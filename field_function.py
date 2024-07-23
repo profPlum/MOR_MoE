@@ -4,15 +4,15 @@ import numpy as np
 
 class FieldFunction:
     ''' Interpolates a field array to provide a field function (with periodic BCs). '''
-    def __init__(self, image_array, interp_method='linear'):
-        # store image_array for sanity check
-        try: self.image_array=image_array.detach().cpu().numpy()
-        except: self.image_array=image_array
+    def __init__(self, field_array, interp_method='linear'):
+        # store field_array for sanity check
+        try: self.field_array=field_array.detach().cpu().numpy()
+        except: self.field_array=field_array
 
         # normalize==True implies: linspace for coords so that it is invariant of the original resolution
-        coords = self._make_uniform_coords(image_array.shape, normalized=True, mesh=False)
-        self.interpolator=scipy.interpolate.RegularGridInterpolator(coords, self.image_array, method=interp_method)
-        #NOTE: 7/22/24, Verified that: self.image_array == self.image_array[*np.meshgrid(*coords)] (this is in fact the definition of mesh_grid)
+        coords = self._make_uniform_coords(field_array.shape, normalized=True, mesh=False)
+        self.interpolator=scipy.interpolate.RegularGridInterpolator(coords, self.field_array, method=interp_method)
+        #NOTE: 7/22/24, Verified that: self.field_array == self.field_array[*np.meshgrid(*coords)] (this is in fact the definition of mesh_grid)
 
     def __call__(self, points):
         '''
@@ -26,7 +26,7 @@ class FieldFunction:
 
     @property
     def shape(self):
-        return self.image_array.shape
+        return self.field_array.shape
 
     @staticmethod # Verified to work: 7/22/24
     def _make_uniform_coords(shape, normalized=True, mesh=True, flat_mesh=False):
@@ -52,7 +52,7 @@ class FieldFunction:
         :param resolution_scale: scales the shape parameter
         :param freq_scale: scales coordinates to make periodic copies of regular field
         '''
-        if shape is None: shape=self.image_array.shape
+        if shape is None: shape=self.field_array.shape
         shape=[dim*resolution_scale for dim in shape]
         mesh = np.stack(self._make_uniform_coords(shape)) #, flat_mesh=True)).T
         mesh *= freq_scale # this will cause periodic sampling by reaching outside the actual bounds of interpolation
@@ -60,18 +60,18 @@ class FieldFunction:
         return reconstructed
 
     def sanity_check2d(self, **kwd_args):
-        reconstructed_tensor = self.reconstruct_field(self.image_array.shape, **kwd_args)
+        reconstructed = self.reconstruct_field(self.field_array.shape, **kwd_args)
         # Display the original and reconstructed tensors as images
         fig, ax = plt.subplots(1, 2, figsize=(12, 6))
-        ax[0].imshow(self.image_array, cmap='gray')
+        ax[0].imshow(self.field_array, cmap='gray')
         ax[0].set_title("Original Field")
-        ax[1].imshow(reconstructed_tensor, cmap='gray')
+        ax[1].imshow(reconstructed, cmap='gray')
         ax[1].set_title(f"Reconstructed Field from ({self.interpolator.method}) Interp Function")
         plt.show()
 
         # Assert that it worked (it did! wahoo!)
-        if self.image_array.shape==reconstructed_tensor.shape:
-            assert (np.abs(self.image_array-reconstructed_tensor)).mean() < 1e-4
+        if self.field_array.shape==reconstructed.shape:
+            assert (np.abs(self.field_array-reconstructed)).mean() < 1e-4
             print('Passed equivalence assertion!')
 
 import random
