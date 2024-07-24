@@ -1,0 +1,21 @@
+name: uqops2
+channels:
+  - defaults
+  - conda-forge
+  - pytorch
+dependencies:
+  - python==3.10.0
+  - numpy==1.22.0
+  - scipy==1.9.3
+  - typing_extensions>=4.12.0
+  - h5py
+  - sympy
+  - jupyter
+  - pytorch-gpu # seems reliable
+  - pytorch-lightning
+  - tensorflow
+  - matplotlib
+  - pip
+  - pip:
+      - pyjhtdb==20200909.0
+prefix: /home/dsdeigh/miniforge3/envs/uqops2
