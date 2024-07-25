@@ -1,0 +1,21 @@
+name: uqops+proxy
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python==3.10.0
+  - numpy>=1.15.0
+  - scipy>=1.1.0
+  - typing_extensions>=4.12.0
+  - h5py>=2.8.0
+  - sympy>=1.2
+  - wurlitzer>=2.0.2
+  - matplotlib>=3.0.0
+  - jupyter
+  - pytorch-gpu # seems reliable
+  - pytorch-lightning
+  - tensorflow
+  - pip
+  - pip:
+      - pyjhtdb @ git+https://github.com/profPlum/pyJHTDB-sandia_proxy@master
+prefix: /home/dsdeigh/miniforge3/envs/uqops
