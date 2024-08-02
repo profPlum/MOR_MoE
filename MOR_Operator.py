@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.fft
 from lightning_utils import *
 
+'''
 # Verified to work 7/19/24
 class MORLayer2D(BasicLightningRegressor):
     """ A single 2D MOR operator layer. """
@@ -39,8 +40,8 @@ class MORLayer2D(BasicLightningRegressor):
 
         # Return real part as output
         return u_ifft
+''';
 
-# Verified to work 7/19/24
 class MOR_Layer(BasicLightningRegressor):
     """ A single Nd MOR operator layer. """
     def __init__(self, in_channels=1, out_channels=1, k_modes=32, ndims=2, **kwd_args):
@@ -53,12 +54,14 @@ class MOR_Layer(BasicLightningRegressor):
 
     def forward(self, u):
         u = torch.as_tensor(u).to(self.device)
+        assert len(u.shape)==2+self.ndims # +1 for batch, +1 for channels
 
         # Apply point-wise MLP nonlinearity h(u)
         h_u = self.h_mlp(u) # keeps channel size the same!
 
         # Apply Fourier transform (last 2 dims need to be x&y!)
-        u_fft = torch.fft.rfftn(h_u, [-1]*self.ndims) # should FFT the last self.ndims modes
+        u_fft = torch.fft.rfftn(h_u, [-1]*self.ndims)
+        # should FFT the last self.ndims modes
 
         # Convert to complex dtype & pad the g_mode_params (this will drop extra modes)
         g = torch.view_as_complex(self.g_mode_params)
@@ -66,20 +69,21 @@ class MOR_Layer(BasicLightningRegressor):
         g_padded = torch.zeros(*g_padded_shape, dtype=g.dtype, device=g.device)
 
         # the first part selects all of the input and output channel dimensions
-        low_pass_slices = [slice(None)]*2 + [slice(s_i) for s_i in g.shape]
+        low_pass_slices = [slice(s_i) for s_i in g.shape]
         g_padded[low_pass_slices] = g
-        # ChatGPT says this is correct b/c apparently for rfft2 the lowest modes are
+        # ChatGPT says this is correct b/c apparently for rfftn the lowest modes are
         # concentrated near the origin (e.g. top-left corner for 2d)
 
-        if len(u_fft.shape)>len(g_padded.shape):
-            g_padded = g_padded[None] # add batch dimension (if needed)
+        g_padded = g_padded[None] # add batch dimension
 
         # Apply learned weights in the Fourier domain
-        u_fft = torch.einsum('ij...,ijk...->ik...', u_fft, g_padded) # einsum does channel reduction
-        #u_fft = u_fft * g_padded
+        # (einsum does channel reduction)
+        u_fft = torch.einsum('bi...,bio...->bo...', u_fft, g_padded)
+        # LEGEND: [b,i,o]:=[batch,in,out] (dimensions)
 
         # Apply inverse Fourier transform
-        u_ifft = torch.fft.irfftn(u_fft, [-1]*self.ndims) # should IFFT the last self.ndims modes
+        u_ifft = torch.fft.irfftn(u_fft, [-1]*self.ndims)
+        # should IFFT the last self.ndims modes
 
         # Return real part as output
         return u_ifft
