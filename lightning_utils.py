@@ -14,15 +14,20 @@ class BasicLightningRegressor(L.LightningModule):
         return loss
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=0.001)
-    def validation_step(self, batch):
-        return BasicLightningRegressor.training_step(self, batch, val=True)
+    def validation_step(self, batch, batch_idx=None):
+        return BasicLightningRegressor.training_step(self, batch, batch_idx, val=True)
 
-# TODO: generalize across dimensionality...
 # Verified to work 7/19/24
 class LightningSequential(nn.Sequential, BasicLightningRegressor): pass
-CNN2d_layer = lambda in_size, out_size, k_size, activation=nn.SiLU: \
-    nn.Sequential(nn.Conv2d(in_size, out_size, k_size, padding='same'), activation())
-CNN2d = lambda in_size=1, out_size=1, k_size=3, activation=nn.SiLU, n_layers=5, filters=32: \
-    LightningSequential(*([CNN2d_layer(in_size,filters,k_size,activation)] +
-                          [CNN2d_layer(filters,filters,k_size,activation) for i in range(n_layers-2)] +
-                          [CNN2d_layer(filters,out_size,k_size,nn.Identity)]))
+def CNN(in_size=1, out_size=1, k_size=3, n_layers=4, filters=32,
+        conv_dims=2, activation=nn.SiLU):
+    assert conv_dims in [1,2,3]
+    ConvLayer = [nn.Conv1d, nn.Conv2d, nn.Conv3d][conv_dims-1]
+
+    # automatically use settings & apply activation
+    CNN_layer = lambda in_size, out_size, activation=activation: \
+        nn.Sequential(ConvLayer(in_size, out_size, k_size, padding='same'), activation())
+
+    return LightningSequential(*([CNN_layer(in_size,filters)] +
+                                 [CNN_layer(filters,filters) for i in range(n_layers-2)] +
+                                 [CNN_layer(filters,out_size, nn.Identity)]))
