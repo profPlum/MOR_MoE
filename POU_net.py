@@ -16,7 +16,7 @@ class FieldGatingNet(BasicLightningRegressor):
     def __init__(self, n_inputs, n_experts, **kwd_args):
         super().__init__()
         self.n_inputs=n_inputs
-        self._gating_net = CNN(n_inputs, n_experts, 1, conv_dims=n_inputs, **kwd_args) # k_size=1 makes it an MLP
+        self._gating_net = CNN(n_inputs, n_experts, 1, ndims=n_inputs, **kwd_args) # k_size=1 makes it an MLP
         self._gating_net = LightningSequential(self._gating_net, nn.Softmax(dim=1)) # make output categorical
     def _make_positional_encodings(self, shape):
         # Create coordinate grids using torch.meshgrid
