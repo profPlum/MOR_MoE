@@ -38,7 +38,7 @@ class MOR_Layer(BasicLightningRegressor):
         modes_to_drop = (np.asarray(u.shape[-self.ndims:]) - np.asarray(g.shape[-self.ndims:]))
 
         # 1st part selects input & output channel dimensions, 2nd part inserts g in the center (at the low_freqs)
-        low_pass_slices = [slice(None)]*2 + [slice(s_i//2, -(s_i//2+s_i%2)) for s_i in modes_to_drop]
+        low_pass_slices = [slice(None)]*2 + [slice(s_i//2+s_i%2, -s_i//2) for s_i in modes_to_drop]
         g_padded[low_pass_slices] = g
         g_padded = g_padded[None] # add batch dimension
 
