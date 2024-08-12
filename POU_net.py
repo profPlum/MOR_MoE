@@ -33,8 +33,8 @@ class FieldGatingNet(BasicLightningRegressor):
 # We only exported the gating net & the miracle is that the forward method still works!!
 class POU_net(BasicLightningRegressor):
     def __init__(self, make_expert=MOR_Operator.MOR_Operator, n_experts=5, n_inputs=2,
-                 make_gating_net: type=FieldGatingNet, lr=0.001, L2_weight=1.0, L2_patience=10,
-                 L2_decay=0.9, T_max=25):
+                 make_gating_net: type=FieldGatingNet, lr=0.001, T_max=25,
+                 L2_weight=0.0, L2_patience=10, L2_decay=0.9):
         super().__init__()
         # NOTE: setting n_experts=n_experts+1 inside the gating_net implicitly adds a "ZeroExpert"
         self.gating_net=make_gating_net(n_inputs=n_inputs, n_experts=n_experts+1) # supports n_inputs!=2
