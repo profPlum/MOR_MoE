@@ -11,9 +11,16 @@ class BasicLightningRegressor(L.LightningModule):
         y_pred = self.forward(X)
         loss = F.mse_loss(y, y_pred.reshape(y.shape))
         self.log(f'{val*"val_"}loss', loss.item(), prog_bar=True)
+        if not val: self.log_lr()
         return loss
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=0.001)
+    def log_lr(self):
+        scheduler = self.lr_schedulers()
+        lrs = scheduler.get_last_lr()
+        if type(lrs) in [list, tuple]:
+            lrs=sum(lrs)/len(lrs) # simplify
+        self.log('lr', lrs, prog_bar=True)
     def validation_step(self, batch, batch_idx=None):
         return BasicLightningRegressor.training_step(self, batch, batch_idx, val=True)
 
