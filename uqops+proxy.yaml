@@ -17,5 +17,6 @@ dependencies:
   - tensorflow
   - pip
   - pip:
+      - papermill
       - pyjhtdb @ git+https://github.com/profPlum/pyJHTDB-sandia_proxy@master
 prefix: /home/dsdeigh/miniforge3/envs/uqops
