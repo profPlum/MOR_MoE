@@ -75,6 +75,7 @@ class MOR_Operator(BasicLightningRegressor):
             [MOR_Layer(hidden_channels, hidden_channels, **kwd_args) for i in range(n_layers-2)]+
             [MOR_Layer(hidden_channels, out_channels, **kwd_args)])
     def forward(self, X):
-        for layer in self.layers[:-1]:
+        X = self.layers[0](X)
+        for layer in self.layers[1:-1]:
             X=layer(X)+X # skip connections
         return self.layers[-1](X)
