@@ -6,15 +6,25 @@ import numpy as np
 
 class MOR_Layer(BasicLightningRegressor):
     """ A single Nd MOR operator layer. """
-    def __init__(self, in_channels=1, out_channels=1, k_modes=32, ndims=2, **kwd_args):
+    def __init__(self, in_channels=1, out_channels=1, k_modes=32, ndims=2, mlp_second=False, **kwd_args):
         super().__init__()
         vars(self).update(locals()); del self.self
         #g_shape = [in_channels, out_channels]+[k_modes]*(ndims-1) + [k_modes//2+1, 2]
-        g_shape = [in_channels, in_channels]+[k_modes]*ndims + [2]
-        #scale = 1/(in_channels*out_channels) # similar to xavier initializaiton
-        self.g_mode_params = nn.Parameter(torch.randn(*g_shape))#*scale)
-        self.h_mlp=CNN(in_channels,out_channels,k_size=1, ndims=ndims, **kwd_args)
+
+        def make_g(in_channels, out_channels):
+            g_shape = [in_channels, out_channels]+[k_modes]*ndims + [2]
+            scale = 1.0#/(in_channels**0.5)#out_channels) # similar to xavier initializaiton
+            param = torch.randn(*g_shape)*scale
+            param = torch.nn.init.xavier_uniform_(param)
+            return nn.Parameter(param)
+
         # Define the weights in the Fourier domain (complex values)
+        mlp_channels = [in_channels]*2
+        g_channels = [in_channels, out_channels]
+        if mlp_second: mlp_channels, g_channels = g_channels, mlp_channels
+
+        self.g_mode_params = make_g(*g_channels)
+        self.h_mlp=CNN(*mlp_channels, k_size=1, n_layers=2, ndims=ndims, **kwd_args)
 
     def forward(self, u):
         u = torch.as_tensor(u).to(self.device)
@@ -28,6 +38,9 @@ class MOR_Layer(BasicLightningRegressor):
         fft_shape = [u_s + abs(u_s-g_s)%2 for u_s, g_s in zip(u.shape[-self.ndims:], g.shape[-self.ndims:])]
         fft_dims = list(range(-self.ndims, 0))
         # Apply Fourier transform (last ndims need to be spatial!)
+
+        # Apply point-wise MLP nonlinearity h(u)
+        if not self.mlp_second: u = self.h_mlp(u)
 
         # should FFT the last self.ndims modes, also we pad (if needed) to low-pass work
         u_fft = torch.fft.fftn(u, s=fft_shape, dim=fft_dims)
@@ -47,26 +60,28 @@ class MOR_Layer(BasicLightningRegressor):
         g_padded[low_pass_slices] = g
         g_padded = g_padded[None] # add batch dimension
 
-        # Apply learned weights in the Fourier domain
-        # (einsum does channel reduction)
+        # Apply learned weights in the Fourier domain (einsum does channel reduction)
+        assert u_fft.shape[1]==g_padded.shape[1]==g.shape[0] # check channel compatibility
         u_fft = torch.einsum('bi...,bio...->bo...', u_fft, g_padded) # keeps channel size the same! (but einsum is still needed)
         # LEGEND: [b,i,o]:=[batch,in,out] (dimensions)
 
         # Apply inverse Fourier transform
         u_fft = torch.fft.ifftshift(u_fft, dim=fft_dims)
-        u_ifft = torch.fft.ifftn(u_fft, s=u.shape[-self.ndims:], dim=fft_dims)
+        u_ifft = torch.fft.ifftn(u_fft, s=u.shape[-self.ndims:], dim=fft_dims).real
         # should IFFT the last self.ndims modes, also crop/pad to original shape
 
-        # Apply point-wise MLP nonlinearity h(u)
-        hu_ifft = self.h_mlp(u_ifft.real)
+        assert u_ifft.shape[-self.ndims:]==u.shape[-self.ndims:]
 
-        return hu_ifft
+        # Apply point-wise MLP nonlinearity h(u)
+        if self.mlp_second: u_ifft = self.h_mlp(u_ifft)
+
+        return u_ifft
 
 class MOR_Operator(BasicLightningRegressor):
     """
     Essentially a stack of MORLayer-Nd layers + skip connections.
     Without skip-connections this operator doesn't work at all
-    (assuming multiple layers), b/c of 1 channel bottleneck.
+    (assuming multiple layers), b/c of 1 channel bottleneck & b/c
     """
     def __init__(self, in_channels=1, out_channels=1, hidden_channels=32,
                  n_layers=4, **kwd_args):
@@ -74,6 +89,12 @@ class MOR_Operator(BasicLightningRegressor):
         self.layers = nn.ModuleList([MOR_Layer(in_channels, hidden_channels, **kwd_args)] +
             [MOR_Layer(hidden_channels, hidden_channels, **kwd_args) for i in range(n_layers-2)]+
             [MOR_Layer(hidden_channels, out_channels, **kwd_args)])
+
+        #ndims = {'ndims': kwd_args['ndims']} if 'ndims' in kwd_args else {}
+        #ProjLayer = lambda *args, **kwd_args: CNN(*args, n_layers=1, **ndims, **kwd_args)
+        #self.layers = nn.ModuleList([ProjLayer(in_channels, hidden_channels)] +
+        #    [MOR_Layer(hidden_channels, hidden_channels, **kwd_args) for i in range(n_layers)]+
+        #    [ProjLayer(hidden_channels, out_channels)])
     def forward(self, X):
         X = self.layers[0](X)
         for layer in self.layers[1:-1]:
