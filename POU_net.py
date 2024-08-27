@@ -13,30 +13,36 @@ class FieldGatingNet(BasicLightningRegressor):
     Essentially a Conv MLP that outputs class probabilities across the field.
     Currently it is not actually a function of the field, just it's size (& the corresponding positions).
     """
-    def __init__(self, n_inputs, n_experts, **kwd_args):
+    def __init__(self, n_inputs, n_experts, ndims, **kwd_args):
         super().__init__()
-        self.n_inputs=n_inputs
-        self._gating_net = CNN(n_inputs, n_experts, 1, ndims=n_inputs, **kwd_args) # k_size=1 makes it an MLP
-        self._gating_net = LightningSequential(self._gating_net, nn.Softmax(dim=1)) # make output categorical
+        #self.k = k # for top-k selection
+        self.ndims=ndims
+        self._gating_net = MOR_Operator.MOR_Operator(n_inputs+ndims, n_experts, ndims=ndims, **kwd_args)
     def _make_positional_encodings(self, shape):
         # Create coordinate grids using torch.meshgrid
-        assert len(shape)==self.n_inputs
+        assert len(shape)==self.ndims
         coords = [torch.linspace(0,1,steps=dim) for dim in shape]
         mesh = torch.meshgrid(*coords, indexing='ij')
         pos_encodings = torch.stack(mesh)[None] # [None] adds batch dim
         return pos_encodings.to(self.device)
     def forward(self, X):
-        pos_encodings = self._make_positional_encodings(X.shape[-self.n_inputs:])
-        return self._gating_net(pos_encodings)
+        pos_encodings = self._make_positional_encodings(X.shape[-self.ndims:])
+        pos_encodings = pos_encodings.expand(X.shape[0], *pos_encodings.shape[1:])
+        X = torch.cat([X, pos_encodings], dim=1)
+        gating_logits = self._gating_net(X)
+        #topk = torch.topk(gating_logits, self.k, dim=1).indices
+        #gating_logits = gating_logits[:,topk] # first dim is batch_dim
+        gating_weights = F.softmax(gating_logits, dim=1)
+        return gating_weights#, topk
 
 class POU_net(BasicLightningRegressor):
-    ''' POU_net minus the L2 regularization (which is useless). '''
-    def __init__(self, make_expert=MOR_Operator.MOR_Operator, n_experts=5, n_inputs=2,
-                 make_gating_net: type=FieldGatingNet, lr=0.001, T_max=25):
+    ''' POU_net minus the useless L2 regularization '''
+    def __init__(self, n_inputs, n_outputs, n_experts=3, ndims=2, lr=0.001, T_max=10,
+                 make_expert=MOR_Operator.MOR_Operator, make_gating_net: type=FieldGatingNet):
         super().__init__()
         # NOTE: setting n_experts=n_experts+1 inside the gating_net implicitly adds a "ZeroExpert"
-        self.gating_net=make_gating_net(n_inputs=n_inputs, n_experts=n_experts+1) # supports n_inputs!=2
-        self.experts=nn.ModuleList([make_expert() for i in range(n_experts)])
+        self.gating_net=make_gating_net(n_inputs, n_experts+1, ndims=ndims) # supports n_inputs!=2
+        self.experts=nn.ModuleList([make_expert(n_inputs, n_outputs, ndims=ndims) for i in range(n_experts)])
         vars(self).update(locals()); del self.self
 
     def configure_optimizers(self):
@@ -51,5 +57,5 @@ class POU_net(BasicLightningRegressor):
         gating_weights = self.gating_net(X)
         prediction = 0
         for i, expert in enumerate(self.experts):
-            prediction = prediction + gating_weights[:,i]*expert(X)
+            prediction = prediction + gating_weights[:,i:i+1]*expert(X)
         return prediction
