@@ -149,7 +149,7 @@ class POU_NetSimulator(POU_net):
     def forward(self, X):
         #X.shape==[batch, x, y, ...]
         evolve = lambda u0: self.simulator.evolve(u0, n=self.n_steps, intermediate_outputs=True)
-        evolve = dump_vmap(evolve) #torch.vmap(evolve) # vmap across batch dim
+        evolve = torch.vmap(evolve) #torch.vmap(evolve) # vmap across batch dim
         return evolve(X)
 
 import os, sys
