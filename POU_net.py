@@ -38,11 +38,11 @@ class FieldGatingNet(BasicLightningRegressor):
 class POU_net(BasicLightningRegressor):
     ''' POU_net minus the useless L2 regularization '''
     def __init__(self, n_inputs, n_outputs, n_experts=3, ndims=2, lr=0.001, T_max=10,
-                 make_operator=lambda MOR_Operator.MOR_Operator, make_gating_net: type=FieldGatingNet, **kwd_args):
+                 make_expert=MOR_Operator.MOR_Operator, make_gating_net: type=FieldGatingNet, **kwd_args):
         super().__init__()
         # NOTE: setting n_experts=n_experts+1 inside the gating_net implicitly adds a "ZeroExpert"
         self.gating_net=make_gating_net(n_inputs, n_experts+1, ndims=ndims, **kwd_args) # supports n_inputs!=2
-        self.experts=nn.ModuleList([make_operator(n_inputs, n_outputs, ndims=ndims, **kwd_args) for i in range(n_experts)])
+        self.experts=nn.ModuleList([make_expert(n_inputs, n_outputs, ndims=ndims, **kwd_args) for i in range(n_experts)])
         vars(self).update(locals()); del self.self
 
     def configure_optimizers(self):

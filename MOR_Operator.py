@@ -6,13 +6,17 @@ import numpy as np
 
 class MOR_Layer(BasicLightningRegressor):
     """ A single Nd MOR operator layer. """
-    def __init__(self, in_channels=1, out_channels=1, k_modes=32, ndims=2, mlp_second=False, **kwd_args):
+    def __init__(self, in_channels=1, out_channels=1, k_modes=32, ndims=2,
+                 mlp_second=False, **kwd_args):
         super().__init__()
         vars(self).update(locals()); del self.self
         #g_shape = [in_channels, out_channels]+[k_modes]*(ndims-1) + [k_modes//2+1, 2]
 
+        # why is this a function?
+        if type(k_modes) is int:
+                k_modes = ndims*[k_modes]
         def make_g(in_channels, out_channels):
-            g_shape = [in_channels, out_channels]+[k_modes]*ndims + [2]
+            g_shape = [in_channels, out_channels]+k_modes + [2]
             scale = 1.0#/(in_channels**0.5)#out_channels) # similar to xavier initializaiton
             param = torch.randn(*g_shape)*scale
             param = torch.nn.init.xavier_uniform_(param)
@@ -42,7 +46,7 @@ class MOR_Layer(BasicLightningRegressor):
         # Apply point-wise MLP nonlinearity h(u)
         if not self.mlp_second: u = self.h_mlp(u)
 
-        # should FFT the last self.ndims modes, also we pad (if needed) to low-pass work
+        # should FFT the last self.ndims modes, also we pad (if needed) to make low-pass work
         u_fft = torch.fft.fftn(u, s=fft_shape, dim=fft_dims)
         u_fft = torch.fft.fftshift(u_fft, dim=fft_dims)
 
