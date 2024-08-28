@@ -2,17 +2,26 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import pytorch_lightning as L
+import torchmetrics
 
 # Verified to work 7/19/24
 class BasicLightningRegressor(L.LightningModule):
     """ Mixin for debugging sub-modules by training them independently. """
+    def __init__():
+        self.r2_score = torchmetrics.R2Score()
+        self.explained_variance = torchmetrics.ExplainedVariance()
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=0.001)
     def training_step(self, batch, batch_idx=None, val=False):
         X, y = batch
-        y_pred = self.forward(X)
-        loss = F.mse_loss(y, y_pred.reshape(y.shape))
-        self.log(f'{val*"val_"}loss', loss.item(), prog_bar=True)
+        y_pred = self.forward(X).reshape(y.shape)
+        loss = F.mse_loss(y_pred, y)
+
+        self.r2_score(y_pred, y)
+        self.explained_variance(y_pred, y)
+        self.log(f'{val*"val_"}loss', loss.item())
+        self.log(f'{val*"val_"}R^2', self.r2_score, prog_bar=True, on_step=True, on_epoch=True)
+        self.log(f'{val*"val_"}explained_variance', self.explained_variance, on_step=True, on_epoch=True)
         if not val: self.log_lr()
         return loss
     def validation_step(self, batch, batch_idx=None):
