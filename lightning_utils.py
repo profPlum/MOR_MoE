@@ -29,18 +29,15 @@ class BasicLightningRegressor(L.LightningModule):
         return torch.optim.Adam(self.parameters(), lr=0.001)
     def training_step(self, batch, batch_idx=None, val=False):
         X, y = batch
-        y_pred = self.forward(X).reshape(y.shape)
+        y_pred = self(X).reshape(y.shape)
         loss = F.mse_loss(y_pred, y)
-        self.log(f'{val*"val_"}loss', loss.item())
+        self.log(f'{val*"val_"}loss', loss.item(), sync_dist=True)
         self.log_metrics(y_pred, y, val) # log additional metrics
         return loss
     def validation_step(self, batch, batch_idx=None):
         return BasicLightningRegressor.training_step(self, batch, batch_idx, val=True)
     def log_metrics(self, y_pred, y, val=False): # override for more metrics
         if not val: self.log_lr()
-        #return loss
-    def log(self, *args, sync_dist=True, **kwd_args):
-        super().log(*args, sync_dist=sync_dist, **kwd_args)
     def log_lr(self):
         scheduler = self.lr_schedulers()
         lrs = scheduler.get_last_lr()
