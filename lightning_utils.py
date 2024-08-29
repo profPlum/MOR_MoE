@@ -4,6 +4,24 @@ import torch.nn.functional as F
 import pytorch_lightning as L
 import torchmetrics
 
+# only works on *nix
+def get_forked_pdb():
+    import pdb
+
+    class ForkedPdb(pdb.Pdb):
+        """
+        A Pdb subclass that may be used
+        from a forked multiprocessing child
+        """
+        def interaction(self, *args, **kwargs):
+            _stdin = sys.stdin
+            try:
+                sys.stdin = open('/dev/stdin')
+                pdb.Pdb.interaction(self, *args, **kwargs)
+            finally:
+                sys.stdin = _stdin
+    return ForkedPdb()
+
 # Verified to work 7/19/24
 class BasicLightningRegressor(L.LightningModule):
     """ Mixin for debugging sub-modules by training them independently. """

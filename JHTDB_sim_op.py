@@ -1,30 +1,18 @@
+import os, sys
+import h5py
+from glob import glob
+
 import torch
 import functools
 import numpy as np
 import matplotlib.pyplot as plt
 import pytorch_lightning as L
 
+from lightning_utils import *
+from POU_net import POU_net
+
 rfft = functools.partial(torch.fft.rfftn,dim=[0,1,2])
 irfft = functools.partial(torch.fft.irfftn,dim=[0,1,2])
-
-# only works on *nix
-def get_forked_pdb():
-    import pdb
-
-    class ForkedPdb(pdb.Pdb):
-        """
-        A Pdb subclass that may be used
-        from a forked multiprocessing child
-        """
-        def interaction(self, *args, **kwargs):
-            _stdin = sys.stdin
-            try:
-                sys.stdin = open('/dev/stdin')
-                pdb.Pdb.interaction(self, *args, **kwargs)
-            finally:
-                sys.stdin = _stdin
-    return ForkedPdb()
-
 
 def divide_no_nan(a,b):
     #return a/b w/o nan values or gradient
@@ -134,9 +122,6 @@ class Sim(L.LightningModule):
         return torch.stack(outputs,axis=-1) if intermediate_outputs else outputs[-1]
         # stacking on the first dimension is correct b/c first dimension is the time dimension!
 
-from lightning_utils import *
-from POU_net import POU_net
-
 dump_vmap = lambda func: lambda X: torch.stack([func(x) for x in X])
 
 class POU_NetSimulator(POU_net):
@@ -151,10 +136,6 @@ class POU_NetSimulator(POU_net):
         evolve = lambda u0: self.simulator.evolve(u0, n=self.n_steps, intermediate_outputs=True)
         evolve = torch.vmap(evolve) #torch.vmap(evolve) # vmap across batch dim
         return evolve(X)
-
-import os, sys
-import h5py
-from glob import glob
 
 # TODO: load & store dataset in one big hdf5 file (more efficient I/O)
 # Verified to work: 8/23/24
