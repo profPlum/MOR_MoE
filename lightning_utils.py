@@ -3,7 +3,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import pytorch_lightning as L
 import torchmetrics
-import torcheval
 
 # Verified to work 7/19/24
 class BasicLightningRegressor(L.LightningModule):
