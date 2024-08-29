@@ -3,29 +3,32 @@ import torch.nn as nn
 import torch.nn.functional as F
 import pytorch_lightning as L
 import torchmetrics
+import torcheval
 
 # Verified to work 7/19/24
 class BasicLightningRegressor(L.LightningModule):
     """ Mixin for debugging sub-modules by training them independently. """
-    def __init__():
-        self.r2_score = torchmetrics.R2Score()
+    def __init__(self):
+        super().__init__()
+        #self.r2_score = torchmetrics.R2Score()
         self.explained_variance = torchmetrics.ExplainedVariance()
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=0.001)
     def training_step(self, batch, batch_idx=None, val=False):
         X, y = batch
         y_pred = self.forward(X).reshape(y.shape)
-        loss = F.mse_loss(y_pred, y)
-
-        self.r2_score(y_pred, y)
-        self.explained_variance(y_pred, y)
-        self.log(f'{val*"val_"}loss', loss.item())
-        self.log(f'{val*"val_"}R^2', self.r2_score, prog_bar=True, on_step=True, on_epoch=True)
-        self.log(f'{val*"val_"}explained_variance', self.explained_variance, on_step=True, on_epoch=True)
-        if not val: self.log_lr()
-        return loss
+        return self.log_metrics(y_pred, y, val)
     def validation_step(self, batch, batch_idx=None):
         return BasicLightningRegressor.training_step(self, batch, batch_idx, val=True)
+    def log_metrics(self, y_pred, y, val=False):
+        loss = F.mse_loss(y_pred, y)
+        #self.r2_score(y_pred.flatten(1), y.flatten(1))
+        self.explained_variance(y_pred.flatten(1), y.flatten(1))
+        self.log(f'{val*"val_"}loss', loss.item())
+        self.log(f'{val*"val_"}R^2', torchmetrics.functional.r2_score(y_pred.flatten(1), y.flatten(1)), prog_bar=True)
+        self.log(f'{val*"val_"}explained_variance', self.explained_variance, on_step=True, on_epoch=True, prog_bar=True)
+        if not val: self.log_lr()
+        return loss
     def log(self, *args, sync_dist=True, **kwd_args):
         super().log(*args, sync_dist=sync_dist, **kwd_args)
     def log_lr(self):
@@ -39,7 +42,16 @@ class BasicLightningRegressor(L.LightningModule):
 dump_vmap = lambda func: lambda X: torch.stack([func(x) for x in X])
 
 # Verified to work 7/19/24
-class LightningSequential(nn.Sequential, BasicLightningRegressor): pass
+#class LightningSequential(nn.Sequential, BasicLightningRegressor): pass
+class LightningSequential(BasicLightningRegressor):
+    def __init__(self, *layers):
+        super().__init__()
+        self.layers=nn.ModuleList(layers)
+    def forward(self, x):
+        # Explicitly only call modules in the layers module list
+        for module in self.layers:
+            x = module(x)
+        return x
 def CNN(in_size=1, out_size=1, k_size=1, ndims=2,
         n_layers=4, filters=32, activation=nn.SiLU):
     assert n_layers>=1
