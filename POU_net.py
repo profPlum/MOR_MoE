@@ -43,6 +43,8 @@ class POU_net(BasicLightningRegressor):
         # NOTE: setting n_experts=n_experts+1 inside the gating_net implicitly adds a "ZeroExpert"
         self.gating_net=make_gating_net(n_inputs, n_experts+1, ndims=ndims, **kwd_args) # supports n_inputs!=2
         self.experts=nn.ModuleList([make_expert(n_inputs, n_outputs, ndims=ndims, **kwd_args) for i in range(n_experts)])
+        self.r2_score = torchmetrics.R2Score(num_outputs=n_outputs)
+        self.explained_variance = torchmetrics.ExplainedVariance()
         vars(self).update(locals()); del self.self
 
     def configure_optimizers(self):
@@ -50,6 +52,17 @@ class POU_net(BasicLightningRegressor):
         lr_schedule = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optim, T_0=self.T_max, T_mult=2)
         #lr_schedule=torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=self.T_max)
         return [optim], [lr_schedule]
+
+    def log_metrics(self, y_pred, y, val=False):
+        super().log_metrics(y_pred, y, val)
+
+        # to_table flattens all dims except for the channel dim (making it tabular)
+        to_table = lambda x: x.swapaxes(1, -1).reshape(-1, self.n_outputs)
+        y_pred, y = to_table(y_pred), to_table(y)
+        self.r2_score(y_pred, y)
+        self.explained_variance(y_pred, y)
+        self.log(f'{val*"val_"}R^2', self.r2_score, on_step=True, on_epoch=True, prog_bar=True)
+        self.log(f'{val*"val_"}explained_variance', self.explained_variance, on_step=True, on_epoch=True)
 
     # Verified to work 7/19/24
     def forward(self, X):

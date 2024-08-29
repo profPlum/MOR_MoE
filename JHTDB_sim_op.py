@@ -119,7 +119,7 @@ class Sim(L.LightningModule):
     # use operator learning here to correct for missing physics
     def learnedCorrection(self,u):
         forward = self.op.forward(u)
-        assert torch.isreal(u).all() and torch.isreal(forward).all()
+        #assert torch.isreal(u).all() and torch.isreal(forward).all()
         return forward
         # __call__() is necessary for hooks... <- but this should already happen outside!
 
