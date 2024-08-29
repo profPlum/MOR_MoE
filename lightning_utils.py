@@ -31,7 +31,7 @@ class BasicLightningRegressor(L.LightningModule):
         self.log('lr', lrs, prog_bar=True)
 
 # useful for debugging when vmap won't work
-dump_vmap = lambda func: lambda X: torch.stack([func(x) for x in X])
+dumb_vmap = lambda func: lambda X: torch.stack([func(x) for x in X])
 
 # Verified to work 7/19/24
 #class LightningSequential(nn.Sequential, BasicLightningRegressor): pass
