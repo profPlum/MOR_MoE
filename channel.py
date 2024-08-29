@@ -8,7 +8,6 @@ batch_size: int = 2 # batch size
 lr: float=0.001 # learning rate
 T_max: int=1 # T_0 for CosAnnealing+WarmRestarts
 n_experts: int=1 # number of experts in MoE
-n_devices: int=6
 interactive: bool=False # whether to use parallelism
 
 # In[53]:
@@ -23,8 +22,7 @@ import matplotlib.pyplot as plt
 import pytorch_lightning as L
 import torch.nn.functional as F
 torch.autograd.set_detect_anomaly(True)
-torch.set_float32_matmul_precision('medium')
-
+#torch.set_float32_matmul_precision('medium')
 
 # In[54]:
 
@@ -63,7 +61,8 @@ if __name__=='__main__':
     # In[58]:
 
     dataset = JHTDB_Channel('data/turbulence_output', time_chunking=time_chunking)
-    train_dataset, val_dataset = torch.utils.data.random_split(dataset, [0.8, 0.2])
+    train_len, val_len = int(len(dataset)*0.8), int(len(dataset)*0.2+1-1e-12)
+    train_dataset, val_dataset = torch.utils.data.random_split(dataset, [train_len, val_len])
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, num_workers=16, pin_memory=True)
     val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=batch_size, num_workers=8)
     print(f'{len(dataset)=}\n{len(train_loader)=}\n{len(val_dataset)=}')
@@ -72,13 +71,12 @@ if __name__=='__main__':
     print(f'{IC_0.shape=}\n{Sol_0.shape=}')
 
     ndims=3
-    Expert = lambda: MOR_Operator(in_channels=ndims, out_channels=ndims, n_layers=4, k_modes = 26, ndims=ndims)
+    #Expert = lambda: MOR_Operator(in_channels=ndims, out_channels=ndims, n_layers=4, k_modes = 26, ndims=ndims)
     #Expert = lambda: CNN(ndims=ndims, k_size=3) # works
 
     # train model
-    model = POU_NetSimulator(Expert, n_experts, lr=lr, T_max=T_max,
-                             n_inputs=ndims, simulator=sim, n_steps=time_chunking-1)
-    kwd_args = {'devices': 1} if interactive else {'strategy': 'fsdp', 'devices': n_devices}
-    trainer = L.Trainer(max_epochs=100, accelerator='gpu',
-                        gradient_clip_val=1.0, gradient_clip_algorithm='value', **kwd_args)
+    model = POU_NetSimulator(ndims, ndims, n_experts, ndims=ndims, lr=lr, T_max=T_max,
+                             simulator=sim, n_steps=time_chunking-1)
+    trainer = L.Trainer(max_epochs=1000, accelerator='gpu', strategy='fsdp',
+                        gradient_clip_val=1.0, gradient_clip_algorithm='value')
     trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_loader)
