@@ -80,6 +80,9 @@ if __name__=='__main__':
                              simulator=sim, n_steps=time_chunking-1, k_modes=k_modes)
     num_nodes = int(os.environ.get('SLURM_STEP_NUM_NODES', 1)) # can be auto-detected by slurm
     print(f'{num_nodes=}')
+
+    from lightning.pytorch.callbacks import DeviceStatsMonitor
+    device_stats = DeviceStatsMonitor()
     trainer = L.Trainer(max_epochs=max_epochs, accelerator='gpu', strategy='fsdp', num_nodes=num_nodes,
-                        gradient_clip_val=1.0, gradient_clip_algorithm='value')
+                        gradient_clip_val=1.0, gradient_clip_algorithm='value', callbacks=[device_stats])
     trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_loader)
