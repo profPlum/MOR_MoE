@@ -12,7 +12,7 @@ dependencies:
   - wurlitzer>=2.0.2
   - matplotlib>=3.0.0
   - jupyter
-  - pytorch-gpu # seems reliable
+  - pytorch-gpu>2.0.0 # seems reliable
   - pytorch-lightning
   - tensorflow
   - pip

@@ -49,7 +49,7 @@ class FieldGatingNet(BasicLightningRegressor):
             print(f'{global_logit_sd=}')
 
         # add in the obligitory null expert (always the last index in the softmax)
-        global_topk = torch.topk(global_logits[:-1], self.k, dim=0).indices
+        global_topk = torch.topk(global_logits[:-1], self.k, dim=0).indices # we don't want to select null expert twice!
         global_topk = torch.cat([global_topk, torch.tensor([-1], device=global_topk.device, dtype=global_topk.dtype)])
         gating_logits = gating_logits[:, global_topk] # first dim is batch_dim
         gating_weights = F.softmax(gating_logits, dim=1)[:,:-1]
