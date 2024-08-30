@@ -31,7 +31,7 @@ class BasicLightningRegressor(L.LightningModule):
         X, y = batch
         y_pred = self(X).reshape(y.shape)
         loss = F.mse_loss(y_pred, y)
-        self.log(f'{val*"val_"}loss', loss.item(), sync_dist=True)
+        self.log(f'{val*"val_"}loss', loss.item(), sync_dist=True, prog_bar=True)
         self.log_metrics(y_pred, y, val) # log additional metrics
         return loss
     def validation_step(self, batch, batch_idx=None):

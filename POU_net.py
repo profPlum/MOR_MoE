@@ -4,20 +4,28 @@ import torch.nn.functional as F
 import pytorch_lightning as L
 from lightning_utils import *
 import MOR_Operator
+import warnings
+import random
 
 # Verified to work: 7/18/24
 # Double verified to work (and reproduce specific partition)
 # Triple verified to work (with higher dimensionalities/n_inputs)
 class FieldGatingNet(BasicLightningRegressor):
     """
-    Essentially a Conv MLP that outputs class probabilities across the field.
-    Currently it is not actually a function of the field, just it's size (& the corresponding positions).
+    Essentially a Gating Operator that outputs class probabilities across the field.
+    It is now a function of the field itself and the coordinates of the field positions!
+    Also it will implicitly add the option of a 'null expert' (an expert that just predicts 0).
+    And it adds some small amount of noise to the gating logits to encourage exploration.
     """
-    def __init__(self, n_inputs, n_experts, ndims, **kwd_args):
+    def __init__(self, n_inputs, n_experts, ndims, k=2, noise_sd=0.005, **kwd_args):
         super().__init__()
-        #self.k = k # for top-k selection
-        self.ndims=ndims
-        self._gating_net = MOR_Operator.MOR_Operator(n_inputs+ndims, n_experts, ndims=ndims, **kwd_args)
+        self.k = k # for (global) top-k selection
+        if k<2: warnings.warn('K<2 means the gating network might not learn to gate properly.')
+        self.ndims = ndims
+        self.noise_sd = noise_sd
+
+        # NOTE: setting n_experts=n_experts+1 inside the gating_net implicitly adds a "ZeroExpert"
+        self._gating_net = MOR_Operator.MOR_Operator(n_inputs+ndims, n_experts+1, ndims=ndims, **kwd_args)
     def _make_positional_encodings(self, shape):
         # Create coordinate grids using torch.meshgrid
         assert len(shape)==self.ndims
@@ -30,18 +38,34 @@ class FieldGatingNet(BasicLightningRegressor):
         pos_encodings = pos_encodings.expand(X.shape[0], *pos_encodings.shape[1:])
         X = torch.cat([X, pos_encodings], dim=1)
         gating_logits = self._gating_net(X)
-        #topk = torch.topk(gating_logits, self.k, dim=1).indices
-        #gating_logits = gating_logits[:,topk] # first dim is batch_dim
-        gating_weights = F.softmax(gating_logits, dim=1)
-        return gating_weights#, topk
+
+        # global average pooling to identify top-k global experts (across spatial & BATCH dims!)
+        global_logits = torch.mean(gating_logits, dim=[0]+list(range(-self.ndims,0)))
+        global_logits = global_logits + torch.randn_like(global_logits, requires_grad=False)*self.noise_sd
+        assert len(global_logits.shape)==1 # 1D
+
+        if random.random() < 0.01: # keep an eye on this it seems suspiciously low...
+            global_logit_sd = (gating_logits.var(dim=[0]+list(range(-self.ndims,0))).mean()**0.5).item()
+            print(f'{global_logit_sd=}')
+
+        # add in the obligitory null expert (always the last index in the softmax)
+        global_topk = torch.topk(global_logits[:-1], self.k, dim=0).indices
+        global_topk = torch.cat([global_topk, torch.tensor([-1], device=global_topk.device, dtype=global_topk.dtype)])
+        gating_logits = gating_logits[:, global_topk] # first dim is batch_dim
+        gating_weights = F.softmax(gating_logits, dim=1)[:,:-1]
+        global_topk = global_topk[:-1]
+        # after the 'null expert' has influenced the softmax normalization
+        # it can disappear (we won't waste any flops on it...)
+
+        return gating_weights, global_topk
 
 class POU_net(BasicLightningRegressor):
     ''' POU_net minus the useless L2 regularization '''
-    def __init__(self, n_inputs, n_outputs, n_experts=3, ndims=2, lr=0.001, T_max=10,
+    def __init__(self, n_inputs, n_outputs, n_experts=5, ndims=2, lr=0.001, T_max=10,
                  make_expert=MOR_Operator.MOR_Operator, make_gating_net: type=FieldGatingNet, **kwd_args):
         super().__init__()
         # NOTE: setting n_experts=n_experts+1 inside the gating_net implicitly adds a "ZeroExpert"
-        self.gating_net=make_gating_net(n_inputs, n_experts+1, ndims=ndims, **kwd_args) # supports n_inputs!=2
+        self.gating_net=make_gating_net(n_inputs, n_experts, ndims=ndims, **kwd_args) # supports n_inputs!=2
         self.experts=nn.ModuleList([make_expert(n_inputs, n_outputs, ndims=ndims, **kwd_args) for i in range(n_experts)])
 
         class MetricsModule(L.LightningModule):
@@ -68,14 +92,14 @@ class POU_net(BasicLightningRegressor):
         metrics = self.val_metrics if val else self.train_metrics
         metrics.r2_score(y_pred, y)
         metrics.explained_variance(y_pred, y)
-        self.log(f'{val*"val_"}R^2', metrics.r2_score, on_step=True, on_epoch=True, prog_bar=True)
+        self.log(f'{val*"val_"}R^2', metrics.r2_score, on_step=not val, on_epoch=True, prog_bar=True)
         self.log(f'{val*"val_"}explained_variance', metrics.explained_variance, on_step=True, on_epoch=True)
 
     # Verified to work 7/19/24
     def forward(self, X):
         X = torch.as_tensor(X).to(self.device)
-        gating_weights = self.gating_net(X)
+        gating_weights, topk = self.gating_net(X)
         prediction = 0
-        for i, expert in enumerate(self.experts):
-            prediction = prediction + gating_weights[:,i:i+1]*expert(X)
+        for i, k_i in enumerate(topk):
+            prediction = prediction + gating_weights[:,i:i+1]*self.experts[k_i](X)
         return prediction
