@@ -76,7 +76,7 @@ class Sim(L.LightningModule):
         for name, value in vars(self).copy().items():
             if isinstance(value, torch.Tensor):
                 del vars(self)[name]
-                self.register_buffer(name, value)
+                self.register_buffer(name, value.detach())
 
     def genIC(self):
         h = torch.tensor(np.random.normal(0,1,(self.nx,self.ny,self.nz,3))).float()
@@ -107,7 +107,7 @@ class Sim(L.LightningModule):
     # use operator learning here to correct for missing physics
     def learnedCorrection(self,u):
         forward = self.op.forward(u)
-        #assert torch.isreal(u).all() and torch.isreal(forward).all()
+        assert torch.isreal(u).all() and torch.isreal(forward).all()
         return forward
         # __call__() is necessary for hooks... <- but this should already happen outside!
 
@@ -116,13 +116,17 @@ class Sim(L.LightningModule):
     def evolve(self,u0,n,intermediate_outputs=False):
         u = u0
         outputs = []
+        NSupd = torch.vmap(self.NSupd) # only this needs vmapping, NeuralOp is already batched
+        if len(u.shape)==4: # all permute ops above assume 4 dims (before vmap)
+            u = u[None] # add batch dim
         for _ in range(n):
-            u = self.learnedCorrection(self.NSupd(u)[None]).squeeze()
+            u = self.learnedCorrection(NSupd(u))
             outputs.append(u)
-        return torch.stack(outputs,axis=-1) if intermediate_outputs else outputs[-1]
-        # stacking on the first dimension is correct b/c first dimension is the time dimension!
 
-dump_vmap = lambda func: lambda X: torch.stack([func(x) for x in X])
+        # time dim is the last dim (if it exists)
+        outputs = torch.stack(outputs,axis=-1) if intermediate_outputs else outputs[-1]
+        return outputs.squeeze() if len(u.shape)>len(u0.shape) else outputs
+        # remove artificial batch dimension only if it was added
 
 class POU_NetSimulator(POU_net):
     ''' Combines the POU_net with the raw Sim[ulator] class (internally). '''
@@ -132,10 +136,9 @@ class POU_NetSimulator(POU_net):
         self.simulator = simulator
         self.n_steps = n_steps # n timesteps for PDE evolution
     def forward(self, X):
-        #X.shape==[batch, x, y, ...]
-        evolve = lambda u0: self.simulator.evolve(u0, n=self.n_steps, intermediate_outputs=True)
-        evolve = torch.vmap(evolve) #torch.vmap(evolve) # vmap across batch dim
-        return evolve(X)
+        #NOTE: X.shape==[batch, x, y, ...]
+        # evolve has now been vmapped internally!
+        return self.simulator.evolve(X, n=self.n_steps, intermediate_outputs=True)
 
 # TODO: load & store dataset in one big hdf5 file (more efficient I/O)
 # Verified to work: 8/23/24
