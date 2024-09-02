@@ -5,16 +5,17 @@ from lightning_utils import *
 import numpy as np
 
 # Verified to work: 9/2/14
-def make_rfft_corner_slices(img1_shape, img2_shape):
+def make_rfft_corner_slices(img1_shape, img2_shape, verbose=True):
     ''' Creates slices of low-mode corners that match both img1_shape and img2_shape. '''
+    import itertools
     min_shape = np.minimum(img1_shape, img2_shape)
-    print(f'{min_shape=}')
+    if verbose: print(f'{min_shape=}')
     valid_corner_slices = []
     for s_i in min_shape:
         # GOTCHA: -(s_i//2) is needed to avoid surprising behavior with floor + negatives
         valid_corner_slices.append([slice(None, s_i//2+s_i%2), slice(-(s_i//2), None)])
     del valid_corner_slices[-1][-1] # last dim has only 1 corner (due to symmetry)
-    print(f'{valid_corner_slices=}')
+    if verbose: print(f'{valid_corner_slices=}')
     return itertools.product(*valid_corner_slices)
 
 class MOR_Layer(BasicLightningRegressor):
@@ -78,9 +79,9 @@ class MOR_Layer(BasicLightningRegressor):
         #g_padded[low_pass_slices] = g
 
         # insert G into G_padded s.t. it applies a low pass filter
-        for corner in make_rfft_corner_slices(g_padded.shape[2:], g.shape[2:]):
+        for corner in make_rfft_corner_slices(g_padded.shape[2:], g.shape[2:], verbose=False):
+            corner = [slice(None)]*2 + list(corner) # 1st part selects input & output channel dimensions
             g_padded[corner] = g[corner]
-
         g_padded = g_padded[None] # add batch dimension
 
         # Apply learned weights in the Fourier domain (einsum does channel reduction)
