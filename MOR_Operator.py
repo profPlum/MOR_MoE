@@ -4,19 +4,31 @@ import torch.fft
 from lightning_utils import *
 import numpy as np
 
+# Verified to work: 9/2/14
+def make_rfft_corner_slices(img1_shape, img2_shape):
+    min_shape = np.minimum(img1_shape, img2_shape)
+    print(f'{min_shape=}')
+    valid_corner_slices = []
+    for s_i in min_shape:
+        # GOTCHA: -(s_i//2) is needed to avoid surprising behavior with floor + negatives
+        valid_corner_slices.append([slice(None, s_i//2+s_i%2), slice(-(s_i//2), None)])
+    del valid_corner_slices[-1][-1] # last dim has only 1 corner (due to symmetry)
+    print(f'{valid_corner_slices=}')
+    return itertools.product(*valid_corner_slices)
+
 class MOR_Layer(BasicLightningRegressor):
     """ A single Nd MOR operator layer. """
     def __init__(self, in_channels=1, out_channels=1, k_modes=32, ndims=2,
                  mlp_second=False, **kwd_args):
         super().__init__()
         vars(self).update(locals()); del self.self
-        #g_shape = [in_channels, out_channels]+[k_modes]*(ndims-1) + [k_modes//2+1, 2]
 
         # why is this a function?
         if type(k_modes) is int:
                 k_modes = ndims*[k_modes]
         def make_g(in_channels, out_channels):
-            g_shape = [in_channels, out_channels]+k_modes + [2]
+            g_shape = [in_channels, out_channels]+k_modes[:ndims-1] + [k_modes[-1]//2+1, 2]
+            #g_shape = [in_channels, out_channels]+k_modes + [2]
             scale = 1.0#/(in_channels**0.5)#out_channels) # similar to xavier initializaiton
             param = torch.randn(*g_shape)*scale
             param = torch.nn.init.xavier_uniform_(param)
@@ -39,29 +51,35 @@ class MOR_Layer(BasicLightningRegressor):
         g = torch.view_as_complex(self.g_mode_params)
 
         # Pad fft_shape to make it compatible with simple low-pass code below
-        fft_shape = [u_s + abs(u_s-g_s)%2 for u_s, g_s in zip(u.shape[-self.ndims:], g.shape[-self.ndims:])]
+        #fft_shape = [u_s + abs(u_s-g_s)%2 for u_s, g_s in zip(u.shape[-self.ndims:], g.shape[-self.ndims:])]
         fft_dims = list(range(-self.ndims, 0))
-        # Apply Fourier transform (last ndims need to be spatial!)
 
         # Apply point-wise MLP nonlinearity h(u)
         if not self.mlp_second: u = self.h_mlp(u)
 
+        # Apply Fourier transform (last ndims need to be spatial!)
         # should FFT the last self.ndims modes, also we pad (if needed) to make low-pass work
-        u_fft = torch.fft.fftn(u, s=fft_shape, dim=fft_dims)
-        u_fft = torch.fft.fftshift(u_fft, dim=fft_dims)
+        u_fft = torch.fft.rfftn(u, dim=fft_dims)
+        #u_fft = torch.fft.fftshift(u_fft, dim=fft_dims)
 
         # Pad the g_mode_params (this will drop extra modes)
         g_padded_shape = list(g.shape[:-self.ndims])+list(u_fft.shape[-self.ndims:]) # fuse shapes
         g_padded = torch.zeros(*g_padded_shape, dtype=g.dtype, device=g.device)
 
-        # get total modes to drop for each dimension
-        modes_to_drop = np.asarray(u_fft.shape[-self.ndims:]) - np.asarray(g.shape[-self.ndims:])
-        assert (modes_to_drop%2==0).all() # i.e. compatible parity
-        assert (modes_to_drop>=0).all() # i.e. input bigger than low-pass modes
+        ## get total modes to drop for each dimension
+        #modes_to_drop = np.asarray(u_fft.shape[-self.ndims:]) - np.asarray(g.shape[-self.ndims:])
+        #assert (modes_to_drop%2==0).all() # i.e. compatible parity
+        #assert (modes_to_drop>=0).all() # i.e. input bigger than low-pass modes
+        ## TODO: drop this requirement it doesn't make any sense! Resolution invariance remember??
 
-        # 1st part selects input & output channel dimensions, 2nd part inserts g in the center (at the low_freqs)
-        low_pass_slices = [slice(None)]*2 + [slice(s_i//2, -s_i//2 if s_i>0 else None) for s_i in modes_to_drop]
-        g_padded[low_pass_slices] = g
+        ## 1st part selects input & output channel dimensions, 2nd part inserts g in the center (at the low_freqs)
+        #low_pass_slices = [slice(None)]*2 + [slice(s_i//2, -s_i//2 if s_i>0 else None) for s_i in modes_to_drop]
+        #g_padded[low_pass_slices] = g
+
+        # insert G into G_padded s.t. it applies a low pass filter
+        for corner in make_rfft_corner_slices(g_padded.shape[2:], g.shape[2:]):
+            g_padded[corner] = g[corner]
+
         g_padded = g_padded[None] # add batch dimension
 
         # Apply learned weights in the Fourier domain (einsum does channel reduction)
@@ -70,8 +88,8 @@ class MOR_Layer(BasicLightningRegressor):
         # LEGEND: [b,i,o]:=[batch,in,out] (dimensions)
 
         # Apply inverse Fourier transform
-        u_fft = torch.fft.ifftshift(u_fft, dim=fft_dims)
-        u_ifft = torch.fft.ifftn(u_fft, s=u.shape[-self.ndims:], dim=fft_dims).real
+        #u_fft = torch.fft.ifftshift(u_fft, dim=fft_dims)
+        u_ifft = torch.fft.irfftn(u_fft, s=u.shape[-self.ndims:], dim=fft_dims).real
         # should IFFT the last self.ndims modes, also crop/pad to original shape
 
         assert u_ifft.shape[-self.ndims:]==u.shape[-self.ndims:]
