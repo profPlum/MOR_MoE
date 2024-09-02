@@ -41,7 +41,8 @@ class FieldGatingNet(BasicLightningRegressor):
 
         # global average pooling to identify top-k global experts (across spatial & BATCH dims!)
         global_logits = torch.mean(gating_logits, dim=[0]+list(range(-self.ndims,0)))
-        global_logits = global_logits + torch.randn_like(global_logits, requires_grad=False)*self.noise_sd
+        if self.training:
+            global_logits = global_logits + torch.randn_like(global_logits, requires_grad=False)*self.noise_sd
         assert len(global_logits.shape)==1 # 1D
 
         if random.random() < 0.01: # keep an eye on this it seems suspiciously low...

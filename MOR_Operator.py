@@ -6,6 +6,7 @@ import numpy as np
 
 # Verified to work: 9/2/14
 def make_rfft_corner_slices(img1_shape, img2_shape):
+    ''' Creates slices of low-mode corners that match both img1_shape and img2_shape. '''
     min_shape = np.minimum(img1_shape, img2_shape)
     print(f'{min_shape=}')
     valid_corner_slices = []
