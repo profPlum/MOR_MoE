@@ -5,18 +5,20 @@ from lightning_utils import *
 import numpy as np
 
 # Verified to work: 9/2/14
-def make_rfft_corner_slices(img1_shape, img2_shape, verbose=True):
+def make_rfft_corner_slices(img1_shape, img2_shape, rfft=True, verbose=True):
     ''' Creates slices of low-mode corners that match both img1_shape and img2_shape. '''
     import itertools
-    min_shape = np.minimum(img1_shape, img2_shape)
+    min_shape = np.minimum(img1_shape, img2_shape) # find shape compatible with both
     if verbose: print(f'{min_shape=}')
     valid_corner_slices = []
+    if rfft: min_shape[-1] *= 2 # GOTCHA: last dim already 1/2! must be doubled before halving
     for s_i in min_shape:
-        # GOTCHA: -(s_i//2) is needed to avoid surprising behavior with floor + negatives
+        # GOTCHA: parens in -(s_i//2) is needed to avoid surprising behavior with floor + negatives
+        # Also we round up b/c fft puts 0 mode on the positive side so it can have extra element.
         valid_corner_slices.append([slice(None, s_i//2+s_i%2), slice(-(s_i//2), None)])
-    del valid_corner_slices[-1][-1] # last dim has only 1 corner (due to symmetry)
+    if rfft:  del valid_corner_slices[-1][-1] # last dim has only positive freqs (due to symmetry)
     if verbose: print(f'{valid_corner_slices=}')
-    return itertools.product(*valid_corner_slices)
+    return itertools.product(*valid_corner_slices) # cartesian product gives all corners
 
 class MOR_Layer(BasicLightningRegressor):
     """ A single Nd MOR operator layer. """
