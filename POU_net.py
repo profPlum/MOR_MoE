@@ -26,13 +26,19 @@ class FieldGatingNet(BasicLightningRegressor):
 
         # NOTE: setting n_experts=n_experts+1 inside the gating_net implicitly adds a "ZeroExpert"
         self._gating_net = MOR_Operator.MOR_Operator(n_inputs+ndims, n_experts+1, ndims=ndims, **kwd_args)
+        self._cached_shape = None
+        self._cached_mesh_grid = None
     def _make_positional_encodings(self, shape):
+        if shape == self._cached_shape:
+            return self._cached_mesh_grid
         # Create coordinate grids using torch.meshgrid
         assert len(shape)==self.ndims
         coords = [torch.linspace(0,1,steps=dim) for dim in shape]
         mesh = torch.meshgrid(*coords, indexing='ij')
-        pos_encodings = torch.stack(mesh)[None] # [None] adds batch dim
-        return pos_encodings.to(self.device)
+        pos_encodings = torch.stack(mesh)[None].to(self.device) # [None] adds batch dim
+        self._cached_shape = shape
+        self._cached_mesh_grid = pos_encodings
+        return pos_encodings
     def forward(self, X):
         pos_encodings = self._make_positional_encodings(X.shape[-self.ndims:])
         pos_encodings = pos_encodings.expand(X.shape[0], *pos_encodings.shape[1:])
