@@ -19,13 +19,14 @@ class FieldGatingNet(BasicLightningRegressor):
     """
     def __init__(self, n_inputs, n_experts, ndims, k=2, noise_sd=0.005, **kwd_args):
         super().__init__()
-        self.k = k # for (global) top-k selection
+        self.k = n_experts # for (global) top-k selection
         if k<2: warnings.warn('K<2 means the gating network might not learn to gate properly.')
         self.ndims = ndims
         self.noise_sd = noise_sd
 
         # NOTE: setting n_experts=n_experts+1 inside the gating_net implicitly adds a "ZeroExpert"
-        self._gating_net = MOR_Operator.MOR_Operator(n_inputs+ndims, n_experts+1, ndims=ndims, **kwd_args)
+        #self._gating_net = MOR_Operator.MOR_Operator(n_inputs+ndims, n_experts+1, ndims=ndims, **kwd_args)
+        self._gating_net = CNN(ndims, n_experts+1, 1, ndims=ndims)#, **kwd_args)
         self._cached_shape = None
         self._cached_mesh_grid = None
     def _make_positional_encodings(self, shape):
@@ -42,8 +43,8 @@ class FieldGatingNet(BasicLightningRegressor):
     def forward(self, X):
         pos_encodings = self._make_positional_encodings(X.shape[-self.ndims:])
         pos_encodings = pos_encodings.expand(X.shape[0], *pos_encodings.shape[1:])
-        X = torch.cat([X, pos_encodings], dim=1)
-        gating_logits = self._gating_net(X)
+        #X = torch.cat([X, pos_encodings], dim=1)
+        gating_logits = self._gating_net(pos_encodings)
 
         # global average pooling to identify top-k global experts (across spatial & BATCH dims!)
         global_logits = torch.mean(gating_logits, dim=[0]+list(range(-self.ndims,0)))
