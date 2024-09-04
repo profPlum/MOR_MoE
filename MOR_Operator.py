@@ -5,18 +5,22 @@ from lightning_utils import *
 import numpy as np
 
 # Verified to work: 9/2/14
-def make_rfft_corner_slices(img1_shape, img2_shape, rfft=True, verbose=True):
+def make_rfft_corner_slices(img1_shape, img2_shape, fft_dims=None, rfft=True, verbose=True):
     ''' Creates slices of low-mode corners that match both img1_shape and img2_shape. '''
     import itertools
     min_shape = np.minimum(img1_shape, img2_shape) # find shape compatible with both
+    if fft_dims is None: fft_dims = np.arange(len(min_shape)) # None implies everything
+    else: fft_dims = np.arange(len(min_shape))[fft_dims] # standardize it
+    if rfft: min_shape[fft_dims[-1]] *= 2 # last dim is only 1/2! (also last is last in FFT dims)
     if verbose: print(f'{min_shape=}')
     valid_corner_slices = []
-    if rfft: min_shape[-1] *= 2 # GOTCHA: last dim already 1/2! must be doubled before halving
-    for s_i in min_shape:
-        # GOTCHA: parens in -(s_i//2) is needed to avoid surprising behavior with floor + negatives
-        # Also we round up b/c fft puts 0 mode on the positive side so it can have extra element.
-        valid_corner_slices.append([slice(None, s_i//2+s_i%2), slice(-(s_i//2), None)])
-    if rfft:  del valid_corner_slices[-1][-1] # last dim has only positive freqs (due to symmetry)
+    for i, s_i in enumerate(min_shape):
+        if i in fft_dims:
+            # GOTCHA: parens in -(s_i//2) is needed to avoid surprising behavior with floor + negatives
+            # Also we round up b/c fft puts 0 mode on the positive side so it can have extra element.
+            valid_corner_slices.append([slice(None, s_i//2+s_i%2), slice(-(s_i//2), None)])
+        else: valid_corner_slices.append([slice(None)]) # else select entire dim
+    if rfft: del valid_corner_slices[fft_dims[-1]][-1] # last dim has only positive freqs (due to symmetry)
     if verbose: print(f'{valid_corner_slices=}')
     return itertools.product(*valid_corner_slices) # cartesian product gives all corners
 
@@ -65,8 +69,7 @@ class MOR_Layer(BasicLightningRegressor):
         g_padded = torch.zeros(*g_padded_shape, dtype=g.dtype, device=g.device)
 
         # insert G into G_padded s.t. it applies a low pass filter
-        for corner in make_rfft_corner_slices(g_padded.shape[2:], g.shape[2:], verbose=False):
-            corner = [slice(None)]*2 + list(corner) # 1st part selects input & output channel dimensions
+        for corner in make_rfft_corner_slices(g_padded.shape, g.shape, fft_dims=fft_dims, verbose=False):
             g_padded[corner] = g[corner]
         g_padded = g_padded[None] # add batch dimension
 
