@@ -29,9 +29,9 @@ class FieldGatingNet(BasicLightningRegressor):
         self._cached_shape = None
         self._cached_mesh_grid = None
     def _make_positional_encodings(self, shape):
+        # Create coordinate grids using torch.meshgrid
         if shape == self._cached_shape:
             return self._cached_mesh_grid
-        # Create coordinate grids using torch.meshgrid
         assert len(shape)==self.ndims
         coords = [torch.linspace(0,1,steps=dim) for dim in shape]
         mesh = torch.meshgrid(*coords, indexing='ij')
@@ -68,9 +68,12 @@ class FieldGatingNet(BasicLightningRegressor):
 
 class POU_net(BasicLightningRegressor):
     ''' POU_net minus the useless L2 regularization '''
-    def __init__(self, n_inputs, n_outputs, n_experts=5, ndims=2, lr=0.001, T_max=10,
+    def __init__(self, n_inputs, n_outputs, n_experts=5, ndims=2, lr=0.001,
+                 T_max=10, RLoP=False, RLoP_factor=0.9, RLoP_patience=25,
                  make_expert=MOR_Operator.MOR_Operator, make_gating_net: type=FieldGatingNet, **kwd_args):
         super().__init__()
+        self.save_hyperparameters()
+
         # NOTE: setting n_experts=n_experts+1 inside the gating_net implicitly adds a "ZeroExpert"
         self.gating_net=make_gating_net(n_inputs, n_experts, ndims=ndims, **kwd_args) # supports n_inputs!=2
         self.experts=nn.ModuleList([make_expert(n_inputs, n_outputs, ndims=ndims, **kwd_args) for i in range(n_experts)])
@@ -86,8 +89,9 @@ class POU_net(BasicLightningRegressor):
 
     def configure_optimizers(self):
         optim = torch.optim.Adam(self.parameters(), lr=self.lr)
-        lr_schedule = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optim, T_0=self.T_max, T_mult=2)
-        #lr_schedule=torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=self.T_max)
+
+        if self.RLoP: lr_schedule = torch.optim.lr_scheduler.ReduceLROnPlateau(optim, factor=self.RLoP_factor, patience=self.RLoP_patience)
+        else lr_schedule = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optim, T_0=self.T_max, T_mult=2)
         return [optim], [lr_schedule]
 
     def log_metrics(self, y_pred, y, val=False):

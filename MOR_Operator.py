@@ -3,11 +3,14 @@ import torch.nn as nn
 import torch.fft
 from lightning_utils import *
 import numpy as np
+import warnings
 
 # Verified to work: 9/2/14
 def make_rfft_corner_slices(img1_shape, img2_shape, fft_dims=None, rfft=True, verbose=True):
     ''' Creates slices of low-mode corners that match both img1_shape and img2_shape. '''
     import itertools
+    if (np.asarray(img1_shape)<np.asarray(img2_shape)).any():
+        warnings.warn('you are downsampling the parameters!')
     min_shape = np.minimum(img1_shape, img2_shape) # find shape compatible with both
     if fft_dims is None: fft_dims = np.arange(len(min_shape)) # None implies everything
     else: fft_dims = np.arange(len(min_shape))[fft_dims] # standardize it
