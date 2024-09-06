@@ -35,7 +35,9 @@ class BasicLightningRegressor(L.LightningModule):
         self.log_metrics(y_pred, y, val) # log additional metrics
         return loss
     def validation_step(self, batch, batch_idx=None):
-        return BasicLightningRegressor.training_step(self, batch, batch_idx, val=True)
+        loss = BasicLightningRegressor.training_step(self, batch, batch_idx, val=True)
+        self.log('hp_metric', loss)
+        return loss
     def log_metrics(self, y_pred, y, val=False): # override for more metrics
         if not val: self.log_lr()
     def log_lr(self):

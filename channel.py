@@ -1,13 +1,20 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-time_chunking: int=4 # how many self-aware recursive steps to take
-batch_size: int = 1 # batch size
+from torch.optim import lr_scheduler
+
+max_epochs = 500
+k_modes = [77,26,103] # can be a list
+n_experts: int=2 # number of experts in MoE
+time_chunking: int=5 # how many self-aware recursive steps to take
+batch_size: int = 2 # batch size
+scale_lr=True # scale with DDP batch_size
 lr: float=0.001 # learning rate
+
 T_max: int=1 # T_0 for CosAnnealing+WarmRestarts
-n_experts: int=4 # number of experts in MoE
-k_modes = 26 #[77,26,103] # can be a list
-max_epochs = 1 #000
+RLoP=True # scheduler
+RLoP_factor=0.9
+RLoP_patience=25
 
 # Import External Libraries
 
@@ -27,6 +34,7 @@ from lightning_utils import *
 from MOR_Operator import MOR_Operator
 from POU_net import POU_net, FieldGatingNet
 from JHTDB_sim_op import POU_NetSimulator, Sim, JHTDB_Channel
+
 
 if __name__=='__main__':
     # sets up simulation
@@ -62,17 +70,28 @@ if __name__=='__main__':
 
     extra_args = {'k_modes': [77,26,103], 'k': 2, 'n_layers': 4}
     gating_net = lambda *args, **kwd_args: FieldGatingNet(*args, **(kwd_args | extra_args))
+    # this lambda does nothing if on RevertingMoESparsity branch...
 
-    # train model
-    model = POU_NetSimulator(ndims, ndims, n_experts, ndims=ndims, lr=lr, T_max=T_max, make_gating_net=gating_net,
-                             simulator=sim, n_steps=time_chunking-1, k_modes=k_modes)
     num_nodes = int(os.environ.get('SLURM_STEP_NUM_NODES', 1)) # can be auto-detected by slurm
     print(f'{num_nodes=}')
 
-    #device_stats = L.callbacks.DeviceStatsMonitor()
+    # train model
+    if scale_lr: lr *= num_nodes
+    schedule = lambda optim: lr_scheduler.OneCycleLR(optim, max_lr=lr, total_steps=len(train_loader)*max_epochs)
+    model = POU_NetSimulator(ndims, ndims, n_experts, ndims=ndims, lr=lr, make_gating_net=gating_net,
+                             simulator=sim, n_steps=time_chunking-1, k_modes=k_modes)
+                             #T_max=T_max, RLoP=RLoP, RLoP_factor=RLoP_factor, RLoP_patience=RLoP_patience)
+
+    import os, signal
+    from pytorch_ligthning.loggers import TensorBoardLogger
+    from pytorch_lightning.plugins.environments import SLURMEnvironment
+    # SLURMEnvironment plugin enables auto-requeue
+
+    logger = TensorBoardLogger("lightning_logs", name=os.environ.get("SLURM_JOB_NAME", 'JHTDB_MOR_MoE'),
+                                version=os.environ.get("SLURM_JOB_ID", None))
     profiler = L.profilers.PyTorchProfiler(profile_memory=True, with_stack=True)
     trainer = L.Trainer(max_epochs=max_epochs, accelerator='gpu', strategy='fsdp', num_nodes=num_nodes,
-                        gradient_clip_val=1.0, gradient_clip_algorithm='value', profiler=profiler)#, fast_dev_run=True)
-                        #fast_dev_run=True, #enable_progress_bar=False, callbacks=[device_stats])
+                        #gradient_clip_val=1.0, gradient_clip_algorithm='value', # regularization isn't good for OneCycleLR
+                        profiler=profiler, plugins=[SLURMEnvironment()], logger=logger)
     trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_loader)
                 #ckpt_path="/home/dsdeigh/MOR_MoE/lightning_logs/version_337303/checkpoints/epoch=65-step=3564.ckpt")

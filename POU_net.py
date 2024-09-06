@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 import torch.nn.functional as F
+from torch.optim import lr_scheduler
 import pytorch_lightning as L
 from lightning_utils import *
 import MOR_Operator
@@ -70,8 +71,9 @@ class FieldGatingNet(BasicLightningRegressor):
 class POU_net(BasicLightningRegressor):
     ''' POU_net minus the useless L2 regularization '''
     def __init__(self, n_inputs, n_outputs, n_experts=5, ndims=2, lr=0.001,
-                 T_max=10, RLoP=False, RLoP_factor=0.9, RLoP_patience=25,
+                 schedule=lambda optim: lr_scheduler.CosineAnnealingWarmRestarts(optim, T_0=1, T_mult=2),
                  make_expert=MOR_Operator.MOR_Operator, make_gating_net: type=FieldGatingNet, **kwd_args):
+                 #T_max=10, RLoP=False, RLoP_factor=0.9, RLoP_patience=25,
         super().__init__()
         self.save_hyperparameters()
 
@@ -90,10 +92,11 @@ class POU_net(BasicLightningRegressor):
 
     def configure_optimizers(self):
         optim = torch.optim.Adam(self.parameters(), lr=self.lr)
-
-        if self.RLoP: lr_schedule = torch.optim.lr_scheduler.ReduceLROnPlateau(optim, factor=self.RLoP_factor, patience=self.RLoP_patience)
-        else lr_schedule = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optim, T_0=self.T_max, T_mult=2)
-        return [optim], [lr_schedule]
+        lr_schedule = self.schedule(optim)
+        #if self.RLoP: lr_schedule = lr_scheduler.ReduceLROnPlateau(optim, factor=self.RLoP_factor, patience=self.RLoP_patience)
+        #else: lr_schedule = lr_scheduler.CosineAnnealingWarmRestarts(optim, T_0=self.T_max, T_mult=2)
+        return {'optimizer': optim, 'lr_scheduler': lr_schedule, 'monitor': 'loss'}
+        #return [optim], [lr_schedule]
 
     def log_metrics(self, y_pred, y, val=False):
         super().log_metrics(y_pred, y, val)
