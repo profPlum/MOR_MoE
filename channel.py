@@ -1,13 +1,13 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-time_chunking: int=4 # how many self-aware recursive steps to take
+time_chunking: int=5 # how many self-aware recursive steps to take
 batch_size: int = 1 # batch size
-lr: float=0.001 # learning rate
+lr: float=0.00075 # learning rate
 T_max: int=1 # T_0 for CosAnnealing+WarmRestarts
-n_experts: int=4 # number of experts in MoE
+n_experts: int=10 # number of experts in MoE
 k_modes = 26 #[77,26,103] # can be a list
-max_epochs = 1 #000
+max_epochs = 1000
 
 # Import External Libraries
 
@@ -69,10 +69,12 @@ if __name__=='__main__':
     num_nodes = int(os.environ.get('SLURM_STEP_NUM_NODES', 1)) # can be auto-detected by slurm
     print(f'{num_nodes=}')
 
-    #device_stats = L.callbacks.DeviceStatsMonitor()
+
+    logger = TensorBoardLogger("lightning_logs", name=os.environ.get("SLURM_JOB_NAME", 'JHTDB_MOR_MoE'),
+                                version=os.environ.get("SLURM_JOB_ID", None))
     profiler = L.profilers.PyTorchProfiler(profile_memory=True, with_stack=True)
     trainer = L.Trainer(max_epochs=max_epochs, accelerator='gpu', strategy='fsdp', num_nodes=num_nodes,
-                        gradient_clip_val=1.0, gradient_clip_algorithm='value', profiler=profiler)#, fast_dev_run=True)
-                        #fast_dev_run=True, #enable_progress_bar=False, callbacks=[device_stats])
+                        gradient_clip_val=0.5, gradient_clip_algorithm='value', profiler=profiler, logger=logger)
+
     trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_loader)
                 #ckpt_path="/home/dsdeigh/MOR_MoE/lightning_logs/version_337303/checkpoints/epoch=65-step=3564.ckpt")
