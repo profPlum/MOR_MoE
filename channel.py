@@ -3,18 +3,18 @@
 
 from torch.optim import lr_scheduler
 
-max_epochs = 500
-k_modes = [77,26,103] # can be a list
+max_epochs=1500
+k_modes=[77,26,103] # can be a list
 n_experts: int=2 # number of experts in MoE
 time_chunking: int=5 # how many self-aware recursive steps to take
-batch_size: int = 2 # batch size
+batch_size: int=2 # batch size
 scale_lr=True # scale with DDP batch_size
 lr: float=0.001 # learning rate
 
-T_max: int=1 # T_0 for CosAnnealing+WarmRestarts
-RLoP=True # scheduler
-RLoP_factor=0.9
-RLoP_patience=25
+#T_max: int=1 # T_0 for CosAnnealing+WarmRestarts
+#RLoP=False # scheduler
+#RLoP_factor=0.9
+#RLoP_patience=25
 
 # Import External Libraries
 
@@ -77,7 +77,7 @@ if __name__=='__main__':
 
     # train model
     if scale_lr: lr *= num_nodes
-    schedule = lambda optim: lr_scheduler.OneCycleLR(optim, max_lr=lr, total_steps=len(train_loader)*max_epochs)
+    schedule = lambda optim: lr_scheduler.OneCycleLR(optim, max_lr=lr, total_steps=max_epochs*len(train_loader)//num_nodes)
     model = POU_NetSimulator(ndims, ndims, n_experts, ndims=ndims, lr=lr, make_gating_net=gating_net,
                              simulator=sim, n_steps=time_chunking-1, k_modes=k_modes)
                              #T_max=T_max, RLoP=RLoP, RLoP_factor=RLoP_factor, RLoP_patience=RLoP_patience)
