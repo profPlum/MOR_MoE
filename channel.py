@@ -79,7 +79,7 @@ if __name__=='__main__':
     if scale_lr: lr *= num_nodes
     schedule = lambda optim: lr_scheduler.OneCycleLR(optim, max_lr=lr, total_steps=max_epochs*len(train_loader)//num_nodes)
     model = POU_NetSimulator(ndims, ndims, n_experts, ndims=ndims, lr=lr, make_gating_net=gating_net,
-                             simulator=sim, n_steps=time_chunking-1, k_modes=k_modes)
+                             simulator=sim, n_steps=time_chunking-1, k_modes=k_modes, schedule=schedule)
                              #T_max=T_max, RLoP=RLoP, RLoP_factor=RLoP_factor, RLoP_patience=RLoP_patience)
 
     import os, signal
