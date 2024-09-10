@@ -6,7 +6,7 @@ import torchmetrics
 
 # only works on *nix
 def get_forked_pdb():
-    import pdb
+    import pdb, sys
 
     class ForkedPdb(pdb.Pdb):
         """
@@ -36,7 +36,7 @@ class BasicLightningRegressor(L.LightningModule):
         return loss
     def validation_step(self, batch, batch_idx=None):
         loss = BasicLightningRegressor.training_step(self, batch, batch_idx, val=True)
-        self.log('hp_metric', loss)
+        self.log('hp_metric', loss, sync_dist=True)
         return loss
     def log_metrics(self, y_pred, y, val=False): # override for more metrics
         if not val: self.log_lr()

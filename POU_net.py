@@ -75,7 +75,7 @@ class POU_net(BasicLightningRegressor):
                  make_expert=MOR_Operator.MOR_Operator, make_gating_net: type=FieldGatingNet, **kwd_args):
                  #T_max=10, RLoP=False, RLoP_factor=0.9, RLoP_patience=25,
         super().__init__()
-        self.save_hyperparameters()
+        self.save_hyperparameters(ignore=['simulator'])
 
         # NOTE: setting n_experts=n_experts+1 inside the gating_net implicitly adds a "ZeroExpert"
         self.gating_net=make_gating_net(n_inputs, n_experts, ndims=ndims, **kwd_args) # supports n_inputs!=2
@@ -86,6 +86,8 @@ class POU_net(BasicLightningRegressor):
                 super().__init__()
                 self.r2_score = torchmetrics.R2Score(num_outputs=n_outputs)
                 self.explained_variance = torchmetrics.ExplainedVariance()
+                self.wMAPE = torchmetrics.WeightedMeanAbsolutePercentageError()
+                self.sMAPE = torchmetrics.SymmetricMeanAbsolutePercentageError()
         self.train_metrics = MetricsModule()
         self.val_metrics = MetricsModule()
         vars(self).update(locals()); del self.self
@@ -105,10 +107,19 @@ class POU_net(BasicLightningRegressor):
         to_table = lambda x: x.swapaxes(1, -1).reshape(-1, self.n_outputs)
         y_pred, y = to_table(y_pred), to_table(y)
         metrics = self.val_metrics if val else self.train_metrics
-        metrics.r2_score(y_pred, y)
-        metrics.explained_variance(y_pred, y)
-        self.log(f'{val*"val_"}R^2', metrics.r2_score, on_step=not val, on_epoch=True, prog_bar=True)
-        self.log(f'{val*"val_"}explained_variance', metrics.explained_variance, on_step=True, on_epoch=True)
+
+        # simple helper does everything needed to log one metric!
+        def log_metric(name, metric=None, on_step=True, on_epoch=True, **kwd_args):
+            if metric is None: metric = getattr(metrics, name)
+            metric(y_pred, y) # update metric
+            self.log(f'{val*"val_"}{name}', metric, on_step=on_step,
+                     on_epoch=on_epoch, logger=True, **kwd_args) # log metric
+
+        # we specify the metric itself for the first one to enable a different metric name
+        log_metric('R^2', metrics.r2_score, on_step=not val, prog_bar=True)
+        log_metric('explained_variance')
+        log_metric('wMAPE')
+        log_metric('sMAPE')
 
     # Verified to work 7/19/24
     def forward(self, X):
