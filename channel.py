@@ -83,7 +83,7 @@ if __name__=='__main__':
                              #T_max=T_max, RLoP=RLoP, RLoP_factor=RLoP_factor, RLoP_patience=RLoP_patience)
 
     import os, signal
-    from pytorch_ligthning.loggers import TensorBoardLogger
+    from pytorch_lightning.loggers import TensorBoardLogger
     from pytorch_lightning.plugins.environments import SLURMEnvironment
     # SLURMEnvironment plugin enables auto-requeue
 
