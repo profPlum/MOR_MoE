@@ -75,7 +75,7 @@ class POU_net(BasicLightningRegressor):
                  make_expert=MOR_Operator.MOR_Operator, make_gating_net: type=FieldGatingNet, **kwd_args):
                  #T_max=10, RLoP=False, RLoP_factor=0.9, RLoP_patience=25,
         super().__init__()
-        self.save_hyperparameters(ignore=['simulator'])
+        self.save_hyperparameters(ignore=['n_inputs', 'n_outputs', 'ndims', 'simulator'])
 
         # NOTE: setting n_experts=n_experts+1 inside the gating_net implicitly adds a "ZeroExpert"
         self.gating_net=make_gating_net(n_inputs, n_experts, ndims=ndims, **kwd_args) # supports n_inputs!=2
