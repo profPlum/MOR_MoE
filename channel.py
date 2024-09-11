@@ -4,7 +4,7 @@
 from torch.optim import lr_scheduler
 
 max_epochs=1500
-k_modes=[77,26,103] # can be a list
+k_modes=[103,26,77] # can be a list
 n_experts: int=2 # number of experts in MoE
 time_chunking: int=5 # how many self-aware recursive steps to take
 batch_size: int=2 # batch size
@@ -40,19 +40,16 @@ if __name__=='__main__':
     # sets up simulation
 
     # number of grid points
-    #nx = ny = nz = 256
-    nx,ny,nz=mesh_shape=np.asarray([77, 26, 103])
+    nx,ny,nz=mesh_shape=np.asarray([103, 26, 77])
 
-    #length of domain
-    Lx = Ly = Lz = 2*np.pi
-    #Lx,Ly,Lz=2*np.pi*(mesh_shape/256.0) # assume proportional
+    #length of domain <-- it's given explicitly!!
+    Lx, Ly, Lz = 3*np.pi, 2.0, 8*np.pi
+
     # viscosity
     nu = 5e-5
     # timestep
     dt = 0.0013
     sim = Sim(nx,ny,nz,Lx,Ly,Lz,nu,dt)
-
-    print(f"{Lx,Ly,Lz=}")
 
     dataset = JHTDB_Channel('data/turbulence_output', time_chunking=time_chunking)
     #train_len, val_len = int(len(dataset)*0.8), int(len(dataset)*0.2+1-1e-12)
@@ -68,7 +65,7 @@ if __name__=='__main__':
     #Expert = lambda: MOR_Operator(in_channels=ndims, out_channels=ndims, n_layers=4, k_modes = 26, ndims=ndims)
     #Expert = lambda: CNN(ndims=ndims, k_size=3) # works
 
-    extra_args = {'k_modes': [77,26,103], 'k': 2, 'n_layers': 4}
+    extra_args = {'k_modes': [103,26,77], 'k': 2, 'n_layers': 4}
     gating_net = lambda *args, **kwd_args: FieldGatingNet(*args, **(kwd_args | extra_args))
     # this lambda does nothing if on RevertingMoESparsity branch...
 

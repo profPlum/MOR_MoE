@@ -163,7 +163,8 @@ class JHTDB_Channel(torch.utils.data.Dataset):
                     raise OSError(f'Unable to open file: "{self.path}/channel_t={i}.h5"')
                 else: raise
             velocity_fields.append(files[-1][f'Velocity_{i:04}']) # :04 zero pads to 4 digits
-        velocity_fields = torch.swapaxes(torch.as_tensor(np.stack(velocity_fields)), 0, -1)
+        velocity_fields = torch.as_tensor(np.stack(velocity_fields)).swapaxes(0, -1) # put time in the back
+        velocity_fields = velocity_fields.swapaxes(1, -2) # swap x & z so that the dimensions are in order: x,y,z
         return velocity_fields[...,0], velocity_fields[...,1:] # X=IC, Y=sol
 
 if __name__=='__main__':
