@@ -1,11 +1,11 @@
 #!/bin/bash
-#SBATCH --job-name=channel_MOR_MoE           # Job name
+#SBATCH --job-name=OneCycle_lr=0.0031_POU     # Job name
 #SBATCH --output=logs/%x_%j.out              # Output file (%x: job-name, %j: job-id)
 #SBATCH --error=logs/%x_%j.err               # Error file (%x: job-name, %j: job-id)
 #SBATCH --exclusive
-#SBATCH --nodes=20                           # Number of nodes
+#SBATCH --nodes=4                            # Number of nodes
 #SBATCH --ntasks-per-node=1                  # Tasks per node (usually 1 for PyTorch)
-#SBATCH --time=6:00:00                       # Maximum runtime (HH:MM:SS)
+#SBATCH --time=1-00:00:00                    # Maximum runtime (HH:MM:SS)
 #SBATCH --partition=glinda                   # Partition name
 #SBATCH --exclude gn78
 
@@ -24,6 +24,10 @@ echo "rank hostnames & Ips:"
 srun bash -c 'echo host: $SLURMD_NODENAME, rank: $PMI_RANK, slurm_proc_id: $SLURM_PROCID, $(host $(hostname))'
 echo srun nvidia-smi:
 srun nvidia-smi
+
+# 500 epochs takes about 21.5 hours (measured: 9/12/24)
+export MAX_EPOCHS=500
+export LR=0.00316228
 
 # Run your PyTorch Lightning script
 srun python channel.py
