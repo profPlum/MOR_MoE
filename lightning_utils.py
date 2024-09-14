@@ -31,7 +31,7 @@ class BasicLightningRegressor(L.LightningModule):
         X, y = batch
         y_pred = self(X).reshape(y.shape)
         loss = F.mse_loss(y_pred, y)
-        self.log(f'{val*"val_"}loss', loss.item(), sync_dist=True, prog_bar=True)
+        self.log(f'{val*"val_"}loss', loss.item(), sync_dist=val, prog_bar=True)
         self.log_metrics(y_pred, y, val) # log additional metrics
         return loss
     def validation_step(self, batch, batch_idx=None):
@@ -45,7 +45,7 @@ class BasicLightningRegressor(L.LightningModule):
         lrs = scheduler.get_last_lr()
         if type(lrs) in [list, tuple]:
             lrs=sum(lrs)/len(lrs) # simplify
-        self.log('lr', lrs, prog_bar=True)
+        self.log('lr', lrs, on_step=True, prog_bar=True)
 
 # useful for debugging when vmap won't work
 dumb_vmap = lambda func: lambda X: torch.stack([func(x) for x in X])

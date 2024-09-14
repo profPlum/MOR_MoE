@@ -70,8 +70,7 @@ class FieldGatingNet(BasicLightningRegressor):
 
 class POU_net(BasicLightningRegressor):
     ''' POU_net minus the useless L2 regularization '''
-    def __init__(self, n_inputs, n_outputs, n_experts=5, ndims=2, lr=0.001,
-                 schedule=lambda optim: lr_scheduler.CosineAnnealingWarmRestarts(optim, T_0=1, T_mult=2),
+    def __init__(self, n_inputs, n_outputs, n_experts=5, ndims=2, lr=0.001, momentum=0.9,
                  make_expert=MOR_Operator.MOR_Operator, make_gating_net: type=FieldGatingNet, **kwd_args):
                  #T_max=10, RLoP=False, RLoP_factor=0.9, RLoP_patience=25,
         super().__init__()
@@ -94,11 +93,13 @@ class POU_net(BasicLightningRegressor):
 
     def configure_optimizers(self):
         optim = torch.optim.Adam(self.parameters(), lr=self.lr)
-        lr_schedule = self.schedule(optim)
-        #if self.RLoP: lr_schedule = lr_scheduler.ReduceLROnPlateau(optim, factor=self.RLoP_factor, patience=self.RLoP_patience)
-        #else: lr_schedule = lr_scheduler.CosineAnnealingWarmRestarts(optim, T_0=self.T_max, T_mult=2)
-        return {'optimizer': optim, 'lr_scheduler': lr_schedule, 'monitor': 'loss'}
-        #return [optim], [lr_schedule]
+        #optim = torch.optim.SGD(self.parameters(), lr=self.lr, momentum=self.momentum, nesterov=True)
+        print('estimated total steps: ', self.trainer.estimated_stepping_batches)
+        schedule = lr_scheduler.OneCycleLR(optim, max_lr=self.lr, total_steps=self.trainer.estimated_stepping_batches)
+        return [optim], [{'scheduler': schedule, 'interval': 'step'}]
+        #if self.RLoP: schedule = lr_scheduler.ReduceLROnPlateau(optim, factor=self.RLoP_factor, patience=self.RLoP_patience)
+        #else: schedule = lr_scheduler.CosineAnnealingWarmRestarts(optim, T_0=self.T_max, T_mult=2)
+        #return {'optimizer': optim, 'lr_scheduler': schedule, 'monitor': 'loss'}
 
     def log_metrics(self, y_pred, y, val=False):
         super().log_metrics(y_pred, y, val)
@@ -109,14 +110,15 @@ class POU_net(BasicLightningRegressor):
         metrics = self.val_metrics if val else self.train_metrics
 
         # simple helper does everything needed to log one metric!
-        def log_metric(name, metric=None, on_step=True, on_epoch=True, **kwd_args):
+        def log_metric(name, metric=None, on_step=val, on_epoch=True, **kwd_args):
             if metric is None: metric = getattr(metrics, name)
-            metric(y_pred, y) # update metric
+            if on_step: metric(y_pred, y) # update metric
+            else: metric.update(y_pred, y)
             self.log(f'{val*"val_"}{name}', metric, on_step=on_step,
                      on_epoch=on_epoch, logger=True, **kwd_args) # log metric
 
         # we specify the metric itself for the first one to enable a different metric name
-        log_metric('R^2', metrics.r2_score, on_step=not val, prog_bar=True)
+        log_metric('R^2', metrics.r2_score, prog_bar=True)
         log_metric('explained_variance')
         log_metric('wMAPE')
         log_metric('sMAPE')

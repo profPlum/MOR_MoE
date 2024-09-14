@@ -75,11 +75,11 @@ if __name__=='__main__':
 
     # train model
     if scale_lr: lr *= num_nodes
-    total_steps = max_epochs*len(train_loader)//num_nodes
-    print('est total steps: ', total_steps)
-    schedule = lambda optim: lr_scheduler.OneCycleLR(optim, max_lr=lr, total_steps=total_steps)
-    model = POU_NetSimulator(ndims, ndims, n_experts, ndims=ndims, lr=lr, make_gating_net=gating_net,
-                             simulator=sim, n_steps=time_chunking-1, k_modes=k_modes, schedule=schedule)
+    #total_steps = max_epochs*len(train_loader)//num_nodes
+    #print('est total steps: ', total_steps)
+    #schedule = lambda optim: lr_scheduler.OneCycleLR(optim, max_lr=lr, total_steps=total_steps)
+    model = POU_NetSimulator(ndims, ndims, n_experts, ndims=ndims, lr=lr, #make_gating_net=gating_net,
+                             simulator=sim, n_steps=time_chunking-1, k_modes=k_modes)#, schedule=schedule)
                              #T_max=T_max, RLoP=RLoP, RLoP_factor=RLoP_factor, RLoP_patience=RLoP_patience)
 
     import os, signal
@@ -87,11 +87,13 @@ if __name__=='__main__':
     from pytorch_lightning.plugins.environments import SLURMEnvironment
     # SLURMEnvironment plugin enables auto-requeue
 
-    logger = TensorBoardLogger("lightning_logs", name=os.environ.get("SLURM_JOB_NAME", 'JHTDB_MOR_MoE'),
-                                version=os.environ.get("SLURM_JOB_ID", None))
+    logger = TensorBoardLogger("lightning_logs", name=os.environ.get("SLURM_JOB_NAME", 'JHTDB_MOR_MoE'))#,
+                                #version=os.environ.get("SLURM_JOB_ID", None))
     profiler = L.profilers.PyTorchProfiler(profile_memory=True, with_stack=True)
     trainer = L.Trainer(max_epochs=max_epochs, accelerator='gpu', strategy='fsdp', num_nodes=num_nodes,
-                        #gradient_clip_val=1.0, gradient_clip_algorithm='value', # regularization isn't good for OneCycleLR
+                        gradient_clip_val=10.0, gradient_clip_algorithm='value', # regularization isn't good for OneCycleLR
                         profiler=profiler, plugins=[SLURMEnvironment()], logger=logger)
+                        #limit_train_batches=10)
+
     trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_loader)
                 #ckpt_path="/home/dsdeigh/MOR_MoE/lightning_logs/version_337303/checkpoints/epoch=65-step=3564.ckpt")
