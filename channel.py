@@ -1,16 +1,19 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-from torch.optim import lr_scheduler
 import os
+import torch
+from torch.optim import lr_scheduler
 
-max_epochs=int(os.environ.get('MAX_EPOCHS', 500))
 k_modes=[103,26,77] # can be a list
 n_experts: int=2 # number of experts in MoE
 time_chunking: int=5 # how many self-aware recursive steps to take
 batch_size: int=2 # batch size
 scale_lr=True # scale with DDP batch_size
 lr: float=float(os.environ.get('LR', 0.001)) # learning rate
+max_epochs=int(os.environ.get('MAX_EPOCHS', 500))
+make_optim=torch.optim.Adam
+gradient_clip_val=10.0
 
 #T_max: int=1 # T_0 for CosAnnealing+WarmRestarts
 #RLoP=False # scheduler
@@ -78,7 +81,7 @@ if __name__=='__main__':
     #total_steps = max_epochs*len(train_loader)//num_nodes
     #print('est total steps: ', total_steps)
     #schedule = lambda optim: lr_scheduler.OneCycleLR(optim, max_lr=lr, total_steps=total_steps)
-    model = POU_NetSimulator(ndims, ndims, n_experts, ndims=ndims, lr=lr, #make_gating_net=gating_net,
+    model = POU_NetSimulator(ndims, ndims, n_experts, ndims=ndims, lr=lr, make_optim=make_optim, #make_gating_net=gating_net,
                              simulator=sim, n_steps=time_chunking-1, k_modes=k_modes)#, schedule=schedule)
                              #T_max=T_max, RLoP=RLoP, RLoP_factor=RLoP_factor, RLoP_patience=RLoP_patience)
 
@@ -91,9 +94,9 @@ if __name__=='__main__':
                                 #version=os.environ.get("SLURM_JOB_ID", None))
     profiler = L.profilers.PyTorchProfiler(profile_memory=True, with_stack=True)
     trainer = L.Trainer(max_epochs=max_epochs, accelerator='gpu', strategy='fsdp', num_nodes=num_nodes,
-                        gradient_clip_val=10.0, gradient_clip_algorithm='value', # regularization isn't good for OneCycleLR
+                        gradient_clip_val=gradient_clip_val, gradient_clip_algorithm='value', # regularization isn't good for OneCycleLR
                         profiler=profiler, plugins=[SLURMEnvironment()], logger=logger)
-                        #limit_train_batches=10)
+                        #limit_train_batches=10) #, fast_dev_run=True)
 
     trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_loader)
                 #ckpt_path="/home/dsdeigh/MOR_MoE/lightning_logs/version_337303/checkpoints/epoch=65-step=3564.ckpt")

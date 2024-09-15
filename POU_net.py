@@ -70,11 +70,11 @@ class FieldGatingNet(BasicLightningRegressor):
 
 class POU_net(BasicLightningRegressor):
     ''' POU_net minus the useless L2 regularization '''
-    def __init__(self, n_inputs, n_outputs, n_experts=5, ndims=2, lr=0.001, momentum=0.9,
-                 make_expert=MOR_Operator.MOR_Operator, make_gating_net: type=FieldGatingNet, **kwd_args):
+    def __init__(self, n_inputs, n_outputs, n_experts=5, ndims=2, lr=0.001, momentum=0.9, make_optim: type=torch.optim.Adam,
+                 make_expert: type=MOR_Operator.MOR_Operator, make_gating_net: type=FieldGatingNet, **kwd_args):
                  #T_max=10, RLoP=False, RLoP_factor=0.9, RLoP_patience=25,
         super().__init__()
-        self.save_hyperparameters(ignore=['n_inputs', 'n_outputs', 'ndims', 'simulator'])
+        self.save_hyperparameters(ignore=['n_inputs', 'n_outputs', 'ndims', 'simulator', 'make_expert', 'make_gating_net'])
 
         # NOTE: setting n_experts=n_experts+1 inside the gating_net implicitly adds a "ZeroExpert"
         self.gating_net=make_gating_net(n_inputs, n_experts, ndims=ndims, **kwd_args) # supports n_inputs!=2
@@ -92,14 +92,23 @@ class POU_net(BasicLightningRegressor):
         vars(self).update(locals()); del self.self
 
     def configure_optimizers(self):
-        optim = torch.optim.Adam(self.parameters(), lr=self.lr)
-        #optim = torch.optim.SGD(self.parameters(), lr=self.lr, momentum=self.momentum, nesterov=True)
+        optim_kwd_args = {'lr': self.lr}
+        if self.make_optim==torch.optim.SGD:
+            optim_kwd_args.update({'momentum': self.momentum, 'nesterov': True})
+        optim = self.make_optim(self.parameters(), **optim_kwd_args)
         print('estimated total steps: ', self.trainer.estimated_stepping_batches)
         schedule = lr_scheduler.OneCycleLR(optim, max_lr=self.lr, total_steps=self.trainer.estimated_stepping_batches)
         return [optim], [{'scheduler': schedule, 'interval': 'step'}]
         #if self.RLoP: schedule = lr_scheduler.ReduceLROnPlateau(optim, factor=self.RLoP_factor, patience=self.RLoP_patience)
         #else: schedule = lr_scheduler.CosineAnnealingWarmRestarts(optim, T_0=self.T_max, T_mult=2)
         #return {'optimizer': optim, 'lr_scheduler': schedule, 'monitor': 'loss'}
+
+    def on_before_optimizer_step(self, optimizer):
+        from pytorch_lightning.utilities import grad_norm
+        # Compute the 2-norm for each layer
+        # If using mixed precision, the gradients are already unscaled here
+        norms = grad_norm(self, norm_type='inf')
+        self.log_dict(norms, sync_dist=False)
 
     def log_metrics(self, y_pred, y, val=False):
         super().log_metrics(y_pred, y, val)
