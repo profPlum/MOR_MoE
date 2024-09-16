@@ -12,14 +12,14 @@ batch_size: int=2 # batch size
 scale_lr=True # scale with DDP batch_size
 lr: float=float(os.environ.get('LR', 0.001)) # learning rate
 max_epochs=int(os.environ.get('MAX_EPOCHS', 500))
-make_optim=torch.optim.Adam
 gradient_clip_val=float(os.environ.get('GRAD_CLIP', 5.0))
 ckpt_path=os.environ.get('CKPT_PATH', None)
+make_optim=torch.optim.Adam
 
 #T_max: int=1 # T_0 for CosAnnealing+WarmRestarts
-#RLoP=False # scheduler
-#RLoP_factor=0.9
-#RLoP_patience=25
+RLoP=bool(int(os.environ.get('RLoP', False))) # scheduler
+RLoP_factor=0.9
+RLoP_patience=25
 
 # Import External Libraries
 
@@ -83,8 +83,8 @@ if __name__=='__main__':
     #print('est total steps: ', total_steps)
     #schedule = lambda optim: lr_scheduler.OneCycleLR(optim, max_lr=lr, total_steps=total_steps)
     model = POU_NetSimulator(ndims, ndims, n_experts, ndims=ndims, lr=lr, make_optim=make_optim, #make_gating_net=gating_net,
+                             RLoP=RLoP, RLoP_factor=RLoP_factor, RLoP_patience=RLoP_patience, #T_max=T_max,
                              simulator=sim, n_steps=time_chunking-1, k_modes=k_modes)#, schedule=schedule)
-                             #T_max=T_max, RLoP=RLoP, RLoP_factor=RLoP_factor, RLoP_patience=RLoP_patience)
 
     import os, signal
     from pytorch_lightning.loggers import TensorBoardLogger
@@ -96,7 +96,7 @@ if __name__=='__main__':
     profiler = L.profilers.PyTorchProfiler(profile_memory=True, with_stack=True)
     trainer = L.Trainer(max_epochs=max_epochs, accelerator='gpu', strategy='fsdp', num_nodes=num_nodes,
                         gradient_clip_val=gradient_clip_val, gradient_clip_algorithm='value', # regularization isn't good for OneCycleLR
-                        profiler=profiler, plugins=[SLURMEnvironment()], logger=logger)
+                        profiler=profiler, plugins=[SLURMEnvironment()], logger=logger)#, log_every_n_steps=1)
                         #limit_train_batches=10) #, fast_dev_run=True)
 
     trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_loader, ckpt_path=ckpt_path)

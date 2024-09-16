@@ -70,10 +70,11 @@ class FieldGatingNet(BasicLightningRegressor):
 
 class POU_net(BasicLightningRegressor):
     ''' POU_net minus the useless L2 regularization '''
-    def __init__(self, n_inputs, n_outputs, n_experts=5, ndims=2, lr=0.001, momentum=0.9, make_optim: type=torch.optim.Adam,
+    def __init__(self, n_inputs, n_outputs, n_experts=5, ndims=2, lr=0.001, momentum=0.9,
+                 RLoP=False, RLoP_factor=0.9, RLoP_patience=25, make_optim: type=torch.optim.Adam,
                  make_expert: type=MOR_Operator.MOR_Operator, make_gating_net: type=FieldGatingNet, **kwd_args):
-                 #T_max=10, RLoP=False, RLoP_factor=0.9, RLoP_patience=25,
         super().__init__()
+        RLoP_patience = int(RLoP_patience) # cast
         self.save_hyperparameters(ignore=['n_inputs', 'n_outputs', 'ndims', 'simulator', 'make_expert', 'make_gating_net'])
 
         # NOTE: setting n_experts=n_experts+1 inside the gating_net implicitly adds a "ZeroExpert"
@@ -96,12 +97,14 @@ class POU_net(BasicLightningRegressor):
         if self.make_optim==torch.optim.SGD:
             optim_kwd_args.update({'momentum': self.momentum, 'nesterov': True})
         optim = self.make_optim(self.parameters(), **optim_kwd_args)
+
         print('estimated total steps: ', self.trainer.estimated_stepping_batches)
-        schedule = lr_scheduler.OneCycleLR(optim, max_lr=self.lr, total_steps=self.trainer.estimated_stepping_batches)
-        return [optim], [{'scheduler': schedule, 'interval': 'step'}]
-        #if self.RLoP: schedule = lr_scheduler.ReduceLROnPlateau(optim, factor=self.RLoP_factor, patience=self.RLoP_patience)
-        #else: schedule = lr_scheduler.CosineAnnealingWarmRestarts(optim, T_0=self.T_max, T_mult=2)
-        #return {'optimizer': optim, 'lr_scheduler': schedule, 'monitor': 'loss'}
+        schedule = {'interval': 'epoch', 'monitor': 'loss'}
+        if self.RLoP: schedule['scheduler'] = lr_scheduler.ReduceLROnPlateau(optim, factor=self.RLoP_factor, patience=self.RLoP_patience)
+        else:
+            schedule['scheduler'] = lr_scheduler.OneCycleLR(optim, max_lr=self.lr, total_steps=self.trainer.estimated_stepping_batches)
+            schedule['interval'] = 'step'
+        return [optim], [schedule]
 
     def on_before_optimizer_step(self, optimizer):
         from pytorch_lightning.utilities import grad_norm
