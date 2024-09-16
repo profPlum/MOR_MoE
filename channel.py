@@ -13,7 +13,8 @@ scale_lr=True # scale with DDP batch_size
 lr: float=float(os.environ.get('LR', 0.001)) # learning rate
 max_epochs=int(os.environ.get('MAX_EPOCHS', 500))
 make_optim=torch.optim.Adam
-gradient_clip_val=10.0
+gradient_clip_val=float(os.environ.get('GRAD_CLIP', 5.0))
+ckpt_path=os.environ.get('CKPT_PATH', None)
 
 #T_max: int=1 # T_0 for CosAnnealing+WarmRestarts
 #RLoP=False # scheduler
@@ -98,5 +99,4 @@ if __name__=='__main__':
                         profiler=profiler, plugins=[SLURMEnvironment()], logger=logger)
                         #limit_train_batches=10) #, fast_dev_run=True)
 
-    trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_loader)
-                #ckpt_path="/home/dsdeigh/MOR_MoE/lightning_logs/version_337303/checkpoints/epoch=65-step=3564.ckpt")
+    trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_loader, ckpt_path=ckpt_path)
