@@ -111,7 +111,7 @@ class POU_net(BasicLightningRegressor):
         # Compute the 2-norm for each layer
         # If using mixed precision, the gradients are already unscaled here
         norms = grad_norm(self, norm_type='inf')
-        self.log_dict(norms, sync_dist=False)
+        self.log('grad_inf_norm_total', norms['grad_inf_norm_total'].item(), sync_dist=True, reduce_fx='max')
 
     def log_metrics(self, y_pred, y, val=False):
         super().log_metrics(y_pred, y, val)

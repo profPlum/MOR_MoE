@@ -12,7 +12,7 @@ batch_size: int=2 # batch size
 scale_lr=True # scale with DDP batch_size
 lr: float=float(os.environ.get('LR', 0.001)) # learning rate
 max_epochs=int(os.environ.get('MAX_EPOCHS', 500))
-gradient_clip_val=float(os.environ.get('GRAD_CLIP', 5.0))
+gradient_clip_val=float(os.environ.get('GRAD_CLIP', 2.5))
 ckpt_path=os.environ.get('CKPT_PATH', None)
 make_optim=torch.optim.Adam
 
