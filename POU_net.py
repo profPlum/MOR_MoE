@@ -71,7 +71,7 @@ class FieldGatingNet(BasicLightningRegressor):
 class POU_net(BasicLightningRegressor):
     ''' POU_net minus the useless L2 regularization '''
     def __init__(self, n_inputs, n_outputs, n_experts=5, ndims=2, lr=0.001, momentum=0.9,
-                 RLoP=False, RLoP_factor=0.9, RLoP_patience=25, make_optim: type=torch.optim.Adam,
+                 RLoP=False, RLoP_factor=0.9, RLoP_patience=25, three_phase=False, make_optim: type=torch.optim.Adam,
                  make_expert: type=MOR_Operator.MOR_Operator, make_gating_net: type=FieldGatingNet, **kwd_args):
         super().__init__()
         RLoP_patience = int(RLoP_patience) # cast
@@ -102,7 +102,8 @@ class POU_net(BasicLightningRegressor):
         schedule = {'interval': 'epoch', 'monitor': 'loss'}
         if self.RLoP: schedule['scheduler'] = lr_scheduler.ReduceLROnPlateau(optim, factor=self.RLoP_factor, patience=self.RLoP_patience)
         else:
-            schedule['scheduler'] = lr_scheduler.OneCycleLR(optim, max_lr=self.lr, total_steps=self.trainer.estimated_stepping_batches)
+            schedule['scheduler'] = lr_scheduler.OneCycleLR(optim, max_lr=self.lr, three_phase=self.three_phase,
+                                                            total_steps=self.trainer.estimated_stepping_batches)
             schedule['interval'] = 'step'
         return [optim], [schedule]
 
@@ -110,8 +111,10 @@ class POU_net(BasicLightningRegressor):
         from pytorch_lightning.utilities import grad_norm
         # Compute the 2-norm for each layer
         # If using mixed precision, the gradients are already unscaled here
-        norms = grad_norm(self, norm_type='inf')
-        self.log('grad_inf_norm_total', norms['grad_inf_norm_total'].item(), sync_dist=True, reduce_fx='max')
+        norms_inf = grad_norm(self, norm_type='inf')
+        norms_2 = grad_norm(self, norm_type=2)
+        self.log('grad_inf_norm_total', norms_inf['grad_inf_norm_total'].item(), sync_dist=True, reduce_fx='max')
+        self.log('grad_2.0_norm_total', norms_2['grad_2.0_norm_total'].item(), sync_dist=True, reduce_fx='mean')
 
     def log_metrics(self, y_pred, y, val=False):
         super().log_metrics(y_pred, y, val)

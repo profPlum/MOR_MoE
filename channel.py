@@ -10,13 +10,14 @@ n_experts: int=2 # number of experts in MoE
 time_chunking: int=5 # how many self-aware recursive steps to take
 batch_size: int=2 # batch size
 scale_lr=True # scale with DDP batch_size
-lr: float=float(os.environ.get('LR', 0.001)) # learning rate
+lr: float=float(os.environ.get('LR', 0.0005)) # learning rate
 max_epochs=int(os.environ.get('MAX_EPOCHS', 500))
-gradient_clip_val=float(os.environ.get('GRAD_CLIP', 2.5))
+gradient_clip_val=float(os.environ.get('GRAD_CLIP', 0.5))
 ckpt_path=os.environ.get('CKPT_PATH', None)
-make_optim=torch.optim.Adam
+make_optim=eval(f"torch.optim.{os.environ.get('OPTIM', 'Adam')}")
 
 #T_max: int=1 # T_0 for CosAnnealing+WarmRestarts
+three_phase=bool(int(os.environ.get('THREE_PHASE', False))) # TODO: use me
 RLoP=bool(int(os.environ.get('RLoP', False))) # scheduler
 RLoP_factor=0.9
 RLoP_patience=25
@@ -83,7 +84,7 @@ if __name__=='__main__':
     #print('est total steps: ', total_steps)
     #schedule = lambda optim: lr_scheduler.OneCycleLR(optim, max_lr=lr, total_steps=total_steps)
     model = POU_NetSimulator(ndims, ndims, n_experts, ndims=ndims, lr=lr, make_optim=make_optim, #make_gating_net=gating_net,
-                             RLoP=RLoP, RLoP_factor=RLoP_factor, RLoP_patience=RLoP_patience, #T_max=T_max,
+                             RLoP=RLoP, RLoP_factor=RLoP_factor, RLoP_patience=RLoP_patience, three_phase=three_phase, #T_max=T_max,
                              simulator=sim, n_steps=time_chunking-1, k_modes=k_modes)#, schedule=schedule)
 
     import os, signal
