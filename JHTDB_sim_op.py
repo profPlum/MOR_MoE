@@ -135,10 +135,22 @@ class POU_NetSimulator(POU_net):
         simulator.set_operator(super()) # this will internally call super().forward(X)
         self.simulator = simulator
         self.n_steps = n_steps # n timesteps for PDE evolution
-    def forward(self, X):
-        #NOTE: X.shape==[batch, x, y, ...]
+    def forward(self, X, n_steps: int=None):
+        #NOTE: X.shape==[batch, channel, x, y, z]
+        if n_steps is None: n_steps=self.n_steps
+        return self.simulator.evolve(X, n=n_steps, intermediate_outputs=True)
         # evolve has now been vmapped internally!
-        return self.simulator.evolve(X, n=self.n_steps, intermediate_outputs=True)
+
+    def validation_step(self, batch, batch_idx, dataloader_idx):
+        X, y = batch # y.shape==[batch, channel, x, y, z, time]
+        print(f'{dataloader_idx=}')
+
+        try:
+            org_steps=self.n_steps
+            self.n_steps = y.shape[-1]
+            super().validation_step(batch, batch_idx) #, dataloader_idx)
+        finally:
+            self.n_steps=org_steps
 
 # TODO: load & store dataset in one big hdf5 file (more efficient I/O)
 # Verified to work: 8/23/24
