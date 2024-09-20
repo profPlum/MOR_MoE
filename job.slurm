@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=OneCycle_Adam+Clip=5_POU
+#SBATCH --job-name=OneCycle3_Adam_LR=5-4
 #SBATCH --output=logs/%x_%j.out              # Output file (%x: job-name, %j: job-id)
 #SBATCH --error=logs/%x_%j.err               # Error file (%x: job-name, %j: job-id)
 #SBATCH --exclusive
@@ -28,7 +28,12 @@ srun nvidia-smi
 # 500 epochs takes about 21.5 hours (with 8 nodes, measured: 9/12/24)
 # 100 epochs takes about 9 hours (with 4 nodes, measured 9/16/24)
 export MAX_EPOCHS=500
-export LR=0.001
+export LR=5e-4
+export GRAD_CLIP=5.0
+export RLoP=0
+export OPTIM='Adam'
+export THREE_PHASE=1
+#export CKPT_PATH='/home/dsdeigh/MOR_MoE/lightning_logs/OneCycle_Adam+Clip=5_POU/version_0/checkpoints/epoch=239-step=19200.ckpt'
 
 # Run your PyTorch Lightning script
 srun python channel.py
