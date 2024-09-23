@@ -29,9 +29,10 @@ srun nvidia-smi
 # 100 epochs takes about 9 hours (with 4 nodes, measured 9/16/24)
 export MAX_EPOCHS=500
 export LR=5e-4
-export GRAD_CLIP=5.0
-export RLoP=0
+export GRAD_CLIP=0.5
 export OPTIM='Adam'
+export RLoP=0
+export ONE_CYCLE=$((! RLoP)) # we can set both to false to use CosineWarmRestarts, but lets keep it simple
 export THREE_PHASE=1
 #export CKPT_PATH='/home/dsdeigh/MOR_MoE/lightning_logs/OneCycle_Adam+Clip=5_POU/version_0/checkpoints/epoch=239-step=19200.ckpt'
 

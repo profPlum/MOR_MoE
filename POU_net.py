@@ -70,9 +70,11 @@ class FieldGatingNet(BasicLightningRegressor):
 
 class POU_net(BasicLightningRegressor):
     ''' POU_net minus the useless L2 regularization '''
-    def __init__(self, n_inputs, n_outputs, n_experts=5, ndims=2, lr=0.001, momentum=0.9,
-                 RLoP=False, RLoP_factor=0.9, RLoP_patience=25, three_phase=False, make_optim: type=torch.optim.Adam,
-                 make_expert: type=MOR_Operator.MOR_Operator, make_gating_net: type=FieldGatingNet, **kwd_args):
+    def __init__(self, n_inputs, n_outputs, n_experts=5, ndims=2, lr=0.001, momentum=0.9, T_max=10,
+                 one_cycle=False, three_phase=False, RLoP=False, RLoP_factor=0.9, RLoP_patience=25,
+                 make_optim: type=torch.optim.Adam, make_expert: type=MOR_Operator.MOR_Operator,
+                 make_gating_net: type=FieldGatingNet, **kwd_args):
+        assert not (one_cycle and RLoP), 'These learning rate schedules are mututally exclusive!'
         super().__init__()
         RLoP_patience = int(RLoP_patience) # cast
         self.save_hyperparameters(ignore=['n_inputs', 'n_outputs', 'ndims', 'simulator', 'make_expert', 'make_gating_net'])
@@ -99,9 +101,11 @@ class POU_net(BasicLightningRegressor):
         optim = self.make_optim(self.parameters(), **optim_kwd_args)
 
         print('estimated total steps: ', self.trainer.estimated_stepping_batches)
-        schedule = {'interval': 'epoch', 'monitor': 'loss'}
-        if self.RLoP: schedule['scheduler'] = lr_scheduler.ReduceLROnPlateau(optim, factor=self.RLoP_factor, patience=self.RLoP_patience)
-        else:
+        schedule = {'scheduler': lr_scheduler.CosineAnnealingWarmRestarts(optim, T_0=self.T_max, T_mult=2),
+                    'interval': 'epoch', 'monitor': 'loss'}
+        if self.RLoP: schedule['scheduler'] = lr_scheduler.ReduceLROnPlateau(optim, factor=self.RLoP_factor,
+                                                                             patience=self.RLoP_patience)
+        elif self.one_cycle:
             schedule['scheduler'] = lr_scheduler.OneCycleLR(optim, max_lr=self.lr, three_phase=self.three_phase,
                                                             total_steps=self.trainer.estimated_stepping_batches)
             schedule['interval'] = 'step'

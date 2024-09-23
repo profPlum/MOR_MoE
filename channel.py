@@ -16,8 +16,9 @@ gradient_clip_val=float(os.environ.get('GRAD_CLIP', 0.5))
 ckpt_path=os.environ.get('CKPT_PATH', None)
 make_optim=eval(f"torch.optim.{os.environ.get('OPTIM', 'Adam')}")
 
-#T_max: int=1 # T_0 for CosAnnealing+WarmRestarts
-three_phase=bool(int(os.environ.get('THREE_PHASE', False))) # TODO: use me
+T_max: int=1 # T_0 for CosAnnealing+WarmRestarts
+one_cycle=bool(int(os.environ.get('ONE_CYCLE', False))) # scheduler
+three_phase=bool(int(os.environ.get('THREE_PHASE', False))) # adds decay after inital bump
 RLoP=bool(int(os.environ.get('RLoP', False))) # scheduler
 RLoP_factor=0.9
 RLoP_patience=25
@@ -88,8 +89,8 @@ if __name__=='__main__':
     #total_steps = max_epochs*len(train_loader)//num_nodes
     #print('est total steps: ', total_steps)
     #schedule = lambda optim: lr_scheduler.OneCycleLR(optim, max_lr=lr, total_steps=total_steps)
-    model = POU_NetSimulator(ndims, ndims, n_experts, ndims=ndims, lr=lr, make_optim=make_optim, #make_gating_net=gating_net,
-                             RLoP=RLoP, RLoP_factor=RLoP_factor, RLoP_patience=RLoP_patience, three_phase=three_phase, #T_max=T_max,
+    model = POU_NetSimulator(ndims, ndims, n_experts, ndims=ndims, lr=lr, make_optim=make_optim, T_max=T_max, #make_gating_net=gating_net,
+                             one_cycle=one_cycle, three_phase=three_phase, RLoP=RLoP, RLoP_factor=RLoP_factor, RLoP_patience=RLoP_patience,
                              simulator=sim, n_steps=time_chunking-1, k_modes=k_modes)#, schedule=schedule)
 
     import os, signal
