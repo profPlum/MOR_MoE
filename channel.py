@@ -46,24 +46,10 @@ from JHTDB_sim_op import POU_NetSimulator, Sim, JHTDB_Channel
 
 
 if __name__=='__main__':
-    # sets up simulation
-
-    # number of grid points
-    nx,ny,nz=mesh_shape=np.asarray([103, 26, 77])
-
-    #length of domain <-- it's given explicitly!!
-    Lx, Ly, Lz = 3*np.pi, 2.0, 8*np.pi
-
-    # viscosity
-    nu = 5e-5
-    # timestep
-    dt = 0.0013
-    sim = Sim(nx,ny,nz,Lx,Ly,Lz,nu,dt)
-
+    # setup dataset
     dataset = JHTDB_Channel('data/turbulence_output', time_chunking=time_chunking)
     dataset_long_horizon = JHTDB_Channel('data/turbulence_output', time_chunking=time_chunking*3)
     _, val_long_horizon = torch.utils.data.random_split(dataset, [0.8, 0.2])
-    #train_len, val_len = int(len(dataset)*0.8), int(len(dataset)*0.2+1-1e-12)
     train_dataset, val_dataset = torch.utils.data.random_split(dataset, [0.8, 0.2])
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, num_workers=16, pin_memory=True)
     val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=batch_size, num_workers=8)
@@ -74,9 +60,6 @@ if __name__=='__main__':
     print(f'{IC_0.shape=}\n{Sol_0.shape=}')
 
     ndims=3
-    #Expert = lambda: MOR_Operator(in_channels=ndims, out_channels=ndims, n_layers=4, k_modes = 26, ndims=ndims)
-    #Expert = lambda: CNN(ndims=ndims, k_size=3) # works
-
     extra_args = {'k_modes': [103,26,77], 'k': 2, 'n_layers': 4}
     gating_net = lambda *args, **kwd_args: FieldGatingNet(*args, **(kwd_args | extra_args))
     # this lambda does nothing if on RevertingMoESparsity branch...
@@ -86,12 +69,9 @@ if __name__=='__main__':
 
     # train model
     if scale_lr: lr *= num_nodes
-    #total_steps = max_epochs*len(train_loader)//num_nodes
-    #print('est total steps: ', total_steps)
-    #schedule = lambda optim: lr_scheduler.OneCycleLR(optim, max_lr=lr, total_steps=total_steps)
     model = POU_NetSimulator(ndims, ndims, n_experts, ndims=ndims, lr=lr, make_optim=make_optim, T_max=T_max, #make_gating_net=gating_net,
                              one_cycle=one_cycle, three_phase=three_phase, RLoP=RLoP, RLoP_factor=RLoP_factor, RLoP_patience=RLoP_patience,
-                             simulator=sim, n_steps=time_chunking-1, k_modes=k_modes)#, schedule=schedule)
+                             n_steps=time_chunking-1, k_modes=k_modes)
 
     import os, signal
     from pytorch_lightning.loggers import TensorBoardLogger
@@ -104,6 +84,5 @@ if __name__=='__main__':
     trainer = L.Trainer(max_epochs=max_epochs, accelerator='gpu', strategy='fsdp', num_nodes=num_nodes,
                         gradient_clip_val=gradient_clip_val, gradient_clip_algorithm='value', # regularization isn't good for OneCycleLR
                         profiler=profiler, plugins=[SLURMEnvironment()], logger=logger)#, precision='bf16-mixed')#, log_every_n_steps=1)
-                        #limit_train_batches=10) #, fast_dev_run=True)
 
     trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=[val_loader, val_long_loader], ckpt_path=ckpt_path)
