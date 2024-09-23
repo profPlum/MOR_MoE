@@ -97,8 +97,8 @@ if __name__=='__main__':
     from pytorch_lightning.plugins.environments import SLURMEnvironment
     # SLURMEnvironment plugin enables auto-requeue
 
-    logger = TensorBoardLogger("lightning_logs", name=os.environ.get("SLURM_JOB_NAME", 'JHTDB_MOR_MoE'))#,
-                                #version=os.environ.get("SLURM_JOB_ID", None))
+    logger = TensorBoardLogger("lightning_logs", name=os.environ.get("SLURM_JOB_NAME", 'JHTDB_MOR_MoE'),
+                                version=os.environ.get("SLURM_JOB_ID", None))
     profiler = L.profilers.PyTorchProfiler(profile_memory=True, with_stack=True)
     trainer = L.Trainer(max_epochs=max_epochs, accelerator='gpu', strategy='fsdp', num_nodes=num_nodes,
                         gradient_clip_val=gradient_clip_val, gradient_clip_algorithm='value', # regularization isn't good for OneCycleLR
