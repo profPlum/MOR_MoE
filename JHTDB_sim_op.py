@@ -124,10 +124,10 @@ class Sim(L.LightningModule):
             u = u[None] # add batch dim
         for _ in range(n):
             u = self.learnedCorrection(NSupd(u))
-            outputs.append(u)
+            if intermediate_outputs: outputs.append(u)
 
         # time dim is the last dim (if it exists)
-        outputs = torch.stack(outputs,axis=-1) if intermediate_outputs else outputs[-1]
+        outputs = torch.stack(outputs,axis=-1) if intermediate_outputs else u
         return outputs.squeeze() if len(u.shape)>len(u0.shape) else outputs
         # remove artificial batch dimension only if it was added
 
