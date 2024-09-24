@@ -116,15 +116,15 @@ class Sim(L.LightningModule):
 
     # This needs to output intermediate time-steps to get full loss!
     # GOTCHA: this probably needs torch.vmap to work properly across a batch
-    def evolve(self,u0,n,intermediate_outputs=False):
+    def evolve(self,u0,n,intermediate_outputs=False, intermediate_output_stride=1):
         u = u0
         outputs = []
         NSupd = torch.vmap(self.NSupd) # only this needs vmapping, NeuralOp is already batched
         if len(u.shape)==4: # all permute ops above assume 4 dims (before vmap)
             u = u[None] # add batch dim
-        for _ in range(n):
+        for i in range(n):
             u = self.learnedCorrection(NSupd(u))
-            if intermediate_outputs: outputs.append(u)
+            if intermediate_outputs and i%intermediate_output_stride==0: outputs.append(u)
 
         # time dim is the last dim (if it exists)
         outputs = torch.stack(outputs,axis=-1) if intermediate_outputs else u
