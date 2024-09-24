@@ -145,7 +145,7 @@ class POU_NetSimulator(POU_net):
         return self.simulator.evolve(X, n=n_steps, intermediate_outputs=True)
         # evolve has now been vmapped internally!
 
-    def validation_step(self, batch, batch_idx, dataloader_idx):
+    def validation_step(self, batch, batch_idx, dataloader_idx=0):
         X, y = batch # y.shape==[batch, channel, x, y, z, time]
         print(f'{dataloader_idx=}')
 
