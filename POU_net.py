@@ -151,8 +151,12 @@ class POU_net(L.LightningModule):
 
     # Verified to work 7/19/24
     def forward(self, X):
-        X = torch.as_tensor(X).to(self.device)                                                                                                                      gating_weights, topk = self.gating_net(X)
-        prediction = 0                                                                                                                                              for i, k_i in enumerate(topk):                                                                                                                                  prediction = prediction + gating_weights[:,i:i+1]*self.experts[k_i](X)                                                                                  return prediction
+        X = torch.as_tensor(X).to(self.device)
+        gating_weights, topk = self.gating_net(X)
+        prediction = 0
+        for i, k_i in enumerate(topk):
+            prediction = prediction + gating_weights[:,i:i+1]*self.experts[k_i](X)
+        return prediction
 
     def training_step(self, batch, batch_idx=None, val=False):
         X, y = batch
@@ -195,3 +199,33 @@ class POU_net(L.LightningModule):
         if type(lrs) in [list, tuple]:
             lrs=sum(lrs)/len(lrs) # simplify
         self.log('lr', lrs, on_step=True, prog_bar=True)
+
+import model_agnostic_BNN
+
+class PPOU_net(POU_net): # Not really, it's POU+VI(gating)
+    def __init__(self, n_inputs, n_outputs, *args, **kwd_args):
+        # make VI reparameterized gating function (only this will fit into memory)
+        make_gating_net = lambda *args, **kwd_args: model_agnostic_BNN.model_agnostic_dnn_to_bnn(FieldGatingNet(*args, **kwd_args))
+        super().__init__(n_inputs*2, n_outputs*2, make_gating_net=make_gating_net, *args, **kwd_args)
+        # we double output channels to have the sigma predictions too
+
+    def forward(self, X, Y=None):
+        if Y is None: Y = torch.zeros(1).expand(*X.shape)
+        X = torch.cat([X,Y], axis=1)
+        pred = super().forward(X)
+        mu_pred = pred[:, :pred.shape[1]//2]
+        sigma_pred = pred[:, pred.shape[1]//2:]
+        return mu_pred, sigma_pred
+
+    def training_step(self, batch, batch_idx=None, val=False):
+        X, y = batch
+        y_pred_mu, y_pred_sigma = self(X)
+
+        num_batches = self.trainer.estimated_stepping_batches//self.trainer.max_epochs # sneakily extract from PL
+        kl_loss = self.gating_net.get_kl_loss()/num_batches # (weighted)
+        loss = model_agnostic_BNN.nll_regression(y_pred_mu, y, y_pred_sigma=y_pred_sigma) + kl_loss # posterior loss
+
+        self.log(f'{val*"val_"}loss', loss.item(), sync_dist=val, prog_bar=True)
+        self.log(f'{val*"val_"}kl_loss', kl_loss.item(), sync_dist=val, prog_bar=True)
+        self.log_metrics(y_pred_mu, y, val) # log additional mu metrics
+        return loss
