@@ -4,24 +4,6 @@ import torch.nn.functional as F
 import pytorch_lightning as L
 import torchmetrics
 
-# only works on *nix
-def get_forked_pdb():
-    import pdb, sys
-
-    class ForkedPdb(pdb.Pdb):
-        """
-        A Pdb subclass that may be used
-        from a forked multiprocessing child
-        """
-        def interaction(self, *args, **kwargs):
-            _stdin = sys.stdin
-            try:
-                sys.stdin = open('/dev/stdin')
-                pdb.Pdb.interaction(self, *args, **kwargs)
-            finally:
-                sys.stdin = _stdin
-    return ForkedPdb()
-
 # Verified to work 7/19/24
 class BasicLightningRegressor(L.LightningModule):
     """ Mixin for debugging sub-modules by training them independently. """
@@ -32,20 +14,11 @@ class BasicLightningRegressor(L.LightningModule):
         y_pred = self(X).reshape(y.shape)
         loss = F.mse_loss(y_pred, y)
         self.log(f'{val*"val_"}loss', loss.item(), sync_dist=val, prog_bar=True)
-        self.log_metrics(y_pred, y, val) # log additional metrics
         return loss
     def validation_step(self, batch, batch_idx=None):
-        loss = BasicLightningRegressor.training_step(self, batch, batch_idx, val=True)
+        loss = self.training_step(self, batch, batch_idx, val=True)
         self.log('hp_metric', loss, sync_dist=True)
         return loss
-    def log_metrics(self, y_pred, y, val=False): # override for more metrics
-        if not val: self.log_lr()
-    def log_lr(self):
-        scheduler = self.lr_schedulers()
-        lrs = scheduler.get_last_lr()
-        if type(lrs) in [list, tuple]:
-            lrs=sum(lrs)/len(lrs) # simplify
-        self.log('lr', lrs, on_step=True, prog_bar=True)
 
 # useful for debugging when vmap won't work
 dumb_vmap = lambda func: lambda X: torch.stack([func(x) for x in X])

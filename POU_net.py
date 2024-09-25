@@ -97,7 +97,7 @@ class FieldGatingNet(BasicLightningRegressor):
             self._cached_forward_results=None # reset cache
             self._cached_forward_shape=None # reset cache
 
-class POU_net(BasicLightningRegressor):
+class POU_net(L.LightningModule):
     ''' POU_net minus the useless L2 regularization '''
     def __init__(self, n_inputs, n_outputs, n_experts=5, ndims=2, lr=0.001, momentum=0.9, T_max=10,
                  one_cycle=False, three_phase=False, RLoP=False, RLoP_factor=0.9, RLoP_patience=25,
@@ -108,7 +108,7 @@ class POU_net(BasicLightningRegressor):
         RLoP_patience = int(RLoP_patience) # cast
         self.save_hyperparameters(ignore=['n_inputs', 'n_outputs', 'ndims', 'simulator', 'make_expert', 'make_gating_net'])
 
-        # NOTE: setting n_experts=n_experts+1 inside the gating_net implicitly adds a "ZeroExpert"
+        # NOTE: The gating_net implicitly adds a "ZeroExpert"
         self.gating_net=make_gating_net(n_inputs, n_experts, ndims=ndims, **kwd_args) # supports n_inputs!=2
         self.experts=nn.ModuleList([make_expert(n_inputs, n_outputs, ndims=ndims, **kwd_args) for i in range(n_experts)])
 
@@ -149,8 +149,26 @@ class POU_net(BasicLightningRegressor):
         self.log('grad_inf_norm_total', norms_inf['grad_inf_norm_total'].item(), sync_dist=True, reduce_fx='max')
         self.log('grad_2.0_norm_total', norms_2['grad_2.0_norm_total'].item(), sync_dist=True, reduce_fx='mean')
 
+    # Verified to work 7/19/24
+    def forward(self, X):
+        X = torch.as_tensor(X).to(self.device)                                                                                                                      gating_weights, topk = self.gating_net(X)
+        prediction = 0                                                                                                                                              for i, k_i in enumerate(topk):                                                                                                                                  prediction = prediction + gating_weights[:,i:i+1]*self.experts[k_i](X)                                                                                  return prediction
+
+    def training_step(self, batch, batch_idx=None, val=False):
+        X, y = batch
+        y_pred = self(X).reshape(y.shape)
+        loss = F.mse_loss(y_pred, y)
+        self.log(f'{val*"val_"}loss', loss.item(), sync_dist=val, prog_bar=True)
+        self.log_metrics(y_pred, y, val) # log additional metrics
+        return loss
+
+    def validation_step(self, batch, batch_idx=None):
+        loss = self.training_step(self, batch, batch_idx, val=True)
+        self.log('hp_metric', loss, sync_dist=True)
+        return loss
+
     def log_metrics(self, y_pred, y, val=False):
-        super().log_metrics(y_pred, y, val)
+        if not val: self.log_lr()
 
         # to_table flattens all dims except for the channel dim (making it tabular)
         to_table = lambda x: x.swapaxes(1, -1).reshape(-1, self.n_outputs)
@@ -171,11 +189,9 @@ class POU_net(BasicLightningRegressor):
         log_metric('wMAPE')
         log_metric('sMAPE')
 
-    # Verified to work 7/19/24
-    def forward(self, X):
-        X = torch.as_tensor(X).to(self.device)
-        gating_weights, topk = self.gating_net(X)
-        prediction = 0
-        for i, k_i in enumerate(topk):
-            prediction = prediction + gating_weights[:,i:i+1]*self.experts[k_i](X)
-        return prediction
+    def log_lr(self):
+        scheduler = self.lr_schedulers()
+        lrs = scheduler.get_last_lr()
+        if type(lrs) in [list, tuple]:
+            lrs=sum(lrs)/len(lrs) # simplify
+        self.log('lr', lrs, on_step=True, prog_bar=True)
