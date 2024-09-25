@@ -138,6 +138,7 @@ def model_agnostic_dnn_to_bnn(dnn: nn.Module, prior_cfg: dict = {}):
     return dnn
 
 # GOTCHA: This is still technically incorrect *with MSE* because NLL loss is supposed to sum across features too...
+# For correct usage (with MSE): dataset_size = prod(Y.shape) # s.t. Y is the GLOBAL output tensor (i.e. not divided into tensors!)
 # TODO: Test! It could work to replace more complicated existing interface...
 def model_agnostic_dnn_to_bnn_auto_KL(dnn: nn.Module, dataset_size=None,
                                       prior_weight=1.0, prior_cfg: dict = {}):

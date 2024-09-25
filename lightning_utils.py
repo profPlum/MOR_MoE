@@ -16,7 +16,7 @@ class BasicLightningRegressor(L.LightningModule):
         self.log(f'{val*"val_"}loss', loss.item(), sync_dist=val, prog_bar=True)
         return loss
     def validation_step(self, batch, batch_idx=None):
-        loss = self.training_step(self, batch, batch_idx, val=True)
+        loss = self.training_step(batch, batch_idx, val=True)
         self.log('hp_metric', loss, sync_dist=True)
         return loss
 

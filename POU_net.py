@@ -22,8 +22,8 @@ class FieldGatingNet(BasicLightningRegressor):
     """
     def __init__(self, n_inputs, n_experts, ndims, k=2, noise_sd=0.005, **kwd_args):
         super().__init__()
-        self.k = k # for (global) top-k selection
-        if k<2: warnings.warn('K<2 means the gating network might not learn to gate properly.')
+        self.k = min(k, n_experts) # for (global) top-k selection
+        if k<2 and n_experts>=2: warnings.warn('K<2 means the gating network might not learn to gate properly.')
         self.ndims = ndims
         self.noise_sd = noise_sd
 
@@ -167,7 +167,7 @@ class POU_net(L.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx=None):
-        loss = self.training_step(self, batch, batch_idx, val=True)
+        loss = self.training_step(batch, batch_idx, val=True)
         self.log('hp_metric', loss, sync_dist=True)
         return loss
 
