@@ -35,13 +35,14 @@ def get_kl_loss(m):
     return kl_loss
 
 _pt_nll_classificiation = torch.nn.NLLLoss(reduction='sum') # sum needed for the true NLL
-nll_classification = lambda y_pred, y, **kwd_args: _pt_nll_classificiation(y_pred, y)
-nll_regression_basic = lambda y_pred, y, **kwd_args: ((y_pred-y)**2).sum()/2 # Truest NLL (for regression)!
+nll_classification = lambda y_pred, y: _pt_nll_classificiation(y_pred, y)
 
-# Truest NLL (for regression)!
-nll_sigma_ = lambda y_pred, y, y_pred_sigma: ((y_pred-y)**2).sum()/(2*y_pred_sigma**2) + torch.log(y_pred_sigma)
-nll_regression = lambda y_pred, y: nll_sigma(y_pred[:,0], y, y_pred_sigma=y_pred[:,1])
-# this assumes that first dim after batch seperates mu, sigma preds
+# Truest NLL! (for regression)
+# NOTE: This generalizes both the simpler (constant sigma) and more general (non-constant sigma) cases!
+def nll_regresion(y_pred, y, y_pred_sigma=1.0): # y_pred_sigma sigma is optional (can be assumed constant) but most accurate if you specify it
+    y_pred_sigma = torch.as_tensor(y_pred_sigma, device=y_pred.device, dtype=y_pred.dtype)
+    return ((y_pred-y)**2/(2*y_pred_sigma**2) + torch.log(y_pred_sigma)).sum() # sum over element-wise NLL
+    # Sum over element-wise NLL; this is mathematically correct when you assume output UQ is independent.
 
 _get_rho = lambda sigma: np.log(np.expm1(sigma)+1e-20)
 
@@ -134,8 +135,9 @@ def model_agnostic_dnn_to_bnn(dnn: nn.Module, prior_cfg: dict = {}):
             return super(type(self), self).forward(*args, **kwargs)
     methods =  {'forward': forward, 'get_kl_loss': get_kl_loss}
     dnn.__class__  = type(f'Bayesian{dnn.__class__.__name__}', (type(dnn),), methods)
+    return dnn
 
-# GOTCHA: This is still technically incorrect because NLL loss is supposed to sum across features too...
+# GOTCHA: This is still technically incorrect *with MSE* because NLL loss is supposed to sum across features too...
 # TODO: Test! It could work to replace more complicated existing interface...
 def model_agnostic_dnn_to_bnn_auto_KL(dnn: nn.Module, dataset_size=None,
                                       prior_weight=1.0, prior_cfg: dict = {}):
@@ -162,6 +164,7 @@ def model_agnostic_dnn_to_bnn_auto_KL(dnn: nn.Module, dataset_size=None,
         return output
     methods =  {'forward': forward, 'get_kl_loss': get_kl_loss}
     dnn.__class__  = type(f'Bayesian{dnn.__class__.__name__}', (type(dnn),), methods)
+    return dnn
 
 # TODO: embed the moment accumulation functions into the forward method of the class
 ################################ BNN sampling utility functions: ################################
@@ -217,7 +220,6 @@ class CummVar:
             return self(np.atleast_1d(X))
             # If X *is just a python scalar* then convert to numpy 1d array (of length 1)
 
-import utils
 
 # More efficient now! It doesn't rely on pred distribution!!
 # Verified to work 3/15/24
@@ -233,9 +235,7 @@ def get_BNN_pred_moments(bnn_model, x_inputs, n_samples=100, no_grad=True, verbo
     assert n_samples>1
     for i in range(n_samples):
         if i%print_interval==0:
-            if verbose:
-                print(f'{i}th moment sample')
-                utils.report_cuda_memory_usage(clear=False)
+            if verbose: print(f'{i}th moment sample')
         pred = bnn_model(x_inputs.float())
         total_pred += pred
         cum_var(pred.unsqueeze(0)) # update, first dim is reduced so we add it
