@@ -89,6 +89,7 @@ class Sim(L.LightningModule):
         u0 = irfft(hh - proj, s=self.shapef)
         return u0.permute(-1,0,1,2) # (i.e. torch.moveaxis(u0,-1,0))
 
+    # NOTE: u.shape==[channel, x, y, z]
     def NSupd(self,u): # Navier-stokes update
         u = u.permute(1,2,-1,0) #torch.moveaxis(u, 0, -1)
         uh = rfft(u)
@@ -115,7 +116,6 @@ class Sim(L.LightningModule):
         # __call__() is necessary for hooks... <- but this should already happen outside!
 
     # This needs to output intermediate time-steps to get full loss!
-    # GOTCHA: this probably needs torch.vmap to work properly across a batch
     def evolve(self,u0,n,intermediate_outputs=False, intermediate_output_stride=1):
         u = u0
         outputs = []
@@ -128,6 +128,28 @@ class Sim(L.LightningModule):
 
         # time dim is the last dim (if it exists)
         outputs = torch.stack(outputs,axis=-1) if intermediate_outputs else u
+        return outputs.squeeze() if len(u.shape)>len(u0.shape) else outputs
+        # remove artificial batch dimension only if it was added
+
+# For use with PPOU_net
+class UQ_Sim(Sim):
+    # This needs to output intermediate time-steps to get full loss!
+    def evolve(self,u0,n,intermediate_outputs=False, intermediate_output_stride=1):
+        u = u0
+        outputs = []
+        uq_outputs = []
+        NSupd = torch.vmap(self.NSupd) # only this needs vmapping, NeuralOp is already batched
+        if len(u.shape)==4: # all permute ops above assume 4 dims (before vmap)
+            u = u[None] # add batch dim
+        uq = None
+        for i in range(n):
+            u, uq = self.op.forward(NSupd(u), uq)
+            if intermediate_outputs and i%intermediate_output_stride==0:
+                outputs.append(u)
+                uq_outputs.append(uq)
+        outputs = u, uq
+        if intermediate_outputs: # time dim is the last dim (if it exists)
+            outputs = torch.stack(outputs,axis=-1), torch.stack(uq_outputs,axis=-1)
         return outputs.squeeze() if len(u.shape)>len(u0.shape) else outputs
         # remove artificial batch dimension only if it was added
 
@@ -159,6 +181,11 @@ class POU_NetSimulator(POU_net):
             super().validation_step(batch, batch_idx) #, dataloader_idx)
         finally:
             self.n_steps=org_steps
+
+# This is it! It should do full aleatoric + epistemic UQ with VI
+class PPOU_NetSimulator(POU_NetSimulator, PPOU_net):
+    def __init__(self, *args, simulator: Sim=UQ_Sim(), **kwd_args):
+        super().__init__(*args, simulator=simulator, **kwd_args)
 
 # TODO: load & store dataset in one big hdf5 file (more efficient I/O)
 # Verified to work: 8/23/24

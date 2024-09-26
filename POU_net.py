@@ -202,12 +202,13 @@ class POU_net(L.LightningModule):
 
 import model_agnostic_BNN
 
-class PPOU_net(POU_net): # Not really, it's POU+VI(gating)
+class PPOU_net(POU_net): # Not really, it's POU+VI
     def __init__(self, n_inputs, n_outputs, *args, **kwd_args):
-        # make VI reparameterized gating function (only this will fit into memory)
-        make_gating_net = lambda *args, **kwd_args: model_agnostic_BNN.model_agnostic_dnn_to_bnn(FieldGatingNet(*args, **kwd_args))
-        super().__init__(n_inputs*2, n_outputs*2, make_gating_net=make_gating_net, *args, **kwd_args)
         # we double output channels to have the sigma predictions too
+        super().__init__(n_inputs*2, n_outputs*2, *args, **kwd_args)
+
+        # make VI reparameterize our entire model
+        model_agnostic_BNN.model_agnostic_dnn_to_bnn(self)
 
     def forward(self, X, Y=None):
         if Y is None: Y = torch.zeros(1).expand(*X.shape)
