@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import pytorch_lightning as L
 
 from lightning_utils import *
-from POU_net import POU_net
+from POU_net import POU_net, PPOU_net
 
 rfft = functools.partial(torch.fft.rfftn,dim=[0,1,2])
 irfft = functools.partial(torch.fft.irfftn,dim=[0,1,2])
@@ -136,7 +136,7 @@ class UQ_Sim(Sim):
     # This needs to output intermediate time-steps to get full loss!
     def evolve(self,u0,n,intermediate_outputs=False, intermediate_output_stride=1):
         u = u0
-        outputs = []
+        u_outputs = []
         uq_outputs = []
         NSupd = torch.vmap(self.NSupd) # only this needs vmapping, NeuralOp is already batched
         if len(u.shape)==4: # all permute ops above assume 4 dims (before vmap)
@@ -145,13 +145,16 @@ class UQ_Sim(Sim):
         for i in range(n):
             u, uq = self.op.forward(NSupd(u), uq)
             if intermediate_outputs and i%intermediate_output_stride==0:
-                outputs.append(u)
+                u_outputs.append(u)
                 uq_outputs.append(uq)
-        outputs = u, uq
-        if intermediate_outputs: # time dim is the last dim (if it exists)
-            outputs = torch.stack(outputs,axis=-1), torch.stack(uq_outputs,axis=-1)
-        return outputs.squeeze() if len(u.shape)>len(u0.shape) else outputs
+
         # remove artificial batch dimension only if it was added
+        maybe_squeeze = lambda output: output.squeeze() if len(u.shape)>len(u0.shape) else output
+
+        if intermediate_outputs: # time dim is the last dim (if it exists)
+            return maybe_squeeze(torch.stack(u_outputs,axis=-1)), \
+                    maybe_squeeze(torch.stack(uq_outputs,axis=-1))
+        else: return maybe_squeeze(u), maybe_squeeze(uq)
 
 class POU_NetSimulator(POU_net):
     ''' Combines the POU_net with the raw Sim[ulator] class (internally). '''

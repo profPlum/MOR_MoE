@@ -211,11 +211,11 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
         model_agnostic_BNN.model_agnostic_dnn_to_bnn(self)
 
     def forward(self, X, Y=None):
-        if Y is None: Y = torch.zeros(1).expand(*X.shape)
+        if Y is None: Y = torch.zeros(1,device=X.device, dtype=X.dtype).expand(*X.shape)
         X = torch.cat([X,Y], axis=1)
         pred = super().forward(X)
         mu_pred = pred[:, :pred.shape[1]//2]
-        sigma_pred = pred[:, pred.shape[1]//2:]
+        sigma_pred = F.softplus(pred[:, pred.shape[1]//2:])
         return mu_pred, sigma_pred
 
     def training_step(self, batch, batch_idx=None, val=False):
@@ -223,8 +223,8 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
         y_pred_mu, y_pred_sigma = self(X)
 
         num_batches = self.trainer.estimated_stepping_batches//self.trainer.max_epochs # sneakily extract from PL
-        kl_loss = self.gating_net.get_kl_loss()/num_batches # (weighted)
-        loss = model_agnostic_BNN.nll_regression(y_pred_mu, y, y_pred_sigma=y_pred_sigma) + kl_loss # posterior loss
+        kl_loss = self.get_kl_loss()/(num_batches*y.numel()) # (weighted)
+        loss = model_agnostic_BNN.nll_regression(y_pred_mu, y, y_pred_sigma=y_pred_sigma, reduction=torch.mean) + kl_loss # posterior loss
 
         self.log(f'{val*"val_"}loss', loss.item(), sync_dist=val, prog_bar=True)
         self.log(f'{val*"val_"}kl_loss', kl_loss.item(), sync_dist=val, prog_bar=True)
