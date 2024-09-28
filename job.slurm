@@ -7,13 +7,13 @@
 #SBATCH --ntasks-per-node=1                  # Tasks per node (usually 1 for PyTorch)
 #SBATCH --time=1-00:00:00                    # Maximum runtime (HH:MM:SS)
 #SBATCH --partition=glinda                   # Partition name
-#SBATCH --exclude gn78,gn71
+#SBATCH --exclude gn78,gn71 #gn111,gn16 #both these nodes have caused timeouts before, maybe exclude?
 
 # Load modules or environment
 . ~/.bashrc
 conda activate uqops+proxy
 module load cuda/11.8.0
-export NCCL_DEBUG=INFO
+#export NCCL_DEBUG=INFO
 
 # Optional: Debugging info
 echo "Job started on $(hostname) at $(date)"
