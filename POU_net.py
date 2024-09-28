@@ -20,7 +20,7 @@ class FieldGatingNet(BasicLightningRegressor):
     Also it will implicitly add the option of a 'null expert' (an expert that just predicts 0).
     And it adds some small amount of noise to the gating logits to encourage exploration.
     """
-    def __init__(self, n_inputs, n_experts, ndims, k=2, noise_sd=0.005, **kwd_args):
+    def __init__(self, n_inputs, n_experts, ndims, k=2, noise_sd=0.05, **kwd_args):
         super().__init__()
         self.k = min(k, n_experts) # for (global) top-k selection
         if k<2 and n_experts>=2: warnings.warn('K<2 means the gating network might not learn to gate properly.')
@@ -60,16 +60,18 @@ class FieldGatingNet(BasicLightningRegressor):
         pos_encodings = pos_encodings.expand(X.shape[0], *pos_encodings.shape[1:])
         #X = torch.cat([X, pos_encodings], dim=1)
         gating_logits = self._gating_net(pos_encodings)
+        global_logits = torch.randn(gating_logits.shape[1], requires_grad=False) # random selection
 
-        # global average pooling to identify top-k global experts (across spatial & BATCH dims!)
-        global_logits = torch.mean(gating_logits, dim=[0]+list(range(-self.ndims,0)))
-        if self.training:
-            global_logits = global_logits + torch.randn_like(global_logits, requires_grad=False)*self.noise_sd
+        ## global average pooling to identify top-k global experts (across spatial & BATCH dims!)
+        #global_logits = torch.mean(gating_logits, dim=[0]+list(range(-self.ndims,0)))
+        #if self.training:
+        #    #global_logits = F.softmax(global_logits) # makes it easier to guess good noise values (secretly no longer logits)
+        #    global_logits = torch.randn_like(global_logits, requires_grad=False)*self.noise_sd + global_logits
         assert len(global_logits.shape)==1 # 1D
 
-        if random.random() < 0.01: # keep an eye on this it seems suspiciously low...
-            global_logit_sd = (gating_logits.var(dim=[0]+list(range(-self.ndims,0))).mean()**0.5).item()
-            print(f'{global_logit_sd=}')
+        #if random.random() < 0.01: # keep an eye on this it seems suspiciously low...
+        #    global_logit_sd = (gating_logits.var(dim=[0]+list(range(-self.ndims,0))).mean()**0.5).item()
+        #    print(f'{global_logit_sd=}')
 
         # add in the obligitory null expert (always the last index in the softmax)
         global_topk = torch.topk(global_logits[:-1], self.k, dim=0).indices # we don't want to select null expert twice!
