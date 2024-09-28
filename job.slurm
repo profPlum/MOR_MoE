@@ -28,8 +28,9 @@ srun nvidia-smi
 # 500 epochs takes about 21.5 hours (with 8 nodes, measured: 9/12/24)
 # 100 epochs takes about 9 hours (with 4 nodes, measured 9/16/24)
 export MAX_EPOCHS=500
-export LR=5e-4 # this is 8x higher than theory suggests (it is only possible b/c grad clip)
-export GRAD_CLIP=2e-3
+export LR=2.5e-4
+export GRAD_CLIP=6.35e-3
+export PRIOR_SIGMA=0.2
 export OPTIM='Adam'
 export RLoP=0
 export ONE_CYCLE=$((! RLoP)) # we can set both to false to use CosineWarmRestarts, but lets keep it simple

@@ -16,6 +16,7 @@ gradient_clip_val=float(os.environ.get('GRAD_CLIP', 0.5))
 ckpt_path=os.environ.get('CKPT_PATH', None)
 make_optim=eval(f"torch.optim.{os.environ.get('OPTIM', 'Adam')}")
 
+prior_sigma=float(os.environ.get('PRIOR_SIGMA', 1.0))
 T_max: int=1 # T_0 for CosAnnealing+WarmRestarts
 one_cycle=bool(int(os.environ.get('ONE_CYCLE', False))) # scheduler
 three_phase=bool(int(os.environ.get('THREE_PHASE', False))) # adds decay after inital bump
@@ -73,7 +74,7 @@ if __name__=='__main__':
 
     # train model
     if scale_lr: lr *= num_nodes
-    model = PPOU_NetSimulator(ndims, ndims, n_experts, ndims=ndims, lr=lr, make_optim=make_optim, T_max=T_max, #make_gating_net=gating_net,
+    model = PPOU_NetSimulator(ndims, ndims, n_experts, ndims=ndims, lr=lr, make_optim=make_optim, T_max=T_max, prior_cfg={'prior_sigma': prior_sigma},
                               one_cycle=one_cycle, three_phase=three_phase, RLoP=RLoP, RLoP_factor=RLoP_factor, RLoP_patience=RLoP_patience,
                               n_steps=time_chunking-1, k_modes=k_modes)
 
