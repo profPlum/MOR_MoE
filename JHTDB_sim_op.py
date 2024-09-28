@@ -185,10 +185,15 @@ class POU_NetSimulator(POU_net):
         finally:
             self.n_steps=org_steps
 
+import torch.nn.utils.parametrize as parametrize
+
 # This is it! It should do full aleatoric + epistemic UQ with VI
 class PPOU_NetSimulator(POU_NetSimulator, PPOU_net):
     def __init__(self, *args, simulator: Sim=UQ_Sim(), **kwd_args):
         super().__init__(*args, simulator=simulator, **kwd_args)
+    def forward(self, *args, **kwd_args):
+        with parametrize.cached():
+            return super().forward(*args, **kwd_args)
 
 # TODO: load & store dataset in one big hdf5 file (more efficient I/O)
 # Verified to work: 8/23/24
