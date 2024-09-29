@@ -39,7 +39,7 @@ class Sim(L.LightningModule):
     (the code needs channel dim last but pytorch needs it right after batch dim),
     in a way that is *compatible with vmap* for batching!!
     '''
-    def __init__(self,nx=103,ny=26,nz=77,Lx=3*np.pi,Ly=2.0,Lz=8*np.pi,nu=5e-5,dt=0.0013):
+    def __init__(self,nx=103,ny=26,nz=77,Lx=8*np.pi,Ly=2.0,Lz=3*np.pi,nu=5e-5,dt=0.0065):
         ''' Defaults are set to the values needed for JHTDB channel flow.
             Also note that nu:=viscosity, Lx,Ly,Lz:=domain dimensions (physical),
             and nx,ny,nz:=grid dimensions (virtual) '''
