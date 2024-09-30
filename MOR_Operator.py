@@ -70,11 +70,14 @@ class MOR_Layer(BasicLightningRegressor):
         # Pad the g_mode_params (this will drop extra modes)
         g = torch.view_as_complex(self.g_mode_params) # Convert to complex dtype (makes shape "correct")
         g_padded_shape = list(g.shape[:-self.ndims])+list(u_fft.shape[-self.ndims:]) # fuse shapes
-        g_padded = torch.zeros(*g_padded_shape, dtype=g.dtype, device=g.device)
 
         # insert G into G_padded s.t. it applies a low pass filter
-        for corner in make_rfft_corner_slices(g_padded.shape, g.shape, fft_dims=fft_dims, verbose=False):
-            g_padded[corner] = g[corner]
+        if g.shape==g_padded_shape:
+            g_padded=g # special optimization to juice out an extra time-step
+        else:
+            g_padded = torch.zeros(*g_padded_shape, dtype=g.dtype, device=g.device)
+            for corner in make_rfft_corner_slices(g_padded.shape, g.shape, fft_dims=fft_dims, verbose=False):
+                g_padded[corner] = g[corner]
         g_padded = g_padded[None] # add batch dimension
 
         # Apply learned weights in the Fourier domain (einsum does channel reduction)
