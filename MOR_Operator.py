@@ -72,7 +72,7 @@ class MOR_Layer(BasicLightningRegressor):
         g_padded_shape = list(g.shape[:-self.ndims])+list(u_fft.shape[-self.ndims:]) # fuse shapes
 
         # insert G into G_padded s.t. it applies a low pass filter
-        if g.shape==g_padded_shape:
+        if tuple(g.shape)==tuple(g_padded_shape):
             g_padded=g # special optimization to juice out an extra time-step
         else:
             g_padded = torch.zeros(*g_padded_shape, dtype=g.dtype, device=g.device)
