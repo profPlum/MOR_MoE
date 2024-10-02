@@ -75,6 +75,7 @@ class MOR_Layer(BasicLightningRegressor):
         if tuple(g.shape)==tuple(g_padded_shape):
             g_padded=g # special optimization to juice out an extra time-step
         else:
+            warnings.warn('Not using special optimization! tuple(g.shape)!=tuple(g_padded_shape)')
             g_padded = torch.zeros(*g_padded_shape, dtype=g.dtype, device=g.device)
             for corner in make_rfft_corner_slices(g_padded.shape, g.shape, fft_dims=fft_dims, verbose=False):
                 g_padded[corner] = g[corner]

@@ -176,7 +176,6 @@ class POU_NetSimulator(POU_net):
 
     def validation_step(self, batch, batch_idx, dataloader_idx=0):
         X, y = batch # y.shape==[batch, channel, x, y, z, time]
-        print(f'{dataloader_idx=}')
 
         try:
             org_steps=self.n_steps

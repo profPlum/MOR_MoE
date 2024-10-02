@@ -7,7 +7,7 @@ from torch.optim import lr_scheduler
 
 k_modes=[103,26,77] # can be a list
 n_experts: int=2 # number of experts in MoE
-time_chunking: int=3 # how many self-aware recursive steps to take
+time_chunking: int=5 # how many self-aware recursive steps to take
 batch_size: int=1 # batch size, with VI experts we can only fit 1 batch on 20 GPUs!
 scale_lr=True # scale with DDP batch_size
 lr: float=float(os.environ.get('LR', 0.00025)) # learning rate
@@ -33,7 +33,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pytorch_lightning as L
 import torch.nn.functional as F
-torch.autograd.set_detect_anomaly(True)
+#torch.autograd.set_detect_anomaly(True)
 torch.set_float32_matmul_precision('medium')
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
@@ -50,7 +50,7 @@ import utils
 
 class MemMonitorCallback(L.Callback):
     def on_train_epoch_end(self, trainer, pl_module):
-        utils.report_cuda_memory_usage(clear=True)
+        utils.report_cuda_memory_usage(clear=False)
     def on_validation_epoch_end(self, trainer, pl_module):
         utils.report_cuda_memory_usage(clear=False)
 
@@ -83,17 +83,19 @@ if __name__=='__main__':
     from pytorch_lightning.plugins.environments import SLURMEnvironment
     # SLURMEnvironment plugin enables auto-requeue
 
-    logger = TensorBoardLogger("lightning_logs", name=os.environ.get("SLURM_JOB_NAME", 'JHTDB_MOR_MoE'))#,
-                                #version=os.environ.get("SLURM_JOB_ID", None))
+    logger = TensorBoardLogger("lightning_logs", name=os.environ.get("SLURM_JOB_NAME", 'JHTDB_MOR_MoE'),
+                                version=os.environ.get("SLURM_JOB_ID", None))
     profiler = L.profilers.PyTorchProfiler(profile_memory=True, with_stack=True,
                                            on_trace_ready=torch.profiler.tensorboard_trace_handler(logger.log_dir))
-                                           #schedule=torch.profiler.schedule(wait=2, warmup=2, active=99999, repeat=0)) # TODO: remove when done debugging
+                                           #schedule=torch.profiler.schedule(wait=2, warmup=2, active=6, repeat=0))
+                                           ## TODO: remove when done debugging
 
-    # Activation checkpointing doesn't work
-    strategy = L.strategies.FSDPStrategy() #activation_checkpointing_policy={MOR_Layer})#, nn.Conv3d})
+    # This is needed to avoid problem caused by large model size
+    model_checkpoint_callback=L.callbacks.ModelCheckpoint(save_weights_only=True)
+    strategy = L.strategies.FSDPStrategy(state_dict_type='sharded')
     trainer = L.Trainer(max_epochs=max_epochs, accelerator='gpu', strategy=strategy, num_nodes=num_nodes,
                         gradient_clip_val=gradient_clip_val, gradient_clip_algorithm='value', # regularization isn't good for OneCycleLR
-                        profiler=profiler, plugins=[SLURMEnvironment()], logger=logger, callbacks=[MemMonitorCallback()])
+                        profiler=profiler, logger=logger, plugins=[SLURMEnvironment()], callbacks=[model_checkpoint_callback])
 
     val_dataloaders = [val_loader] #, val_long_loader] # long validation loader causes various problems with profiler & GPU utilization...
     trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_dataloaders, ckpt_path=ckpt_path)
