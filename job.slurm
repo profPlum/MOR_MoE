@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=OneCycle3_Clip=2e-3
+#SBATCH --job-name=VI_OneCycle3_Clip=2e-3
 #SBATCH --output=logs/%x_%j.out              # Output file (%x: job-name, %j: job-id)
 #SBATCH --error=logs/%x_%j.err               # Error file (%x: job-name, %j: job-id)
 #SBATCH --exclusive
@@ -27,9 +27,9 @@ srun nvidia-smi
 
 # 500 epochs takes about 21.5 hours (with 8 nodes, measured: 9/12/24)
 # 100 epochs takes about 9 hours (with 4 nodes, measured 9/16/24)
-export MAX_EPOCHS=500
-export LR=2.5e-4
-export GRAD_CLIP=6.35e-3
+export MAX_EPOCHS=333
+export LR=2.5e-4 # this is 8x higher than theory suggests (it is only possible b/c grad clip)
+export GRAD_CLIP=2.0e-3
 export PRIOR_SIGMA=0.2
 export OPTIM='Adam'
 export RLoP=0
