@@ -72,11 +72,14 @@ if __name__=='__main__':
     num_nodes = int(os.environ.get('SLURM_STEP_NUM_NODES', 1)) # can be auto-detected by slurm
     print(f'{num_nodes=}')
 
+    # secretly insider the load from checkpoint api if needed
+    SimModelClass = (lambda **kwd_args: PPOU_NetSimulator.load_from_checkpoint(ckpt_path, **kwd_args)) if ckpt_path else PPOU_NetSimulator
+
     # train model
     if scale_lr: lr *= num_nodes
-    model = PPOU_NetSimulator(ndims, ndims, n_experts, ndims=ndims, lr=lr, make_optim=make_optim, T_max=T_max, prior_cfg={'prior_sigma': prior_sigma},
-                              one_cycle=one_cycle, three_phase=three_phase, RLoP=RLoP, RLoP_factor=RLoP_factor, RLoP_patience=RLoP_patience,
-                              n_steps=time_chunking-1, k_modes=k_modes)
+    model = SimModelClass(n_inputs=ndims, n_outputs=ndims, n_experts=n_experts, ndims=ndims, lr=lr, make_optim=make_optim, T_max=T_max,
+                          one_cycle=one_cycle, three_phase=three_phase, RLoP=RLoP, RLoP_factor=RLoP_factor, RLoP_patience=RLoP_patience,
+                          n_steps=time_chunking-1, k_modes=k_modes, prior_cfg={'prior_sigma': prior_sigma})
 
     import os, signal
     from pytorch_lightning.loggers import TensorBoardLogger
@@ -98,4 +101,4 @@ if __name__=='__main__':
                         profiler=profiler, logger=logger, plugins=[SLURMEnvironment()], callbacks=[model_checkpoint_callback])
 
     val_dataloaders = [val_loader] #, val_long_loader] # long validation loader causes various problems with profiler & GPU utilization...
-    trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_dataloaders, ckpt_path=ckpt_path)
+    trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_dataloaders) #, ckpt_path=ckpt_path)
