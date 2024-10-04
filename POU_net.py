@@ -7,6 +7,8 @@ from lightning_utils import *
 import MOR_Operator
 import warnings
 import random
+from contextlib import contextmanager
+
 
 # Verified to work: 7/18/24
 # Double verified to work (and reproduce specific partition)
@@ -28,20 +30,32 @@ class FieldGatingNet(BasicLightningRegressor):
         # NOTE: setting n_experts=n_experts+1 inside the gating_net implicitly adds a "ZeroExpert"
         #self._gating_net = MOR_Operator.MOR_Operator(n_inputs+ndims, n_experts+1, ndims=ndims, **kwd_args)
         self._gating_net = CNN(ndims, n_experts+1, 1, ndims=ndims)#, **kwd_args)
-        self._cached_shape = None
-        self._cached_mesh_grid = None
+        self._cache_forward=False # whether we should cache the forward call's outputs
+        self._cached_forward_results=None # the cached forward call's outputs
+        self._cached_forward_shape=None # for sanity check
+
+        # positional encoding cache vars
+        self._cached_mesh_shape = None # shape of the X for the cache
+        self._cached_mesh_grid = None # cached mesh grid (aka positional encodings)
+
     def _make_positional_encodings(self, shape):
         # Create coordinate grids using torch.meshgrid
-        if shape == self._cached_shape:
+        if tuple(shape) == self._cached_mesh_shape:
             return self._cached_mesh_grid
         assert len(shape)==self.ndims
         coords = [torch.linspace(0,1,steps=dim) for dim in shape]
         mesh = torch.meshgrid(*coords, indexing='ij')
         pos_encodings = torch.stack(mesh)[None].to(self.device) # [None] adds batch dim
-        self._cached_shape = shape
+        self._cached_mesh_shape = tuple(shape)
         self._cached_mesh_grid = pos_encodings
         return pos_encodings
+
     def forward(self, X):
+        # this cache assumes the gating network takes no input (which currently it doesn't)
+        if tuple(X.shape)==self._cached_forward_shape:
+            assert self._cached_forward_results is not None
+            return self._cached_forward_results
+
         pos_encodings = self._make_positional_encodings(X.shape[-self.ndims:])
         pos_encodings = pos_encodings.expand(X.shape[0], *pos_encodings.shape[1:])
         #X = torch.cat([X, pos_encodings], dim=1)
@@ -66,7 +80,22 @@ class FieldGatingNet(BasicLightningRegressor):
         # after the 'null expert' has influenced the softmax normalization
         # it can disappear (we won't waste any flops on it...)
 
-        return gating_weights, global_topk
+        # return results
+        results = gating_weights, global_topk
+        if self._cache_forward:
+            self._cached_forward_results=results
+            self._cached_forward_shape=tuple(X.shape)
+        return results
+
+    @contextmanager
+    def cached_gating_weights(self):
+        try:
+            self._cache_forward=True # tell forward to cache
+            yield # yeild nothing during with statement
+        finally:
+            self._cache_forward=False
+            self._cached_forward_results=None # reset cache
+            self._cached_forward_shape=None # reset cache
 
 class POU_net(BasicLightningRegressor):
     ''' POU_net minus the useless L2 regularization '''
