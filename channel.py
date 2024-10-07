@@ -94,7 +94,7 @@ if __name__=='__main__':
                                            ## TODO: remove when done debugging
 
     # This is needed to avoid problem caused by large model size
-    model_checkpoint_callback=L.callbacks.ModelCheckpoint(save_weights_only=True)
+    model_checkpoint_callback=L.callbacks.ModelCheckpoint(save_weights_only=True, monitor='loss')
     strategy = L.strategies.FSDPStrategy(state_dict_type='sharded')
     trainer = L.Trainer(max_epochs=max_epochs, accelerator='gpu', strategy=strategy, num_nodes=num_nodes,
                         gradient_clip_val=gradient_clip_val, gradient_clip_algorithm='value', # regularization isn't good for OneCycleLR
