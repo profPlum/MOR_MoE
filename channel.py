@@ -16,6 +16,7 @@ gradient_clip_val=float(os.environ.get('GRAD_CLIP', 0.5))
 ckpt_path=os.environ.get('CKPT_PATH', None)
 make_optim=eval(f"torch.optim.{os.environ.get('OPTIM', 'Adam')}")
 
+use_VI = bool(int(os.environ.get('VI', True))) # whether to enable VI
 prior_sigma=float(os.environ.get('PRIOR_SIGMA', 1.0))
 T_max: int=1 # T_0 for CosAnnealing+WarmRestarts
 one_cycle=bool(int(os.environ.get('ONE_CYCLE', False))) # scheduler
@@ -25,7 +26,6 @@ RLoP_factor=0.9
 RLoP_patience=25
 
 # Import External Libraries
-
 import os
 import torch
 from torch import nn
@@ -54,6 +54,11 @@ class MemMonitorCallback(L.Callback):
     def on_validation_epoch_end(self, trainer, pl_module):
         utils.report_cuda_memory_usage(clear=False)
 
+# wrapper to nullify the prior_cfg kwd_arg (for compatibility)
+class POU_NetSimulator(POU_NetSimulator):
+    def __init__(self, *args, prior_cfg={}, **kwd_args):
+        super().__init__(*args, **kwd_args)
+
 if __name__=='__main__':
     # setup dataset
     dataset = JHTDB_Channel('data/turbulence_output', time_chunking=time_chunking)
@@ -72,8 +77,11 @@ if __name__=='__main__':
     num_nodes = int(os.environ.get('SLURM_STEP_NUM_NODES', 1)) # can be auto-detected by slurm
     print(f'{num_nodes=}')
 
-    # secretly insider the load from checkpoint api if needed
-    SimModelClass = (lambda **kwd_args: PPOU_NetSimulator.load_from_checkpoint(ckpt_path, **kwd_args)) if ckpt_path else PPOU_NetSimulator
+    SimModelClass = PPOU_NetSimulator if use_VI else POU_NetSimulator # VI is optional
+    if ckpt_path:
+        SimModelClass_ = SimModelClass
+        SimModelClass = lambda **kwd_args: SimModelClass_.load_from_checkpoint(ckpt_path, **kwd_args)
+    # secretly use the load from checkpoint api if needed
 
     # train model
     if scale_lr: lr *= num_nodes
