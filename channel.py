@@ -56,7 +56,7 @@ class MemMonitorCallback(L.Callback):
 
 # wrapper to nullify the prior_cfg kwd_arg (for compatibility)
 class POU_NetSimulator(POU_NetSimulator):
-    def __init__(self, *args, prior_cfg={}, train_dataset=None, **kwd_args):
+    def __init__(self, *args, prior_cfg={}, train_dataset_size=None, **kwd_args):
         super().__init__(*args, **kwd_args)
 
 if __name__=='__main__':
@@ -87,7 +87,8 @@ if __name__=='__main__':
     if scale_lr: lr *= num_nodes
     model = SimModelClass(n_inputs=ndims, n_outputs=ndims, n_experts=n_experts, ndims=ndims, lr=lr, make_optim=make_optim, T_max=T_max,
                           one_cycle=one_cycle, three_phase=three_phase, RLoP=RLoP, RLoP_factor=RLoP_factor, RLoP_patience=RLoP_patience,
-                          n_steps=time_chunking-1, k_modes=k_modes, prior_cfg={'prior_sigma': prior_sigma}, train_dataset=train_dataset)
+                          n_steps=time_chunking-1, k_modes=k_modes, prior_cfg={'prior_sigma': prior_sigma},
+                          train_dataset_size=model_agnostic_BNN.get_dataset_size(train_dataset))
 
     import os, signal
     from pytorch_lightning.loggers import TensorBoardLogger
@@ -98,7 +99,7 @@ if __name__=='__main__':
                                 version=os.environ.get("SLURM_JOB_ID", None))
     profiler = L.profilers.PyTorchProfiler(profile_memory=True, with_stack=True,
                                            on_trace_ready=torch.profiler.tensorboard_trace_handler(logger.log_dir),
-                                           schedule=torch.profiler.schedule(wait=12, warmup=2, active=6, repeat=3))
+                                           schedule=torch.profiler.schedule(wait=10, warmup=4, active=6, repeat=3))
 
     # This is needed to avoid problem caused by large model size
     model_checkpoint_callback=L.callbacks.ModelCheckpoint(save_weights_only=True, monitor='loss')

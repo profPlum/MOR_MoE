@@ -117,9 +117,15 @@ class _BayesianParameterization(nn.Module):
     def kl_loss(self): # this method apparently is sufficient to work with get_kl_loss(model) as-is!
         return self._kl_loss
 
+def get_dataset_size(train_dataset: torch.utils.data.Dataset):
+    X, y = train_dataset[0]
+    # TODO: use model(X) instead of y to make it agnostic to classification and regression
+    assert torch.is_floating_point(y), 'classification datasets are implicitly sparse which makes this fail...'
+    return len(train_dataset)*y.numel()
+
 # NOTE: this is essentially the new dnn_to_bnn() but also more versatile
 # NOTE: if you pass in train_dataset and it is non-sparse (e.g. floating point regression) then it will automatically weight the get_kl_loss method!
-def model_agnostic_dnn_to_bnn(dnn: nn.Module, train_dataset: torch.utils.data.Dataset=None, prior_cfg: dict = {}):
+def model_agnostic_dnn_to_bnn(dnn: nn.Module, train_dataset_size: int=None, prior_cfg: dict = {}):
     if 'Bayesian' in type(dnn).__name__: return
 
     # apply _BayesianParameterization
@@ -137,11 +143,11 @@ def model_agnostic_dnn_to_bnn(dnn: nn.Module, train_dataset: torch.utils.data.Da
         with parametrize.cached():
             return super(type(self), self).forward(*args, **kwargs)
     kl_weight=1.0
-    if train_dataset:
-        X, y = train_dataset[0]
-        assert torch.is_floating_point(y) # classification datasets are implicitly sparse which makes this fail...
-        kl_weight = 1.0/(len(train_dataset)*y.numel())
-    else: warnings.warn("you didn't pass in the train_dataset so get_kl_loss() values will be unweighted! (make sure to weight them yourself)")
+    if isinstance(train_dataset_size, torch.utils.data.Dataset):
+        # TODO: use model(X) instead of y to make it agnostic to classification and regression
+        train_dataset_size=get_dataset_size(train_dataset_size)
+    if train_dataset_size: kl_weight = 1.0/train_dataset_size
+    else: warnings.warn("you didn't pass in the train_dataset_size so get_kl_loss() values will be unweighted! (make sure to weight them yourself)")
     _get_kl_loss = lambda self: get_kl_loss(self)*kl_weight
     methods =  {'forward': forward, 'get_kl_loss': _get_kl_loss}
     dnn.__class__  = type(f'Bayesian{dnn.__class__.__name__}', (type(dnn),), methods)
@@ -150,11 +156,11 @@ def model_agnostic_dnn_to_bnn(dnn: nn.Module, train_dataset: torch.utils.data.Da
 # GOTCHA: This is still technically incorrect *with MSE* because NLL loss is supposed to sum across features too...
 # For correct usage (with MSE): dataset_size = prod(Y.shape) # s.t. Y is the GLOBAL output tensor (i.e. not divided into tensors!)
 # TODO: Test! It could work to replace more complicated existing interface...
-def model_agnostic_dnn_to_bnn_auto_KL(dnn: nn.Module, dataset_size=None,
+def model_agnostic_dnn_to_bnn_auto_KL(dnn: nn.Module, train_dataset_size=None,
                                       prior_weight=1.0, prior_cfg: dict = {}):
     if 'Bayesian' in type(dnn).__name__: return
-    if dataset_size is None: # default assumption becomes that model parameters & dataset size are balanced
-        dataset_size = len(torch.nn.utils.parameters_to_vector(dnn.parameters()))
+    if train_dataset_size is None: # default assumption becomes that model parameters & dataset size are balanced
+        train_dataset_size = len(torch.nn.utils.parameters_to_vector(dnn.parameters()))
         # ...this is equivalent to KL taking the mean across parameters
 
     # apply _BayesianParameterization
@@ -171,7 +177,7 @@ def model_agnostic_dnn_to_bnn_auto_KL(dnn: nn.Module, dataset_size=None,
     def forward(self, *args, **kwargs):
         with parametrize.cached():
             output = super(type(self), self).forward(*args, **kwargs)
-            if self.training: (prior_weight*self.get_kl_loss()/dataset_size).backward()
+            if self.training: (prior_weight*self.get_kl_loss()/train_dataset_size).backward()
         return output
     methods =  {'forward': forward, 'get_kl_loss': get_kl_loss}
     dnn.__class__  = type(f'Bayesian{dnn.__class__.__name__}', (type(dnn),), methods)
@@ -231,7 +237,6 @@ class CummVar:
             return self(np.atleast_1d(X))
             # If X *is just a python scalar* then convert to numpy 1d array (of length 1)
 
-
 # More efficient now! It doesn't rely on pred distribution!!
 # Verified to work 3/15/24
 def get_BNN_pred_moments(bnn_model, x_inputs, n_samples=100, no_grad=True, verbose=True):
@@ -265,7 +270,6 @@ def _distance(p1, p2, reduce_start_dim=2):
     distance = squared_difference.sum(axis=-1)**0.5
     print('distance.shape:', distance.shape)
     return distance
-
 
 # Verified to work: 5/20/21
 # TODO: Implement a technically more rigorous approach (which doesn't assume spherical predictive distribution)
