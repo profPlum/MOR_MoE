@@ -2,6 +2,7 @@ import os, random
 import torch, numpy as np
 from torch import nn
 import torch.nn.utils.parametrize as parametrize
+import warnings
 
 # NOTE: We changed it to use sum because the prior p(theta)=p(theta_0)p(theta_1)...p(theta_n) is a product of gaussians
 # which means that more parameters will increase the KL loss. Also KL divergence takes a log which implies the sum.
@@ -117,7 +118,8 @@ class _BayesianParameterization(nn.Module):
         return self._kl_loss
 
 # NOTE: this is essentially the new dnn_to_bnn() but also more versatile
-def model_agnostic_dnn_to_bnn(dnn: nn.Module, prior_cfg: dict = {}):
+# NOTE: if you pass in train_dataset and it is non-sparse (e.g. floating point regression) then it will automatically weight the get_kl_loss method!
+def model_agnostic_dnn_to_bnn(dnn: nn.Module, train_dataset: torch.utils.data.Dataset=None, prior_cfg: dict = {}):
     if 'Bayesian' in type(dnn).__name__: return
 
     # apply _BayesianParameterization
@@ -134,7 +136,14 @@ def model_agnostic_dnn_to_bnn(dnn: nn.Module, prior_cfg: dict = {}):
     def forward(self, *args, **kwargs):
         with parametrize.cached():
             return super(type(self), self).forward(*args, **kwargs)
-    methods =  {'forward': forward, 'get_kl_loss': get_kl_loss}
+    kl_weight=1.0
+    if train_dataset:
+        X, y = train_dataset[0]
+        assert torch.is_floating_point(y) # classification datasets are implicitly sparse which makes this fail...
+        kl_weight = 1.0/(len(train_dataset)*y.numel())
+    else: warnings.warn("you didn't pass in the train_dataset so get_kl_loss() values will be unweighted! (make sure to weight them yourself)")
+    _get_kl_loss = lambda self: get_kl_loss(self)*kl_weight
+    methods =  {'forward': forward, 'get_kl_loss': _get_kl_loss}
     dnn.__class__  = type(f'Bayesian{dnn.__class__.__name__}', (type(dnn),), methods)
     return dnn
 

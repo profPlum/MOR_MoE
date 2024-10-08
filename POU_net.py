@@ -182,7 +182,7 @@ class POU_net(L.LightningModule):
         metrics = self.val_metrics if val else self.train_metrics
 
         # simple helper does everything needed to log one metric!
-        def log_metric(name, metric=None, on_step=val, on_epoch=True, **kwd_args):
+        def log_metric(name, metric=None, on_step=False, on_epoch=True, **kwd_args):
             if metric is None: metric = getattr(metrics, name)
             if on_step: metric(y_pred, y) # update metric
             else: metric.update(y_pred, y)
@@ -205,12 +205,12 @@ class POU_net(L.LightningModule):
 import model_agnostic_BNN
 
 class PPOU_net(POU_net): # Not really, it's POU+VI
-    def __init__(self, n_inputs, n_outputs, *args, prior_cfg={}, **kwd_args):
+    def __init__(self, n_inputs, n_outputs, train_dataset, *args, prior_cfg={}, **kwd_args):
         # we double output channels to have the sigma predictions too
         super().__init__(n_inputs*2, n_outputs*2, *args, **kwd_args)
 
         # make VI reparameterize our entire model
-        model_agnostic_BNN.model_agnostic_dnn_to_bnn(self, prior_cfg=prior_cfg)
+        model_agnostic_BNN.model_agnostic_dnn_to_bnn(self, train_dataset, prior_cfg=prior_cfg)
 
     def forward(self, X, Y=None):
         if Y is None: Y = torch.zeros(1,device=X.device, dtype=X.dtype).expand(*X.shape)
@@ -224,8 +224,8 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
         X, y = batch
         y_pred_mu, y_pred_sigma = self(X)
 
-        num_batches = self.trainer.estimated_stepping_batches//self.trainer.max_epochs # sneakily extract from PL
-        kl_loss = self.get_kl_loss()/(num_batches*y.numel()) # (weighted)
+        #num_batches = len(self.trainer.train_dataloader.dataset)//self.trainer.train_dataloader.batch_size # sneakily extract from PL
+        kl_loss = self.get_kl_loss()#/(num_batches*y.numel()) # (weighted)
         loss = model_agnostic_BNN.nll_regression(y_pred_mu, y, y_pred_sigma=y_pred_sigma, reduction=torch.mean) + kl_loss # posterior loss
 
         self.log(f'{val*"val_"}loss', loss.item(), sync_dist=val, prog_bar=True)

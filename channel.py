@@ -23,7 +23,7 @@ one_cycle=bool(int(os.environ.get('ONE_CYCLE', False))) # scheduler
 three_phase=bool(int(os.environ.get('THREE_PHASE', False))) # adds decay after inital bump
 RLoP=bool(int(os.environ.get('RLoP', False))) # scheduler
 RLoP_factor=0.9
-RLoP_patience=25
+RLoP_patience=15
 
 # Import External Libraries
 import os
@@ -56,18 +56,18 @@ class MemMonitorCallback(L.Callback):
 
 # wrapper to nullify the prior_cfg kwd_arg (for compatibility)
 class POU_NetSimulator(POU_NetSimulator):
-    def __init__(self, *args, prior_cfg={}, **kwd_args):
+    def __init__(self, *args, prior_cfg={}, train_dataset=None, **kwd_args):
         super().__init__(*args, **kwd_args)
 
 if __name__=='__main__':
     # setup dataset
     dataset = JHTDB_Channel('data/turbulence_output', time_chunking=time_chunking)
-    dataset_long_horizon = JHTDB_Channel('data/turbulence_output', time_chunking=time_chunking*2)
+    dataset_long_horizon = JHTDB_Channel('data/turbulence_output', time_chunking=time_chunking*3)
     _, val_long_horizon = torch.utils.data.random_split(dataset, [0.8, 0.2])
     train_dataset, val_dataset = torch.utils.data.random_split(dataset, [0.8, 0.2])
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, num_workers=16, pin_memory=True)
     val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=batch_size, num_workers=8)
-    #val_long_loader = torch.utils.data.DataLoader(val_long_horizon, batch_size=batch_size, num_workers=8)
+    val_long_loader = torch.utils.data.DataLoader(val_long_horizon, batch_size=batch_size, num_workers=8)
     print(f'{len(dataset)=}\n{len(train_loader)=}\n{len(val_dataset)=}')
 
     IC_0, Sol_0 = dataset[0]
@@ -87,7 +87,7 @@ if __name__=='__main__':
     if scale_lr: lr *= num_nodes
     model = SimModelClass(n_inputs=ndims, n_outputs=ndims, n_experts=n_experts, ndims=ndims, lr=lr, make_optim=make_optim, T_max=T_max,
                           one_cycle=one_cycle, three_phase=three_phase, RLoP=RLoP, RLoP_factor=RLoP_factor, RLoP_patience=RLoP_patience,
-                          n_steps=time_chunking-1, k_modes=k_modes, prior_cfg={'prior_sigma': prior_sigma})
+                          n_steps=time_chunking-1, k_modes=k_modes, prior_cfg={'prior_sigma': prior_sigma}, train_dataset=train_dataset)
 
     import os, signal
     from pytorch_lightning.loggers import TensorBoardLogger
@@ -97,9 +97,8 @@ if __name__=='__main__':
     logger = TensorBoardLogger("lightning_logs", name=os.environ.get("SLURM_JOB_NAME", 'JHTDB_MOR_MoE'),
                                 version=os.environ.get("SLURM_JOB_ID", None))
     profiler = L.profilers.PyTorchProfiler(profile_memory=True, with_stack=True,
-                                           on_trace_ready=torch.profiler.tensorboard_trace_handler(logger.log_dir))
-                                           #schedule=torch.profiler.schedule(wait=2, warmup=2, active=6, repeat=0))
-                                           ## TODO: remove when done debugging
+                                           on_trace_ready=torch.profiler.tensorboard_trace_handler(logger.log_dir),
+                                           schedule=torch.profiler.schedule(wait=12, warmup=2, active=6, repeat=3))
 
     # This is needed to avoid problem caused by large model size
     model_checkpoint_callback=L.callbacks.ModelCheckpoint(save_weights_only=True, monitor='loss')
@@ -108,5 +107,6 @@ if __name__=='__main__':
                         gradient_clip_val=gradient_clip_val, gradient_clip_algorithm='value', # regularization isn't good for OneCycleLR
                         profiler=profiler, logger=logger, plugins=[SLURMEnvironment()], callbacks=[model_checkpoint_callback])
 
-    val_dataloaders = [val_loader] #, val_long_loader] # long validation loader causes various problems with profiler & GPU utilization...
+    val_dataloaders = [val_loader, val_long_loader] # long validation loader causes various problems with profiler & GPU utilization...
     trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_dataloaders) #, ckpt_path=ckpt_path)
+    #trainer.validate(model=model, dataloaders=val_dataloaders) #, ckpt_path=ckpt_path)
