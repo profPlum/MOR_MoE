@@ -1,8 +1,7 @@
-import os, random
+import os, random, warnings
 import torch, numpy as np
 from torch import nn
 import torch.nn.utils.parametrize as parametrize
-import warnings
 
 # NOTE: We changed it to use sum because the prior p(theta)=p(theta_0)p(theta_1)...p(theta_n) is a product of gaussians
 # which means that more parameters will increase the KL loss. Also KL divergence takes a log which implies the sum.
@@ -117,7 +116,12 @@ class _BayesianParameterization(nn.Module):
     def kl_loss(self): # this method apparently is sufficient to work with get_kl_loss(model) as-is!
         return self._kl_loss
 
-def get_dataset_size(train_dataset: torch.utils.data.Dataset):
+from torch.utils.data import Dataset, DataLoader
+def get_dataset_size(train_dataset: Dataset | DataLoader):
+    if isinstance(train_dataset, DataLoader):
+        train_dataset = train_dataset.dataset
+    else: assert isinstance(train_dataset, Dataset)
+
     X, y = train_dataset[0]
     # TODO: use model(X) instead of y to make it agnostic to classification and regression
     assert torch.is_floating_point(y), 'classification datasets are implicitly sparse which makes this fail...'
@@ -125,7 +129,7 @@ def get_dataset_size(train_dataset: torch.utils.data.Dataset):
 
 # NOTE: this is essentially the new dnn_to_bnn() but also more versatile
 # NOTE: if you pass in train_dataset and it is non-sparse (e.g. floating point regression) then it will automatically weight the get_kl_loss method!
-def model_agnostic_dnn_to_bnn(dnn: nn.Module, train_dataset_size: int=None, prior_cfg: dict = {}):
+def model_agnostic_dnn_to_bnn(dnn: nn.Module, train_dataset_size: int|Dataset|DataLoader=None, prior_cfg: dict = {}):
     if 'Bayesian' in type(dnn).__name__: return
 
     # apply _BayesianParameterization
@@ -143,8 +147,9 @@ def model_agnostic_dnn_to_bnn(dnn: nn.Module, train_dataset_size: int=None, prio
         with parametrize.cached():
             return super(type(self), self).forward(*args, **kwargs)
     kl_weight=1.0
-    if isinstance(train_dataset_size, torch.utils.data.Dataset):
-        # TODO: use model(X) instead of y to make it agnostic to classification and regression
+    if type(train_dataset_size) is not int:
+        # TODO: use model(X) instead of y to make it agnostic to classification and regression?
+        # Catch is it requires a fully constructed model which will cause problems if this function is called in a constructor...
         train_dataset_size=get_dataset_size(train_dataset_size)
     if train_dataset_size: kl_weight = 1.0/train_dataset_size
     else: warnings.warn("you didn't pass in the train_dataset_size so get_kl_loss() values will be unweighted! (make sure to weight them yourself)")
