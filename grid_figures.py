@@ -81,7 +81,8 @@ def proportional_allocation(scalar_allocation, proportional_to_size, int_cast=Tr
 default_img_scale=1.45
 
 class GridFigure: # Verified to work 5/18/24
-    def __init__(self, title:str='', img_scale: float=default_img_scale, cmap:str=None):
+    def __init__(self, title:str='', img_scale: float=default_img_scale,
+                 cmap:str=None, y_title_vertical=True):
         self._img_scale = img_scale
         #if row_size: assert len(row_size)==2
         self._cmap = cmap
@@ -89,6 +90,7 @@ class GridFigure: # Verified to work 5/18/24
         self._last_x_titles = None
         self._n_unique_x_titles = 0
         self._title = title
+        self._y_title_vertical = y_title_vertical
 
     @property
     def nrows(self):
@@ -210,7 +212,9 @@ class GridFigure: # Verified to work 5/18/24
                 ax.imshow(row['imgs'][j], cmap=self._cmap, norm=normalizer, aspect='auto')
                 ax.set_xticks([], [])
                 ax.set_yticks([], [])
-                if j==0 and row['y_title']: ax.set_ylabel(row['y_title'])#, rotation=0, labelpad=30)
+                if j==0 and row['y_title']:
+                    kwds = {} if self._y_title_vertical else {'rotation': 0, 'labelpad': 40}
+                    ax.set_ylabel(row['y_title'], **kwds)
                 if row['x_titles'] and row['x_titles'][j]:
                     ax.set_title(row['x_titles'][j])
         cbar = ax.cax.colorbar(im)
