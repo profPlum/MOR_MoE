@@ -13,8 +13,8 @@ scale_lr=True # scale with DDP batch_size
 lr: float=float(os.environ.get('LR', 0.00025)) # learning rate
 max_epochs=int(os.environ.get('MAX_EPOCHS', 500))
 gradient_clip_val=float(os.environ.get('GRAD_CLIP', 0.5))
-ckpt_path=os.environ.get('CKPT_PATH', None)
 make_optim=eval(f"torch.optim.{os.environ.get('OPTIM', 'Adam')}")
+ckpt_path=os.environ.get('CKPT_PATH', None)
 
 use_VI = bool(int(os.environ.get('VI', True))) # whether to enable VI
 prior_sigma=float(os.environ.get('PRIOR_SIGMA', 1.0))
@@ -81,7 +81,6 @@ if __name__=='__main__':
     if use_VI: # VI is optional
         SimModelClass = PPOU_NetSimulator
         VI_kwd_args = {'prior_cfg': {'prior_sigma': prior_sigma}, 'train_dataset_size': model_agnostic_BNN.get_dataset_size(train_dataset)}
-    #SimModelClass = PPOU_NetSimulator if use_VI else POU_NetSimulator # VI is optional
     if ckpt_path: # secretly use the load from checkpoint api if needed
         SimModelClass_ = SimModelClass
         SimModelClass = lambda **kwd_args: SimModelClass_.load_from_checkpoint(ckpt_path, **kwd_args)
@@ -100,8 +99,8 @@ if __name__=='__main__':
 
     logger = TensorBoardLogger("lightning_logs", name=os.environ.get("SLURM_JOB_NAME", 'JHTDB_MOR_MoE'),
                                 version=os.environ.get("SLURM_JOB_ID", None))
-    profiler = L.profilers.PyTorchProfiler(profile_memory=True, with_stack=True,
-                                           on_trace_ready=torch.profiler.tensorboard_trace_handler(logger.log_dir),
+    profiler = L.profilers.PyTorchProfiler(profile_memory=True, #with_stack=True,
+                                           #on_trace_ready=torch.profiler.tensorboard_trace_handler(logger.log_dir),
                                            schedule=torch.profiler.schedule(wait=10, warmup=4, active=6, repeat=3))
 
     # This is needed to avoid problem caused by large model size
