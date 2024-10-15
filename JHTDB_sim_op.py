@@ -124,6 +124,7 @@ class Sim(L.LightningModule):
             u = u[None] # add batch dim
         for i in range(n):
             u = self.learnedCorrection(NSupd(u))
+            assert not u.isnan().any()
             if intermediate_outputs and i%intermediate_output_stride==0: outputs.append(u)
 
         # time dim is the last dim (if it exists)
@@ -144,6 +145,7 @@ class UQ_Sim(Sim):
         uq = None
         for i in range(n):
             u, uq = self.op.forward(NSupd(u), uq)
+            assert not (u.isnan().any() or uq.isnan().any())
             if intermediate_outputs and i%intermediate_output_stride==0:
                 u_outputs.append(u)
                 uq_outputs.append(uq)
