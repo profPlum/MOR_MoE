@@ -202,7 +202,7 @@ def get_BNN_pred_distribution(bnn_model, x_input, n_samples=100, no_grad=True):#
     If you just want moments use get_BNN_pred_moments() instead as it is *much* more memory efficient (e.g. for large sample sizes). But this is still useful if you want an actual distribution.
     '''
     if no_grad:
-        with torch.no_grad():
+        with torch.inference_mode():
             return get_BNN_pred_distribution(bnn_model, x_input, n_samples, no_grad=False)
     preds = []
     for i in range(n_samples):
@@ -247,7 +247,7 @@ class CummVar:
 def get_BNN_pred_moments(bnn_model, x_inputs, n_samples=100, no_grad=True, verbose=True):
     if no_grad:
         bnn_model.eval()
-        with torch.no_grad():
+        with torch.inference_mode():
             return get_BNN_pred_moments(bnn_model, x_inputs, n_samples=n_samples, no_grad=False, verbose=verbose)
 
     print_interval = max(n_samples//10, 1)
@@ -287,11 +287,11 @@ def find_BCI_truth_quantiles(model, inputs, outputs, n_samples=250, fake_ideal=F
     GOTCHA: This is still not the most rigorous implementation! That would sort based on KDE-density rather than centroid distance.
     """
     import matplotlib.pyplot as plt
-    with torch.no_grad():
+    with torch.inference_mode():
         print(f'inputs.shape: {inputs.shape}')
         print(f'outputs.shape: {outputs.shape}')
         pred_distribution = get_BNN_pred_distribution(model.cuda(), inputs.cuda(), n_samples=n_samples).cuda()
-        pred_center = pred_distribution.mean(axis=0)
+        pred_center = pred_distribution.median(axis=0)
         print('pred_distribution.shape:', pred_distribution.shape)
         print('pred_center.shape:', pred_center.shape)
 
