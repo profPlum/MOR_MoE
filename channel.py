@@ -54,10 +54,10 @@ class MemMonitorCallback(L.Callback):
     def on_validation_epoch_end(self, trainer, pl_module):
         utils.report_cuda_memory_usage(clear=False)
 
-# wrapper to nullify the prior_cfg kwd_arg (for compatibility)
-class POU_NetSimulator(POU_NetSimulator):
-    def __init__(self, *args, prior_cfg={}, train_dataset_size=None, **kwd_args):
-        super().__init__(*args, **kwd_args)
+## wrapper to nullify the VI kwd_args (for compatibility)
+#class POU_NetSimulator(POU_NetSimulator):
+#    def __init__(self, *args, prior_cfg={}, train_dataset_size=None, **kwd_args):
+#        super().__init__(*args, **kwd_args)
 
 if __name__=='__main__':
     # setup dataset
@@ -77,18 +77,21 @@ if __name__=='__main__':
     num_nodes = int(os.environ.get('SLURM_STEP_NUM_NODES', 1)) # can be auto-detected by slurm
     print(f'{num_nodes=}')
 
-    SimModelClass = PPOU_NetSimulator if use_VI else POU_NetSimulator # VI is optional
-    if ckpt_path:
+    SimModelClass, VI_kwd_args = POU_NetSimulator, {}
+    if use_VI: # VI is optional
+        SimModelClass = PPOU_NetSimulator
+        VI_kwd_args = {'prior_cfg': {'prior_sigma': prior_sigma}, 'train_dataset_size': model_agnostic_BNN.get_dataset_size(train_dataset)}
+    #SimModelClass = PPOU_NetSimulator if use_VI else POU_NetSimulator # VI is optional
+    if ckpt_path: # secretly use the load from checkpoint api if needed
         SimModelClass_ = SimModelClass
         SimModelClass = lambda **kwd_args: SimModelClass_.load_from_checkpoint(ckpt_path, **kwd_args)
-    # secretly use the load from checkpoint api if needed
 
     # train model
     if scale_lr: lr *= num_nodes
     model = SimModelClass(n_inputs=ndims, n_outputs=ndims, n_experts=n_experts, ndims=ndims, lr=lr, make_optim=make_optim, T_max=T_max,
                           one_cycle=one_cycle, three_phase=three_phase, RLoP=RLoP, RLoP_factor=RLoP_factor, RLoP_patience=RLoP_patience,
-                          n_steps=time_chunking-1, k_modes=k_modes, prior_cfg={'prior_sigma': prior_sigma},
-                          train_dataset_size=model_agnostic_BNN.get_dataset_size(train_dataset))
+                          n_steps=time_chunking-1, k_modes=k_modes, **VI_kwd_args) #prior_cfg={'prior_sigma': prior_sigma},
+                          #train_dataset_size=model_agnostic_BNN.get_dataset_size(train_dataset))
 
     import os, signal
     from pytorch_lightning.loggers import TensorBoardLogger
