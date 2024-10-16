@@ -29,7 +29,7 @@ class FieldGatingNet(BasicLightningRegressor):
 
         # NOTE: setting n_experts=n_experts+1 inside the gating_net implicitly adds a "ZeroExpert"
         #self._gating_net = MOR_Operator.MOR_Operator(n_inputs+ndims, n_experts+1, ndims=ndims, **kwd_args)
-        self._gating_net = CNN(ndims, n_experts+1, 1, ndims=ndims)#, **kwd_args)
+        self._gating_net = CNN(ndims*2, n_experts+1, 1, ndims=ndims)#, **kwd_args)
         self._cache_forward=False # whether we should cache the forward call's outputs
         self._cached_forward_results=None # the cached forward call's outputs
         self._cached_forward_shape=None # for sanity check
@@ -38,9 +38,22 @@ class FieldGatingNet(BasicLightningRegressor):
         self._cached_mesh_shape = None # shape of the X for the cache
         self._cached_mesh_grid = None # cached mesh grid (aka positional encodings)
 
+    def _make_positional_encodings_trig(self, shape):
+        # Create coordinate grids using torch.meshgrid
+        if tuple(shape) == self._cached_mesh_shape and self._cached_mesh_grid.device==self.device:
+            return self._cached_mesh_grid
+        assert len(shape)==self.ndims
+        coords = [torch.linspace(0,1,steps=dim+1)[:-1]*2*np.pi for dim in shape]
+        mesh = torch.meshgrid(*coords, indexing='ij')
+        mesh = [torch.cos(x) for x in mesh] + [torch.sin(x) for x in mesh]
+        pos_encodings = torch.stack(mesh)[None].to(self.device) # [None] adds batch dim
+        self._cached_mesh_shape = tuple(shape)
+        self._cached_mesh_grid = pos_encodings
+        return pos_encodings
+
     def _make_positional_encodings(self, shape):
         # Create coordinate grids using torch.meshgrid
-        if tuple(shape) == self._cached_mesh_shape:
+        if tuple(shape) == self._cached_mesh_shape and self._cached_mesh_grid.device==self.device:
             return self._cached_mesh_grid
         assert len(shape)==self.ndims
         coords = [torch.linspace(0,1,steps=dim) for dim in shape]
@@ -56,10 +69,11 @@ class FieldGatingNet(BasicLightningRegressor):
             assert self._cached_forward_results is not None
             return self._cached_forward_results
 
-        pos_encodings = self._make_positional_encodings(X.shape[-self.ndims:])
+        pos_encodings = self._make_positional_encodings_trig(X.shape[-self.ndims:])
         pos_encodings = pos_encodings.expand(X.shape[0], *pos_encodings.shape[1:])
         #X = torch.cat([X, pos_encodings], dim=1)
         gating_logits = self._gating_net(pos_encodings)
+        #if self.training: gating_logits = gating_logits + torch.randn_like(gating_logits, requires_grad=False)*self.noise_sd
         global_logits = torch.randn(gating_logits.shape[1], requires_grad=False) # random selection
 
         ## global average pooling to identify top-k global experts (across spatial & BATCH dims!)
@@ -74,7 +88,7 @@ class FieldGatingNet(BasicLightningRegressor):
         #    print(f'{global_logit_sd=}')
 
         # add in the obligitory null expert (always the last index in the softmax)
-        global_topk = torch.topk(global_logits[:-1], self.k, dim=0).indices # we don't want to select null expert twice!
+        global_topk = torch.topk(global_logits[:-1], self.k, dim=0, sorted=False).indices # we don't want to select null expert twice!
         global_topk = torch.cat([global_topk, torch.tensor([-1], device=global_topk.device, dtype=global_topk.dtype)])
         gating_logits = gating_logits[:, global_topk] # first dim is batch_dim
         gating_weights = F.softmax(gating_logits, dim=1)[:,:-1]
