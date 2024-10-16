@@ -89,7 +89,7 @@ if __name__=='__main__':
     if scale_lr: lr *= num_nodes
     model = SimModelClass(n_inputs=ndims, n_outputs=ndims, n_experts=n_experts, ndims=ndims, lr=lr, make_optim=make_optim, T_max=T_max,
                           one_cycle=one_cycle, three_phase=three_phase, RLoP=RLoP, RLoP_factor=RLoP_factor, RLoP_patience=RLoP_patience,
-                          n_steps=time_chunking-1, k_modes=k_modes, **VI_kwd_args) #prior_cfg={'prior_sigma': prior_sigma},
+                          n_steps=time_chunking-1, k_modes=k_modes, trig_encodings=True, **VI_kwd_args) #prior_cfg={'prior_sigma': prior_sigma},
                           #train_dataset_size=model_agnostic_BNN.get_dataset_size(train_dataset))
 
     import os, signal
