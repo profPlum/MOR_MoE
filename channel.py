@@ -99,9 +99,9 @@ if __name__=='__main__':
 
     logger = TensorBoardLogger("lightning_logs", name=os.environ.get("SLURM_JOB_NAME", 'JHTDB_MOR_MoE'),
                                 version=os.environ.get("SLURM_JOB_ID", None))
-    profiler = L.profilers.PyTorchProfiler(profile_memory=True, #with_stack=True,
-                                           #on_trace_ready=torch.profiler.tensorboard_trace_handler(logger.log_dir),
-                                           schedule=torch.profiler.schedule(wait=10, warmup=4, active=6, repeat=3))
+    profiler = L.profilers.PyTorchProfiler(profile_memory=True, with_stack=True,
+                                           on_trace_ready=torch.profiler.tensorboard_trace_handler(logger.log_dir),
+                                           schedule=torch.profiler.schedule(skip_first=2, wait=10, warmup=4, active=6, repeat=3))
 
     # This is needed to avoid problem caused by large model size
     model_checkpoint_callback=L.callbacks.ModelCheckpoint(save_weights_only=True, monitor='loss')
