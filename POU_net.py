@@ -198,10 +198,18 @@ class POU_net(L.LightningModule):
 
 import model_agnostic_BNN
 
+class ProbabilisticExpertWrapper(MOR_Operator.MOR_Operator):
+    def forward(self, X):
+        pred = super().forward(X)
+        constrainted_preds = torch.empty_like(pred)
+        constrainted_preds[:, :pred.shape[1]//2] = pred[:, :pred.shape[1]//2]
+        constrainted_preds[:, pred.shape[1]//2:] = F.softplus(pred[:, pred.shape[1]//2:])**2 # make pred use variance
+        return constrainted_preds
+
 class PPOU_net(POU_net): # Not really, it's POU+VI
     def __init__(self, n_inputs, n_outputs, train_dataset_size, *args, prior_cfg={}, **kwd_args):
         # we double output channels to have the sigma predictions too
-        super().__init__(n_inputs*2, n_outputs*2, *args, **kwd_args)
+        super().__init__(n_inputs*2, n_outputs*2, *args, make_expert=ProbabilisticExpertWrapper, **kwd_args)
 
         # make VI reparameterize our entire model
         model_agnostic_BNN.model_agnostic_dnn_to_bnn(self, train_dataset_size, prior_cfg=prior_cfg)
@@ -210,9 +218,10 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
         if Y is None: Y = torch.zeros(1,device=X.device, dtype=X.dtype).expand(*X.shape)
         X = torch.cat([X,Y], axis=1)
         pred = super().forward(X)
+
         mu_pred = pred[:, :pred.shape[1]//2]
-        sigma_pred = F.softplus(pred[:, pred.shape[1]//2:])
-        return mu_pred, sigma_pred
+        sigma_sq_pred = pred[:, pred.shape[1]//2:]
+        return mu_pred, sigma_sq_pred**0.5
 
     def training_step(self, batch, batch_idx=None, val=False):
         X, y = batch
