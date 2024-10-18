@@ -62,8 +62,8 @@ class MemMonitorCallback(L.Callback):
 if __name__=='__main__':
     # setup dataset
     dataset = JHTDB_Channel('data/turbulence_output', time_chunking=time_chunking)
-    dataset_long_horizon = JHTDB_Channel('data/turbulence_output', time_chunking=time_chunking*6)
-    _, val_long_horizon = torch.utils.data.random_split(dataset, [0.8, 0.2])
+    dataset_long_horizon = JHTDB_Channel('data/turbulence_output', time_chunking=time_chunking*9)
+    _, val_long_horizon = torch.utils.data.random_split(dataset_long_horizon, [0.8, 0.2])
     train_dataset, val_dataset = torch.utils.data.random_split(dataset, [0.8, 0.2])
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, num_workers=16, pin_memory=True)
     val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=batch_size*3, num_workers=8)
