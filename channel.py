@@ -10,16 +10,16 @@ n_experts: int=2 # number of experts in MoE
 time_chunking: int=5 # how many self-aware recursive steps to take
 batch_size: int=1 # batch size, with VI experts we can only fit 1 batch on 20 GPUs!
 scale_lr=True # scale with DDP batch_size
-lr: float=float(os.environ.get('LR', 0.00025)) # learning rate
+lr: float=float(os.environ.get('LR', 1.25e-4)) # learning rate
 max_epochs=int(os.environ.get('MAX_EPOCHS', 500))
-gradient_clip_val=float(os.environ.get('GRAD_CLIP', 0.5))
+gradient_clip_val=float(os.environ.get('GRAD_CLIP', 5e-3))
 make_optim=eval(f"torch.optim.{os.environ.get('OPTIM', 'Adam')}")
 ckpt_path=os.environ.get('CKPT_PATH', None)
 
 use_VI = bool(int(os.environ.get('VI', True))) # whether to enable VI
-prior_sigma=float(os.environ.get('PRIOR_SIGMA', 1.0))
+prior_sigma=float(os.environ.get('PRIOR_SIGMA', 0.2)) # this prior sigma almost matches he sigma of initialization
 T_max: int=1 # T_0 for CosAnnealing+WarmRestarts
-one_cycle=bool(int(os.environ.get('ONE_CYCLE', False))) # scheduler
+one_cycle=bool(int(os.environ.get('ONE_CYCLE', True))) # scheduler
 three_phase=bool(int(os.environ.get('THREE_PHASE', False))) # adds decay after inital bump
 RLoP=bool(int(os.environ.get('RLoP', False))) # scheduler
 RLoP_factor=0.9
@@ -61,12 +61,13 @@ class MemMonitorCallback(L.Callback):
 
 if __name__=='__main__':
     # setup dataset
+    long_horizon_multiplier=10
     dataset = JHTDB_Channel('data/turbulence_output', time_chunking=time_chunking)
-    dataset_long_horizon = JHTDB_Channel('data/turbulence_output', time_chunking=time_chunking*9)
-    _, val_long_horizon = torch.utils.data.random_split(dataset_long_horizon, [0.8, 0.2])
+    dataset_long_horizon = JHTDB_Channel('data/turbulence_output', time_chunking=time_chunking*long_horizon_multiplier)
+    _, val_long_horizon = torch.utils.data.random_split(dataset_long_horizon, [0.5, 0.5]) # ensure there are two validation steps
     train_dataset, val_dataset = torch.utils.data.random_split(dataset, [0.8, 0.2])
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, num_workers=16, pin_memory=True)
-    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=batch_size*3, num_workers=8)
+    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=batch_size*long_horizon_multiplier, num_workers=8)
     val_long_loader = torch.utils.data.DataLoader(val_long_horizon, batch_size=batch_size, num_workers=8)
     print(f'{len(dataset)=}\n{len(train_loader)=}\n{len(val_dataset)=}')
 
@@ -97,17 +98,18 @@ if __name__=='__main__':
     from pytorch_lightning.plugins.environments import SLURMEnvironment
     # SLURMEnvironment plugin enables auto-requeue
 
-    logger = TensorBoardLogger("lightning_logs", name=os.environ.get("SLURM_JOB_NAME", 'JHTDB_MOR_MoE'),
-                                version=os.environ.get("SLURM_JOB_ID", None))
+    job_name = os.environ.get("SLURM_JOB_NAME", 'JHTDB_MOR_MoE')
+    version = os.environ.get("SLURM_JOB_ID", None) if job_name!='interactive' else None
+    logger = TensorBoardLogger("lightning_logs", name=job_name, version=version)
     profiler = L.profilers.PyTorchProfiler(profile_memory=True, with_stack=True,
-                                           on_trace_ready=torch.profiler.tensorboard_trace_handler(logger.log_dir),
-                                           schedule=torch.profiler.schedule(skip_first=2, wait=10, warmup=4, active=6, repeat=3))
+                                           on_trace_ready=torch.profiler.tensorboard_trace_handler(logger.log_dir))
+                                           #schedule=torch.profiler.schedule(skip_first=10, wait=5, warmup=2, active=6, repeat=3))
 
     # This is needed to avoid problem caused by large model size
     model_checkpoint_callback=L.callbacks.ModelCheckpoint(save_weights_only=True, monitor='loss')
     strategy = L.strategies.FSDPStrategy(state_dict_type='sharded')
     trainer = L.Trainer(max_epochs=max_epochs, accelerator='gpu', strategy=strategy, num_nodes=num_nodes,
-                        gradient_clip_val=gradient_clip_val, gradient_clip_algorithm='value', # regularization isn't good for OneCycleLR
+                        gradient_clip_val=gradient_clip_val, gradient_clip_algorithm='value', #detect_anomaly=True,
                         profiler=profiler, logger=logger, plugins=[SLURMEnvironment()], callbacks=[model_checkpoint_callback])
 
     val_dataloaders = [val_loader, val_long_loader] # long validation loader causes various problems with profiler & GPU utilization...
