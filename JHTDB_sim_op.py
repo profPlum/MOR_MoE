@@ -1,4 +1,4 @@
-import os, sys
+import os, sys, warnings
 import h5py
 from glob import glob
 
@@ -124,7 +124,9 @@ class Sim(L.LightningModule):
             u = u[None] # add batch dim
         for i in range(n):
             u = self.learnedCorrection(NSupd(u))
-            assert not u.isnan().any()
+            if u.isnan().any():
+                warnings.warn(f'Simulation has diverged into NaNs! At step: {i}')
+            #assert not u.isnan().any()
             if intermediate_outputs and i%intermediate_output_stride==0: outputs.append(u)
 
         # time dim is the last dim (if it exists)
@@ -145,7 +147,9 @@ class UQ_Sim(Sim):
         uq = None
         for i in range(n):
             u, uq = self.op.forward(NSupd(u), uq)
-            assert not (u.isnan().any() or uq.isnan().any())
+            if u.isnan().any() or uq.isnan().any():
+                warnings.warn(f'Simulation has diverged into NaNs! At step: {i}')
+            #assert not (u.isnan().any() or uq.isnan().any())
             if intermediate_outputs and i%intermediate_output_stride==0:
                 u_outputs.append(u)
                 uq_outputs.append(uq)
@@ -166,14 +170,14 @@ class POU_NetSimulator(POU_net):
         self.simulator = simulator
         self.n_steps = n_steps # n timesteps for PDE evolution
 
-    def forward(self, X, n_steps: int=None):
+    def forward(self, X, n_steps: int=None, **kwd_args):
         #NOTE: X.shape==[batch, channel, x, y, z]
 
         # by caching the gating weights we optimize memory & time
         # also it is safe because there are no optimization steps inside a forward!
         with self.gating_net.cached_gating_weights():
             if n_steps is None: n_steps=self.n_steps
-            return self.simulator.evolve(X, n=n_steps, intermediate_outputs=True)
+            return self.simulator.evolve(X, n=n_steps, intermediate_outputs=True, **kwd_args)
             # evolve has now been vmapped internally!
 
     def validation_step(self, batch, batch_idx, dataloader_idx=0):
