@@ -35,9 +35,9 @@ STANDARD_LR=3.125e-5 # theoretically suggested by Adam default lr=0.001/32 s.t. 
 VI_LR=1.25e-4 # this is 4x higher than theory suggests (it is only possible b/c grad clip)
 MLE_LR=2.5e-4 # this is 8x higher than theory suggests (it is only possible b/c grad clip + determinism)
 
-# (MLE) 444 epochs takes 24 hours (with 8 nodes, measured 10/15/24)
-# (VI) 375 epochs takes 24 hours (with 12 nodes, measured 10/15/24)
-# (VI) 462 epochs takes 24 hours (with 20 nodes, measured 10/21/24)
+# (MLE) 582 epochs takes 24 hours (with 8 nodes, measured 10/22/24)
+# (VI) 515 epochs takes 24 hours (with 12 nodes, measured 10/22/24)
+# (VI) 858 epochs takes 24 hours (with 20 nodes, measured 10/21/24)
 export MAX_EPOCHS=444
 export LR=$VI_LR # this is 4x higher than theory suggests (it is only possible b/c grad clip)
 export GRAD_CLIP=5e-3 # 5e-3 is adjusted based on small hickup at 6.35e-3
