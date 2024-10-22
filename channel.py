@@ -7,7 +7,7 @@ from torch.optim import lr_scheduler
 
 k_modes=[103,26,77] # can be a list
 n_experts: int=2 # number of experts in MoE
-time_chunking: int=5 # how many self-aware recursive steps to take
+time_chunking: int=8 # how many self-aware recursive steps to take
 batch_size: int=1 # batch size, with VI experts we can only fit 1 batch on 20 GPUs!
 scale_lr=True # scale with DDP batch_size
 lr: float=float(os.environ.get('LR', 1.25e-4)) # learning rate
