@@ -7,7 +7,7 @@ from torch.optim import lr_scheduler
 
 k_modes=[103,26,77] # can be a list
 n_experts: int=2 # number of experts in MoE
-time_chunking: int=9 # how many self-aware recursive steps to take
+time_chunking: int=8 # how many self-aware recursive steps to take
 batch_size: int=1 # batch size, with VI experts we can only fit 1 batch on 20 GPUs!
 scale_lr=True # scale with DDP batch_size
 lr: float=float(os.environ.get('LR', 1.25e-4)) # learning rate
@@ -16,6 +16,7 @@ gradient_clip_val=float(os.environ.get('GRAD_CLIP', 5e-3))
 make_optim=eval(f"torch.optim.{os.environ.get('OPTIM', 'Adam')}")
 ckpt_path=os.environ.get('CKPT_PATH', None)
 
+use_trig = bool(int(os.environ.get('TRIG_ENCODINGS', True))) # Ravi's trig encodings
 use_VI = bool(int(os.environ.get('VI', True))) # whether to enable VI
 prior_sigma=float(os.environ.get('PRIOR_SIGMA', 0.2)) # this prior sigma almost matches he sigma of initialization
 T_max: int=1 # T_0 for CosAnnealing+WarmRestarts
@@ -90,7 +91,7 @@ if __name__=='__main__':
     if scale_lr: lr *= num_nodes
     model = SimModelClass(n_inputs=ndims, n_outputs=ndims, n_experts=n_experts, ndims=ndims, lr=lr, make_optim=make_optim, T_max=T_max,
                           one_cycle=one_cycle, three_phase=three_phase, RLoP=RLoP, RLoP_factor=RLoP_factor, RLoP_patience=RLoP_patience,
-                          n_steps=time_chunking-1, k_modes=k_modes, trig_encodings=True, **VI_kwd_args) #prior_cfg={'prior_sigma': prior_sigma},
+                          n_steps=time_chunking-1, k_modes=k_modes, trig_encodings=use_trig, **VI_kwd_args) #prior_cfg={'prior_sigma': prior_sigma},
                           #train_dataset_size=model_agnostic_BNN.get_dataset_size(train_dataset))
 
     import os, signal

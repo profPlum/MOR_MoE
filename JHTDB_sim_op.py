@@ -187,7 +187,7 @@ class POU_NetSimulator(POU_net):
             self.n_steps=org_steps
 
 # This is it! It should do full aleatoric + epistemic UQ with VI
-# Verified that forward caching is redundant here 10/8/24
+# Verified that forward parametrize-caching is redundant here 10/8/24
 class PPOU_NetSimulator(POU_NetSimulator, PPOU_net):
     def __init__(self, *args, simulator: Sim=UQ_Sim(), **kwd_args):
         super().__init__(*args, simulator=simulator, **kwd_args)

@@ -1,9 +1,9 @@
 #!/bin/bash
-#SBATCH --job-name=VI_OneCycle_Clip=5e-3
+#SBATCH --job-name=OneCycle_Clip=5e-3_Trig
 #SBATCH --output=logs/%x_%j.out              # Output file (%x: job-name, %j: job-id)
 #SBATCH --error=logs/%x_%j.err               # Error file (%x: job-name, %j: job-id)
 #SBATCH --exclusive
-#SBATCH --nodes=20                           # Number of nodes
+#SBATCH --nodes=8                            # Number of nodes
 #SBATCH --ntasks-per-node=1                  # Tasks per node (usually 1 for PyTorch)
 #SBATCH --time=1-00:00:00                    # Maximum runtime (HH:MM:SS)
 #SBATCH --partition=glinda                   # Partition name
@@ -38,7 +38,7 @@ MLE_LR=2.5e-4 # this is 8x higher than theory suggests (it is only possible b/c 
 # (MLE) 444 epochs takes 24 hours (with 8 nodes, measured 10/15/24)
 # (VI) 375 epochs takes 24 hours (with 12 nodes, measured 10/15/24)
 # (VI) 462 epochs takes 24 hours (with 20 nodes, measured 10/21/24)
-export MAX_EPOCHS=462
+export MAX_EPOCHS=444
 export LR=$VI_LR # this is 4x higher than theory suggests (it is only possible b/c grad clip)
 export GRAD_CLIP=5e-3 # 5e-3 is adjusted based on small hickup at 6.35e-3
 export PRIOR_SIGMA=0.2
@@ -46,7 +46,8 @@ export OPTIM='Adam' # RAdam is better for resuming
 export RLoP=0
 export ONE_CYCLE=$((! RLoP)) # we can set both to false to use CosineWarmRestarts, but lets keep it simple
 export THREE_PHASE=0
-export VI=1 # use VI or not
+export VI=0 # use VI or not
+export TRIG_ENCODINGS=1
 #export CKPT_PATH='/home/dsdeigh/MOR_MoE/best_model.ckpt'
 #export CKPT_PATH='/home/dsdeigh/MOR_MoE/lightning_logs/VI_Cos_Extension_Clip=5e-3_LR=1.25e-4/442660/checkpoints/epoch=473-step=18960.ckpt.consolidated'
 #export CKPT_PATH='/home/dsdeigh/MOR_MoE/lightning_logs/RLoP_Extension_Clip=5e-3_LR=standard/418542/checkpoints/epoch=537-step=86080.ckpt.consolidated'
