@@ -207,24 +207,31 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
         model_agnostic_BNN.model_agnostic_dnn_to_bnn(self, train_dataset_size, prior_cfg=prior_cfg)
 
     def forward(self, X, Y=None):
-        ''' crazy forward method that does everything needed for variance summation '''
+        ''' crazy forward method that does everything needed for total variance of mixture distribution '''
         X = torch.as_tensor(X).to(self.device)
         if Y is None: Y = torch.zeros(1,device=X.device, dtype=X.dtype).expand(*X.shape)
         X = torch.cat([X,Y], axis=1)
 
         gating_weights, topk = self.gating_net(X)
-        prediction_mu = 0
-        prediction_sigma_sq = 0
+        total_expectation = 0 # E[Y] = E[E[Y|Z]]
+        total_variance = 0 # Var[Y] = E[Var[Y|Z]]+Var[E[Y|Z]]
+        mus = [] # necessary for 2nd term in total variance eq.
         for i, k_i in enumerate(topk):
             pred_i = self.experts[k_i](X)
             mu = pred_i[:, :pred_i.shape[1]//2]
-            sigma = F.softplus(pred_i[:, pred_i.shape[1]//2:]) # make pred use variance
+            sigma = F.softplus(pred_i[:, pred_i.shape[1]//2:]) # enforce positivity
+            mus.append(mu)
 
-            prediction_mu = prediction_mu + gating_weights[:,i:i+1]*mu
-            prediction_sigma_sq = prediction_sigma_sq + (gating_weights[:,i:i+1]*sigma)**2
-        return prediction_mu, prediction_sigma_sq**0.5
+            total_expectation = total_expectation + gating_weights[:,i:i+1]*mu
+            total_variance = total_variance + gating_weights[:,i:i+1]*sigma**2
 
-''' # original forward before probabilistic considerations
+        # add in the explained variance term (2nd term) = Var(mus) = Var[E[Y|Z]]
+        total_variance = total_variance + sum([gating_weights[:,i:i+1]*(mu-total_expectation)**2 for i, mu in enumerate(mus)])
+
+        return total_expectation, total_variance**0.5
+
+    ''' 
+    # original forward before probabilistic considerations
     def forward(self, X, Y=None):
         if Y is None: Y = torch.zeros(1,device=X.device, dtype=X.dtype).expand(*X.shape)
         X = torch.cat([X,Y], axis=1)
@@ -233,7 +240,7 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
         mu_pred = pred[:, :pred.shape[1]//2]
         sigma_pred = F.softplus(pred[:, pred.shape[1]//2:])
         return mu_pred, sigma_pred
-'''
+    '''
 
     def training_step(self, batch, batch_idx=None, val=False):
         X, y = batch
