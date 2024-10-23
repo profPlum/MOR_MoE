@@ -186,7 +186,7 @@ class POU_net(L.LightningModule):
         X, y = batch
         y_pred = self(X).reshape(y.shape)
         loss = F.mse_loss(y_pred, y)
-        self.log(f'{val*"val_"}loss', loss.item(), sync_dist=val, prog_bar=True)
+        self.log(f'{val*"val_"}loss', loss.item(), sync_dist=val, prog_bar=not val)
         self._log_metrics(y_pred, y, val) # log additional metrics
         return loss
 
@@ -265,19 +265,18 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
         kl_loss = self.get_kl_loss()#/(num_batches*y.numel()) # (weighted)
         loss = model_agnostic_BNN.nll_regression(y_pred_mu, y, y_pred_sigma=y_pred_sigma, reduction=torch.mean) + kl_loss # posterior loss
 
-        self.log(f'{val*"val_"}loss', loss.item(), sync_dist=val, prog_bar=True)
-        self.log(f'{val*"val_"}kl_loss', kl_loss.item(), sync_dist=val, prog_bar=True)
+        self.log(f'{val*"val_"}loss', loss.item(), sync_dist=val, prog_bar=not val)
+        if not val: self.log('kl_loss', kl_loss.item(), sync_dist=val, prog_bar=True)
         self._log_metrics(y_pred_all, y, val) # log additional metrics (mu & sigma variants)
-        #with torch.inference_mode():
-        #    self.log(f'{val*"val_"}_UQ_loss', ((y-y_pred_mu).abs()-y_pred_sigma).abs())
 
         return loss
 
     def _log_metrics(self, y_pred: tuple, y: torch.Tensor, val=False):
         y_pred_mu, y_pred_sigma = y_pred # break apart pred tuple
-        super()._log_metrics(self, y_pred_mu, y, val=val) # log regular mu metrics & lr (implicitly)
+        super()._log_metrics(y_pred_mu, y, val=val) # log regular mu metrics & lr (implicitly)
 
         if not val: return # UQ metrics for training would be overkill...
         with torch.inference_mode():
             y_abs_error=(y-y_pred_mu).abs() # y_pred_mu is to y, as y_pred_sigma is to y_abs_error
             self.val_UQ_metrics.log_metrics(y_pred_sigma, y_abs_error)
+            self.log(f'val_UQ_MAE', (y_abs_error-y_pred_sigma).abs(), sync_dist=True, on_epoch=True, on_step=False)
