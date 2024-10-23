@@ -276,7 +276,9 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
         super()._log_metrics(y_pred_mu, y, val=val) # log regular mu metrics & lr (implicitly)
 
         if not val: return # UQ metrics for training would be overkill...
+        sigma_to_mad_coef = 0.7978865 # this magic constant can be multiplied with sigma of a 1d guassian to obtain the MAD! E[|X-E[X]|] (expected absolute error)
         with torch.inference_mode():
             y_abs_error=(y-y_pred_mu).abs() # y_pred_mu is to y, as y_pred_sigma is to y_abs_error
-            self.val_UQ_metrics.log_metrics(y_pred_sigma, y_abs_error)
-            self.log(f'val_UQ_MAE', (y_abs_error-y_pred_sigma).abs(), sync_dist=True, on_epoch=True, on_step=False)
+            y_pred_MAD = y_pred_sigma*sigma_to_mad_coef
+            self.val_UQ_metrics.log_metrics(y_pred_MAD, y_abs_error)
+            self.log(f'val_UQ_MAE', (y_abs_error-y_pred_MAD).abs().mean(), sync_dist=True, on_epoch=True, on_step=False)
