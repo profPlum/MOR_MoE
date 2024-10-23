@@ -10,7 +10,7 @@ n_experts: int=2 # number of experts in MoE
 time_chunking: int=8 # how many self-aware recursive steps to take
 batch_size: int=1 # batch size, with VI experts we can only fit 1 batch on 20 GPUs!
 scale_lr=True # scale with DDP batch_size
-lr: float=float(os.environ.get('LR', 1.25e-4)) # learning rate
+lr: float=float(os.environ.get('LR', 3.125e-5)) # (standard) learning rate (will be scaled by recurisve steps)
 max_epochs=int(os.environ.get('MAX_EPOCHS', 500))
 gradient_clip_val=float(os.environ.get('GRAD_CLIP', 5e-3))
 make_optim=eval(f"torch.optim.{os.environ.get('OPTIM', 'Adam')}")
@@ -88,7 +88,7 @@ if __name__=='__main__':
         SimModelClass = lambda **kwd_args: SimModelClass_.load_from_checkpoint(ckpt_path, **kwd_args)
 
     # train model
-    if scale_lr: lr *= num_nodes
+    if scale_lr: lr *= num_nodes*(time_chunking-1) # num_nodes is intuitive, however recursive timesteps are effectively comparable to increasing the batch size too!
     model = SimModelClass(n_inputs=ndims, n_outputs=ndims, n_experts=n_experts, ndims=ndims, lr=lr, make_optim=make_optim, T_max=T_max,
                           one_cycle=one_cycle, three_phase=three_phase, RLoP=RLoP, RLoP_factor=RLoP_factor, RLoP_patience=RLoP_patience,
                           n_steps=time_chunking-1, k_modes=k_modes, trig_encodings=use_trig, **VI_kwd_args) #prior_cfg={'prior_sigma': prior_sigma},
