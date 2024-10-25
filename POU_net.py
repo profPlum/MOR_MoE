@@ -61,7 +61,7 @@ class FieldGatingNet(BasicLightningRegressor):
             return self._cached_forward_results
 
         pos_encodings = self._make_positional_encodings(X.shape[-self.ndims:])
-        pos_encodings = pos_encodings.expand(X.shape[0], *pos_encodings.shape[1:])
+        #pos_encodings = pos_encodings.expand(X.shape[0], *pos_encodings.shape[1:])
         gating_logits = self._gating_net(pos_encodings)
         if self.training and self.noise_sd>0: gating_logits = gating_logits + torch.randn_like(gating_logits, requires_grad=False)*self.noise_sd
         global_logits = torch.randn(gating_logits.shape[1], requires_grad=False) # random selection
@@ -93,7 +93,7 @@ class FieldGatingNet(BasicLightningRegressor):
             self._cached_forward_results=None # reset cache
             self._cached_forward_shape=None # reset cache
 
-# these metrics need to be seperated for validatin & training!
+# these metrics need to be seperated for validation & training!
 class MetricsModule(L.LightningModule):
     def __init__(self, parent_module:L.LightningModule, n_outputs:int, prefix=''):
         super().__init__()
@@ -128,9 +128,18 @@ class MetricsModule(L.LightningModule):
             log_metric('wMAPE')
             log_metric('sMAPE')
 
+''' # we did this implicitly instead of using the class
+class ZeroExpert(L.LightningModule):
+    def __init__(self, sigma=False):
+        if sigma: self._sigma=nn.Parameter(torch.randn([]))
+    def forward(self, *args):
+        try: return 0, F.softplus(self._sigma)
+        except AttributeError: return 0
+'''
+
 class POU_net(L.LightningModule):
     ''' POU_net minus the useless L2 regularization '''
-    def __init__(self, n_inputs, n_outputs, n_experts=5, ndims=2, lr=0.001, momentum=0.9, T_max=10,
+    def __init__(self, n_inputs, n_outputs, n_experts=3, ndims=2, lr=0.001, momentum=0.9, T_max=10,
                  one_cycle=False, three_phase=False, RLoP=False, RLoP_factor=0.9, RLoP_patience:int=25,
                  make_optim: type=torch.optim.Adam, make_expert: type=MOR_Operator.MOR_Operator,
                  make_gating_net: type=FieldGatingNet, trig_encodings=True, **kwd_args):
@@ -219,9 +228,10 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
 
         # add additional set of metrics for validating aleatoric UQ itself compared to error
         self.val_UQ_metrics = MetricsModule(self, n_outputs, prefix='val_UQ_')
+        self._zero_expert_sigma=nn.Parameter(torch.randn([]))
 
     def forward(self, X, Y=None):
-        ''' crazy forward method that does everything needed for total variance of mixture distribution '''
+        ''' crazy forward method that does everything needed for total variance of mixture distribution with zero expert '''
         X = torch.as_tensor(X).to(self.device)
         if Y is None: Y = torch.zeros(1,device=X.device, dtype=X.dtype).expand(*X.shape)
         X = torch.cat([X,Y], axis=1)
@@ -230,6 +240,7 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
         total_expectation = 0 # E[Y] = E[E[Y|Z]]
         total_variance = 0 # Var[Y] = E[Var[Y|Z]]+Var[E[Y|Z]]
         mus = [] # necessary for 2nd term in total variance eq.
+
         for i, k_i in enumerate(topk):
             pred_i = self.experts[k_i](X)
             mu = pred_i[:, :pred_i.shape[1]//2]
@@ -242,6 +253,11 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
         # add in the explained variance term (2nd term) = Var(mus) = Var[E[Y|Z]]
         total_variance = total_variance + sum([gating_weights[:,i:i+1]*(mu-total_expectation)**2 for i, mu in enumerate(mus)])
         mus.clear() # paranoia related to memory management
+
+        # handle zero expert
+        zero_expert_gating_weights = 1-gating_weights.sum(axis=1) # recover zero expert weights
+        total_variance = total_variance + gating_weights_zero_expert*F.softplus(self._zero_expert_sigma)**2 # for 1st term
+        total_variance = total_variance + zero_expert_gating_weights*total_expectation**2 # for 2nd term (total_expectation**2==(0-total_expectation)**2)
 
         return total_expectation, total_variance**0.5
 
