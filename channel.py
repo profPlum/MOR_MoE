@@ -50,10 +50,14 @@ import model_agnostic_BNN
 import utils
 
 class MemMonitorCallback(L.Callback):
+    def __init__(self, clear_interval=40):
+        self._epoch_counter=0
+        self._clear_interval=clear_interval
     def on_train_epoch_end(self, trainer, pl_module):
-        utils.report_cuda_memory_usage(clear=False)
-    def on_validation_epoch_end(self, trainer, pl_module):
-        utils.report_cuda_memory_usage(clear=False)
+        self._epoch_counter+=1
+        utils.report_cuda_memory_usage(clear=not (self._epoch_counter%self._clear_interval), verbose=True)
+    #def on_validation_epoch_end(self, trainer, pl_module):
+    #    utils.report_cuda_memory_usage(clear=False)
 
 ## wrapper to nullify the VI kwd_args (for compatibility)
 #class POU_NetSimulator(POU_NetSimulator):
@@ -67,7 +71,7 @@ if __name__=='__main__':
     dataset_long_horizon = JHTDB_Channel('data/turbulence_output', time_chunking=time_chunking*long_horizon_multiplier)
     _, val_long_horizon = torch.utils.data.random_split(dataset_long_horizon, [0.5, 0.5]) # ensure there are two validation steps
     train_dataset, val_dataset = torch.utils.data.random_split(dataset, [0.8, 0.2])
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, num_workers=16, pin_memory=True)
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, num_workers=16, pin_memory=True, shuffle=True, drop_last=True)
     val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=batch_size*long_horizon_multiplier, num_workers=8)
     val_long_loader = torch.utils.data.DataLoader(val_long_horizon, batch_size=batch_size, num_workers=8)
     print(f'{len(dataset)=}\n{len(train_loader)=}\n{len(val_dataset)=}')
@@ -114,7 +118,8 @@ if __name__=='__main__':
     strategy = L.strategies.FSDPStrategy(state_dict_type='sharded')
     trainer = L.Trainer(max_epochs=max_epochs, accelerator='gpu', strategy=strategy, num_nodes=num_nodes,
                         gradient_clip_val=gradient_clip_val, gradient_clip_algorithm='value', #detect_anomaly=True,
-                        profiler=profiler, logger=logger, plugins=[SLURMEnvironment()], callbacks=[model_checkpoint_callback])
+                        profiler=profiler, logger=logger, plugins=[SLURMEnvironment()],
+                        callbacks=[model_checkpoint_callback, MemMonitorCallback()])
 
     val_dataloaders = [val_loader, val_long_loader] # long validation loader causes various problems with profiler & GPU utilization...
     trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_dataloaders) #, ckpt_path=ckpt_path)

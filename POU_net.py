@@ -241,6 +241,7 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
 
         # add in the explained variance term (2nd term) = Var(mus) = Var[E[Y|Z]]
         total_variance = total_variance + sum([gating_weights[:,i:i+1]*(mu-total_expectation)**2 for i, mu in enumerate(mus)])
+        mus.clear() # paranoia related to memory management
 
         return total_expectation, total_variance**0.5
 
