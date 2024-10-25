@@ -93,10 +93,45 @@ class FieldGatingNet(BasicLightningRegressor):
             self._cached_forward_results=None # reset cache
             self._cached_forward_shape=None # reset cache
 
+# these metrics need to be seperated for validatin & training!
+class MetricsModule(L.LightningModule):
+    def __init__(self, parent_module:L.LightningModule, n_outputs:int, prefix=''):
+        super().__init__()
+
+        # this list-trick prevents parent module being registered as a sub-module!
+        self._parent_module = [parent_module]
+        self.n_outputs=n_outputs
+        self.prefix=prefix
+
+        self.r2_score = torchmetrics.R2Score(num_outputs=n_outputs)
+        self.explained_variance = torchmetrics.ExplainedVariance()
+        self.wMAPE = torchmetrics.WeightedMeanAbsolutePercentageError()
+        self.sMAPE = torchmetrics.SymmetricMeanAbsolutePercentageError()
+
+    def log_metrics(self, y_pred, y):
+        with torch.inference_mode():
+            # to_table flattens all dims except for the channel dim (making it tabular)
+            to_table = lambda x: x.swapaxes(1, -1).reshape(-1, self.n_outputs)
+            y_pred, y = to_table(y_pred), to_table(y)
+
+            # simple helper does everything needed to log one metric!
+            def log_metric(name, metric=None, on_step=False, on_epoch=True, **kwd_args):
+                if metric is None: metric = getattr(self, name)
+                if on_step: metric(y_pred, y) # update metric
+                else: metric.update(y_pred, y)
+                self._parent_module[0].log(f'{self.prefix}{name}', metric, on_step=on_step,
+                                           on_epoch=on_epoch, logger=True, **kwd_args) # log metric
+
+            # we specify the metric itself for the first one to enable a different metric name
+            log_metric('R^2', self.r2_score, prog_bar=not self.prefix)
+            log_metric('explained_variance')
+            log_metric('wMAPE')
+            log_metric('sMAPE')
+
 class POU_net(L.LightningModule):
     ''' POU_net minus the useless L2 regularization '''
     def __init__(self, n_inputs, n_outputs, n_experts=5, ndims=2, lr=0.001, momentum=0.9, T_max=10,
-                 one_cycle=False, three_phase=False, RLoP=False, RLoP_factor=0.9, RLoP_patience=25,
+                 one_cycle=False, three_phase=False, RLoP=False, RLoP_factor=0.9, RLoP_patience:int=25,
                  make_optim: type=torch.optim.Adam, make_expert: type=MOR_Operator.MOR_Operator,
                  make_gating_net: type=FieldGatingNet, trig_encodings=True, **kwd_args):
         assert not (one_cycle and RLoP), 'These learning rate schedules are mututally exclusive!'
@@ -108,16 +143,9 @@ class POU_net(L.LightningModule):
         self.gating_net=make_gating_net(n_inputs, n_experts, ndims=ndims, trig_encodings=trig_encodings) # supports n_inputs!=2
         self.experts=nn.ModuleList([make_expert(n_inputs, n_outputs, ndims=ndims, **kwd_args) for i in range(n_experts)])
 
-        class MetricsModule(L.LightningModule):
-            def __init__(self): # these metrics need to be seperated for validatin & training!
-                super().__init__()
-                self.r2_score = torchmetrics.R2Score(num_outputs=n_outputs)
-                self.explained_variance = torchmetrics.ExplainedVariance()
-                self.wMAPE = torchmetrics.WeightedMeanAbsolutePercentageError()
-                self.sMAPE = torchmetrics.SymmetricMeanAbsolutePercentageError()
-        self.train_metrics = MetricsModule()
-        self.val_metrics = MetricsModule()
-        vars(self).update(locals()); del self.self
+        self.train_metrics = MetricsModule(self, n_outputs)
+        self.val_metrics = MetricsModule(self, n_outputs, prefix='val_')
+        vars(self).update(locals()); del self.self; del self.kwd_args
 
     def configure_optimizers(self):
         optim_kwd_args = {'lr': self.lr}
@@ -158,8 +186,8 @@ class POU_net(L.LightningModule):
         X, y = batch
         y_pred = self(X).reshape(y.shape)
         loss = F.mse_loss(y_pred, y)
-        self.log(f'{val*"val_"}loss', loss.item(), sync_dist=val, prog_bar=True)
-        self.log_metrics(y_pred, y, val) # log additional metrics
+        self.log(f'{val*"val_"}loss', loss.item(), sync_dist=val, prog_bar=not val)
+        self._log_metrics(y_pred, y, val) # log additional metrics
         return loss
 
     def validation_step(self, batch, batch_idx=None):
@@ -167,29 +195,12 @@ class POU_net(L.LightningModule):
         self.log('hp_metric', loss.item(), sync_dist=True)
         return loss
 
-    def log_metrics(self, y_pred, y, val=False):
-        if not val: self.log_lr()
-
-        # to_table flattens all dims except for the channel dim (making it tabular)
-        to_table = lambda x: x.swapaxes(1, -1).reshape(-1, self.n_outputs)
-        y_pred, y = to_table(y_pred), to_table(y)
+    def _log_metrics(self, y_pred, y, val=False):
+        if not val: self._log_lr()
         metrics = self.val_metrics if val else self.train_metrics
+        metrics.log_metrics(y_pred, y)
 
-        # simple helper does everything needed to log one metric!
-        def log_metric(name, metric=None, on_step=False, on_epoch=True, **kwd_args):
-            if metric is None: metric = getattr(metrics, name)
-            if on_step: metric(y_pred, y) # update metric
-            else: metric.update(y_pred, y)
-            self.log(f'{val*"val_"}{name}', metric, on_step=on_step,
-                     on_epoch=on_epoch, logger=True, **kwd_args) # log metric
-
-        # we specify the metric itself for the first one to enable a different metric name
-        log_metric('R^2', metrics.r2_score, prog_bar=True)
-        log_metric('explained_variance')
-        log_metric('wMAPE')
-        log_metric('sMAPE')
-
-    def log_lr(self):
+    def _log_lr(self):
         scheduler = self.lr_schedulers()
         lrs = scheduler.get_last_lr()
         if type(lrs) in [list, tuple]:
@@ -205,6 +216,9 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
 
         # make VI reparameterize our entire model
         model_agnostic_BNN.model_agnostic_dnn_to_bnn(self, train_dataset_size, prior_cfg=prior_cfg)
+
+        # add additional set of metrics for validating aleatoric UQ itself compared to error
+        self.val_UQ_metrics = MetricsModule(self, n_outputs, prefix='val_UQ_')
 
     def forward(self, X, Y=None):
         ''' crazy forward method that does everything needed for total variance of mixture distribution '''
@@ -227,10 +241,11 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
 
         # add in the explained variance term (2nd term) = Var(mus) = Var[E[Y|Z]]
         total_variance = total_variance + sum([gating_weights[:,i:i+1]*(mu-total_expectation)**2 for i, mu in enumerate(mus)])
+        mus.clear() # paranoia related to memory management
 
         return total_expectation, total_variance**0.5
 
-    ''' 
+    '''
     # original forward before probabilistic considerations
     def forward(self, X, Y=None):
         if Y is None: Y = torch.zeros(1,device=X.device, dtype=X.dtype).expand(*X.shape)
@@ -244,13 +259,27 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
 
     def training_step(self, batch, batch_idx=None, val=False):
         X, y = batch
-        y_pred_mu, y_pred_sigma = self(X)
+        y_pred_all = self(X)
+        y_pred_mu, y_pred_sigma = y_pred_all
 
         #num_batches = len(self.trainer.train_dataloader.dataset)//self.trainer.train_dataloader.batch_size # sneakily extract from PL
         kl_loss = self.get_kl_loss()#/(num_batches*y.numel()) # (weighted)
         loss = model_agnostic_BNN.nll_regression(y_pred_mu, y, y_pred_sigma=y_pred_sigma, reduction=torch.mean) + kl_loss # posterior loss
 
-        self.log(f'{val*"val_"}loss', loss.item(), sync_dist=val, prog_bar=True)
-        self.log(f'{val*"val_"}kl_loss', kl_loss.item(), sync_dist=val, prog_bar=True)
-        self.log_metrics(y_pred_mu, y, val) # log additional mu metrics
+        self.log(f'{val*"val_"}loss', loss.item(), sync_dist=val, prog_bar=not val)
+        if not val: self.log('kl_loss', kl_loss.item(), sync_dist=val, prog_bar=True)
+        self._log_metrics(y_pred_all, y, val) # log additional metrics (mu & sigma variants)
+
         return loss
+
+    def _log_metrics(self, y_pred: tuple, y: torch.Tensor, val=False):
+        y_pred_mu, y_pred_sigma = y_pred # break apart pred tuple
+        super()._log_metrics(y_pred_mu, y, val=val) # log regular mu metrics & lr (implicitly)
+
+        if not val: return # UQ metrics for training would be overkill...
+        sigma_to_mad_coef = 0.7978865 # this magic constant can be multiplied with sigma of a 1d guassian to obtain the MAD! E[|X-E[X]|] (expected absolute error)
+        with torch.inference_mode():
+            y_abs_error=(y-y_pred_mu).abs() # y_pred_mu is to y, as y_pred_sigma is to y_abs_error
+            y_pred_MAD = y_pred_sigma*sigma_to_mad_coef
+            self.val_UQ_metrics.log_metrics(y_pred_MAD, y_abs_error)
+            self.log(f'val_UQ_MAE', (y_abs_error-y_pred_MAD).abs().mean(), sync_dist=True, on_epoch=True, on_step=False)
