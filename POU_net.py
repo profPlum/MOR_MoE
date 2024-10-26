@@ -9,6 +9,8 @@ import warnings
 import random
 from contextlib import contextmanager
 
+import utils
+
 # Verified to work: 7/18/24
 # Double verified to work (and reproduce specific partition)
 # Triple verified to work (with higher dimensionalities/n_inputs)
@@ -60,7 +62,8 @@ class FieldGatingNet(BasicLightningRegressor):
             assert self._cached_forward_results is not None
             return self._cached_forward_results
 
-        pos_encodings = self._make_positional_encodings(X.shape[-self.ndims:])
+        with torch.no_grad():
+            pos_encodings = self._make_positional_encodings(X.shape[-self.ndims:])
         #pos_encodings = pos_encodings.expand(X.shape[0], *pos_encodings.shape[1:])
         gating_logits = self._gating_net(pos_encodings)
         if self.training and self.noise_sd>0: gating_logits = gating_logits + torch.randn_like(gating_logits, requires_grad=False)*self.noise_sd
@@ -219,7 +222,7 @@ class POU_net(L.LightningModule):
 import model_agnostic_BNN
 
 class PPOU_net(POU_net): # Not really, it's POU+VI
-    def __init__(self, n_inputs, n_outputs, train_dataset_size, *args, prior_cfg={}, **kwd_args):
+    def __init__(self, n_inputs, n_outputs, train_dataset_size, *args, total_variance=True, prior_cfg={}, **kwd_args):
         # we double output channels to have the sigma predictions too
         super().__init__(n_inputs*2, n_outputs*2, *args, **kwd_args)
 
@@ -228,7 +231,8 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
 
         # add additional set of metrics for validating aleatoric UQ itself compared to error
         self.val_UQ_metrics = MetricsModule(self, n_outputs, prefix='val_UQ_')
-        self._zero_expert_sigma=nn.Parameter(torch.randn([]))
+        self._zero_expert_sigma=nn.Parameter(torch.randn([1]))
+        self._total_variance=total_variance
 
     def forward(self, X, Y=None):
         ''' crazy forward method that does everything needed for total variance of mixture distribution with zero expert '''
@@ -250,14 +254,15 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
             total_expectation = total_expectation + gating_weights[:,i:i+1]*mu
             total_variance = total_variance + gating_weights[:,i:i+1]*sigma**2
 
-        # add in the explained variance term (2nd term) = Var(mus) = Var[E[Y|Z]]
-        total_variance = total_variance + sum([gating_weights[:,i:i+1]*(mu-total_expectation)**2 for i, mu in enumerate(mus)])
+        if self._total_variance: # add in the explained variance term (2nd term) = Var(mus) = Var[E[Y|Z]]
+            total_variance = total_variance + sum([gating_weights[:,i:i+1]*(mu-total_expectation)**2 for i, mu in enumerate(mus)])
         mus.clear() # paranoia related to memory management
 
         # handle zero expert
         zero_expert_gating_weights = 1-gating_weights.sum(axis=1) # recover zero expert weights
-        total_variance = total_variance + gating_weights_zero_expert*F.softplus(self._zero_expert_sigma)**2 # for 1st term
-        total_variance = total_variance + zero_expert_gating_weights*total_expectation**2 # for 2nd term (total_expectation**2==(0-total_expectation)**2)
+        total_variance = total_variance + zero_expert_gating_weights*F.softplus(self._zero_expert_sigma)**2 # for 1st term
+        if self._total_variance:
+            total_variance = total_variance + zero_expert_gating_weights*total_expectation**2 # for 2nd term (total_expectation**2==(0-total_expectation)**2)
 
         return total_expectation, total_variance**0.5
 

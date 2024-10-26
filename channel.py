@@ -16,6 +16,7 @@ gradient_clip_val=float(os.environ.get('GRAD_CLIP', 2.5e-3)) # grad clip adjuste
 make_optim=eval(f"torch.optim.{os.environ.get('OPTIM', 'Adam')}")
 ckpt_path=os.environ.get('CKPT_PATH', None)
 
+use_total_variance=bool(int(os.environ.get('TOTAL_VARIANCE', True)))
 use_trig = bool(int(os.environ.get('TRIG_ENCODINGS', True))) # Ravi's trig encodings
 use_VI = bool(int(os.environ.get('VI', True))) # whether to enable VI
 prior_sigma=float(os.environ.get('PRIOR_SIGMA', 0.2)) # this prior sigma almost matches he sigma of initialization
@@ -86,7 +87,8 @@ if __name__=='__main__':
     SimModelClass, VI_kwd_args = POU_NetSimulator, {}
     if use_VI: # VI is optional
         SimModelClass = PPOU_NetSimulator
-        VI_kwd_args = {'prior_cfg': {'prior_sigma': prior_sigma}, 'train_dataset_size': model_agnostic_BNN.get_dataset_size(train_dataset)}
+        VI_kwd_args = {'prior_cfg': {'prior_sigma': prior_sigma}, 'train_dataset_size': model_agnostic_BNN.get_dataset_size(train_dataset),
+                       'total_variance': use_total_variance}
     if ckpt_path: # secretly use the load from checkpoint api if needed
         SimModelClass_ = SimModelClass
         SimModelClass = lambda **kwd_args: SimModelClass_.load_from_checkpoint(ckpt_path, **kwd_args)
