@@ -259,7 +259,7 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
         mus.clear() # paranoia related to memory management
 
         # handle zero expert
-        zero_expert_gating_weights = 1-gating_weights.sum(axis=1) # recover zero expert weights
+        zero_expert_gating_weights = 1-gating_weights.sum(axis=1, keepdim=True) # recover zero expert weights
         total_variance = total_variance + zero_expert_gating_weights*F.softplus(self._zero_expert_sigma)**2 # for 1st term
         if self._total_variance:
             total_variance = total_variance + zero_expert_gating_weights*total_expectation**2 # for 2nd term (total_expectation**2==(0-total_expectation)**2)
