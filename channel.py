@@ -16,7 +16,7 @@ gradient_clip_val=float(os.environ.get('GRAD_CLIP', 2.5e-3)) # grad clip adjuste
 make_optim=eval(f"torch.optim.{os.environ.get('OPTIM', 'Adam')}")
 ckpt_path=os.environ.get('CKPT_PATH', None)
 
-use_total_variance=bool(int(os.environ.get('TOTAL_VARIANCE', True)))
+use_total_variance=bool(int(os.environ.get('TOTAL_VARIANCE', False)))
 use_trig = bool(int(os.environ.get('TRIG_ENCODINGS', True))) # Ravi's trig encodings
 use_VI = bool(int(os.environ.get('VI', True))) # whether to enable VI
 prior_sigma=float(os.environ.get('PRIOR_SIGMA', 0.2)) # this prior sigma almost matches he sigma of initialization
@@ -115,8 +115,8 @@ if __name__=='__main__':
                                            on_trace_ready=torch.profiler.tensorboard_trace_handler(logger.log_dir))
                                            #schedule=torch.profiler.schedule(skip_first=10, wait=5, warmup=2, active=6, repeat=3))
 
-    # This is needed to avoid problem caused by large model size
-    model_checkpoint_callback=L.callbacks.ModelCheckpoint(save_weights_only=True, monitor='loss')
+    # Weight-only sharded checkpoints are needed to avoid problem caused by large model size
+    model_checkpoint_callback=L.callbacks.ModelCheckpoint(save_weights_only=True, monitor='val_loss/dataloader_idx_1') # monitor long-horizon loss
     strategy = L.strategies.FSDPStrategy(state_dict_type='sharded')
     trainer = L.Trainer(max_epochs=max_epochs, accelerator='gpu', strategy=strategy, num_nodes=num_nodes,
                         gradient_clip_val=gradient_clip_val, gradient_clip_algorithm='value', #detect_anomaly=True,
