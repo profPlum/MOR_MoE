@@ -68,9 +68,9 @@ class MemMonitorCallback(L.Callback):
 if __name__=='__main__':
     # setup dataset
     long_horizon_multiplier=10
-    dataset = JHTDB_Channel('data/turbulence_output', time_chunking=time_chunking)
-    dataset_long_horizon = JHTDB_Channel('data/turbulence_output', time_chunking=time_chunking*long_horizon_multiplier)
-    _, val_long_horizon = torch.utils.data.random_split(dataset_long_horizon, [0.5, 0.5]) # ensure there are two validation steps
+    dataset = JHTDB_Channel('data/turbulence_output', time_chunking=time_chunking) # called dataloader_idx_0 in tensorboard
+    dataset_long_horizon = JHTDB_Channel('data/turbulence_output', time_chunking=time_chunking*long_horizon_multiplier) # called dataloader_idx_1 in tensorboard
+    _, val_long_horizon = torch.utils.data.random_split(dataset_long_horizon, [0.5, 0.5]) # 50% ensures there are two validation steps
     train_dataset, val_dataset = torch.utils.data.random_split(dataset, [0.8, 0.2])
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, num_workers=16, pin_memory=True, shuffle=True, drop_last=True)
     val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=batch_size*long_horizon_multiplier, num_workers=8)
