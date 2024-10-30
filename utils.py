@@ -19,6 +19,21 @@ def check_point(msg:str):
 check_point.num=0
 check_point.last_time=time.time()
 
+from contextlib import contextmanager
+
+# This is a different flavor of check_point
+@contextmanager
+def profile_it(msg: str):
+    try:
+        profile_it.num+=1
+        start_time = time.time()
+        yield
+    finally:
+        duration = time.time()-start_time
+        msg = f'Profile #{profile_it.num} ({LINE(1)}): {msg}\nDuration in Seconds: {duration}'
+        print(msg, flush=True)
+profile_it.num=0
+
 # the simpler ways... now deprecated for consistent/recorded scaling
 np_normalize = lambda array: (array-array.mean())/array.std()
 
