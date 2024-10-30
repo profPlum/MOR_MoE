@@ -202,9 +202,10 @@ class POU_net(L.LightningModule):
         self._log_metrics(y_pred, y, val) # log additional metrics
         return loss
 
-    def validation_step(self, batch, batch_idx=None):
+    def validation_step(self, batch, batch_idx=None, data_loader_idx=0):
         loss = self.training_step(batch, batch_idx, val=True)
-        self.log('hp_metric', loss.item(), sync_dist=True)
+        if data_loader_idx==0:
+            self.log('hp_metric', loss.item(), sync_dist=True)
         return loss
 
     def _log_metrics(self, y_pred, y, val=False):

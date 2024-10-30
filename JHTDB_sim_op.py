@@ -186,7 +186,7 @@ class POU_NetSimulator(POU_net):
         try:
             org_steps=self.n_steps
             self.n_steps = y.shape[-1]
-            super().validation_step(batch, batch_idx) #, dataloader_idx)
+            super().validation_step(batch, batch_idx, dataloader_idx)
         finally:
             self.n_steps=org_steps
 
