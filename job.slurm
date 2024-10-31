@@ -5,7 +5,7 @@
 #SBATCH --exclusive
 #SBATCH --nodes=20                           # Number of nodes
 #SBATCH --ntasks-per-node=1                  # Tasks per node (usually 1 for PyTorch)
-#SBATCH --time=1-00:00:00                    # Maximum runtime (HH:MM:SS)
+#SBATCH --time=3-0:00:00                     # Maximum runtime (HH:MM:SS)
 #SBATCH --partition=glinda                   # Partition name
 #SBATCH --exclude gn78,gn71,gn54,gn60 # gn54 failed in srun echo hi... gn60 failed with unknown error, idk if others are still problematic 
 
@@ -38,9 +38,10 @@ MLE_LR=2.5e-4 # this is 8x higher than theory suggests (it is only possible b/c 
 # (MLE) 582 epochs takes 24 hours (with 8 nodes, measured 10/22/24)
 # (VI) 515 epochs takes 24 hours (with 12 nodes, measured 10/22/24)
 # (VI) 644 epochs takes 24 hours (with 20 nodes, measured 10/23/24)
-# (VI+TRIG) 333 epochs takes 24 hours (with 10 nodes, measured 10/26/24)
 # (VI) 445 epochs takes 24 hours (with 10 nodes, measured 10/26/24)
-export MAX_EPOCHS=416 # MUST BE ACCURATELY ADJUSTED based on estimated epochs (this ensures that OneCycle is properly calibrated)
+# (VI+TRIG) 333 epochs takes 24 hours (with 10 nodes, measured 10/26/24)
+# (VI+TRIG) 678 epochs takes 24 hours (with 20 nodes, measured 10/31/24)
+export MAX_EPOCHS=2042 # MUST BE ACCURATELY ADJUSTED based on estimated epochs (this ensures that OneCycle is properly calibrated)
 export LR=$VI_LR # this is 4x higher than theory suggests (it is only possible b/c grad clip)
 export GRAD_CLIP=2.5e-3 # it is best to keep this 2.5e-3 value, it will automatically be adjusted based on number of recursive timesteps
 export PRIOR_SIGMA=0.2 # approximately reflects the values of sigma at initialization
@@ -50,8 +51,8 @@ export ONE_CYCLE=$((! RLoP)) # OneCycle warmup & decay lr schedule. Really impor
 export THREE_PHASE=0 # faster decay in one cycle, usually not needed
 export VI=1 # use VI or not (in bash binary booleans have the best support for boolean logic)
 export TRIG_ENCODINGS=1 # trig encodings slow down training almost 1/3 but might give better partitions?
-export TOTAL_VARIANCE=0 # whether to use total variaONE_CYCLEnce for NLL
-export TIME_CHUNKING=10 # 10 is possible with 20 A100 nodes
+export TOTAL_VARIANCE=0 # whether to use total variance for NLL
+export TIME_CHUNKING=9 # 9 is max (but only verified to work for 10 at least nodes)
 
 ## IMPORTANT: you NEED to use `python -m pytorch_lightning.utilities.consolidate_checkpoint epoch=X-step=Y.ckpt` in order to get a useable model file for resuming or prediction
 ## Once you do that you can pass the checkpoint path like below to resume a run to get even better performance than what was achievable in the first run

@@ -5,7 +5,7 @@ import os
 import torch
 from torch.optim import lr_scheduler
 
-k_modes=[103,26,77] # can be a list
+k_modes=[103,26,77] # can be a list, GOTCHA: don't change!
 n_experts: int=2 # number of experts in MoE
 time_chunking: int=int(os.environ.get('TIME_CHUNKING', 8)) # how many self-aware recursive steps to take
 batch_size: int=1 # batch size, with VI experts we can only fit 1 batch on 20 GPUs!
