@@ -111,8 +111,8 @@ if __name__=='__main__':
     job_name = os.environ.get("SLURM_JOB_NAME", 'JHTDB_MOR_MoE')
     version = os.environ.get("SLURM_JOB_ID", None) if job_name!='interactive' else None
     logger = TensorBoardLogger("lightning_logs", name=job_name, version=version)
-    profiler = L.profilers.PyTorchProfiler(profile_memory=True, with_stack=True,
-                                           on_trace_ready=torch.profiler.tensorboard_trace_handler(logger.log_dir))
+    profiler = L.profilers.PyTorchProfiler(profile_memory=True)#, with_stack=False,
+                                           #on_trace_ready=torch.profiler.tensorboard_trace_handler(logger.log_dir))
                                            #schedule=torch.profiler.schedule(skip_first=10, wait=5, warmup=2, active=6, repeat=3))
 
     # Weight-only sharded checkpoints are needed to avoid problem caused by large model size
