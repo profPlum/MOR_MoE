@@ -17,7 +17,6 @@ import utils
 class FieldGatingNet(BasicLightningRegressor):
     """
     Essentially a Gating Operator that outputs class probabilities across the field.
-    It is now a function of the field itself and the coordinates of the field positions!
     Also it will implicitly add the option of a 'null expert' (an expert that just predicts 0).
     And it adds some small amount of noise to the gating logits to encourage exploration.
     """
@@ -66,6 +65,7 @@ class FieldGatingNet(BasicLightningRegressor):
             pos_encodings = self._make_positional_encodings(X.shape[-self.ndims:])
         #pos_encodings = pos_encodings.expand(X.shape[0], *pos_encodings.shape[1:])
         gating_logits = self._gating_net(pos_encodings)
+
         if self.training and self.noise_sd>0: gating_logits = gating_logits + torch.randn_like(gating_logits, requires_grad=False)*self.noise_sd
         global_logits = torch.randn(gating_logits.shape[1], requires_grad=False) # random selection
         assert len(global_logits.shape)==1 # 1D
@@ -148,7 +148,6 @@ class POU_net(L.LightningModule):
                  make_gating_net: type=FieldGatingNet, trig_encodings=True, **kwd_args):
         assert not (one_cycle and RLoP), 'These learning rate schedules are mututally exclusive!'
         super().__init__()
-        RLoP_patience = int(RLoP_patience) # cast
         self.save_hyperparameters(ignore=['n_inputs', 'n_outputs', 'ndims', 'simulator', 'make_expert', 'make_gating_net'])
 
         # NOTE: The gating_net implicitly adds a "ZeroExpert"
@@ -223,7 +222,7 @@ class POU_net(L.LightningModule):
 import model_agnostic_BNN
 
 class PPOU_net(POU_net): # Not really, it's POU+VI
-    def __init__(self, n_inputs, n_outputs, train_dataset_size, *args, total_variance=True, prior_cfg={}, **kwd_args):
+    def __init__(self, n_inputs, n_outputs, train_dataset_size, *args, total_variance=False, prior_cfg={}, **kwd_args):
         # we double output channels to have the sigma predictions too
         super().__init__(n_inputs*2, n_outputs*2, *args, **kwd_args)
 
@@ -233,18 +232,21 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
         # add additional set of metrics for validating aleatoric UQ itself compared to error
         self.val_UQ_metrics = MetricsModule(self, n_outputs, prefix='val_UQ_')
         self._zero_expert_sigma=nn.Parameter(torch.randn([1]))
-        self._total_variance=total_variance
+        self.use_total_variance=total_variance
 
-    def forward(self, X, Y=None):
+    def forward(self, mu, sigma=None, use_total_variance=None):
         ''' crazy forward method that does everything needed for total variance of mixture distribution with zero expert '''
-        X = torch.as_tensor(X).to(self.device)
-        if Y is None: Y = torch.zeros(1,device=X.device, dtype=X.dtype).expand(*X.shape)
-        X = torch.cat([X,Y], axis=1)
+        mu = torch.as_tensor(mu).to(self.device)
+        if sigma is None: sigma = torch.zeros(1,device=mu.device, dtype=mu.dtype).expand(*mu.shape)
+        X = torch.cat([mu,sigma], axis=1)
 
         gating_weights, topk = self.gating_net(X)
         total_expectation = 0 # E[Y] = E[E[Y|Z]]
         total_variance = 0 # Var[Y] = E[Var[Y|Z]]+Var[E[Y|Z]]
         mus = [] # necessary for 2nd term in total variance eq.
+
+        if use_total_variance is None:
+            use_total_variance=self.use_total_variance
 
         for i, k_i in enumerate(topk):
             pred_i = self.experts[k_i](X)
@@ -255,14 +257,14 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
             total_expectation = total_expectation + gating_weights[:,i:i+1]*mu
             total_variance = total_variance + gating_weights[:,i:i+1]*sigma**2
 
-        if self._total_variance: # add in the explained variance term (2nd term) = Var(mus) = Var[E[Y|Z]]
+        if use_total_variance: # add in the explained variance term (2nd term) = Var(mus) = Var[E[Y|Z]]
             total_variance = total_variance + sum([gating_weights[:,i:i+1]*(mu-total_expectation)**2 for i, mu in enumerate(mus)])
         mus.clear() # paranoia related to memory management
 
         # handle zero expert
         zero_expert_gating_weights = 1-gating_weights.sum(axis=1, keepdim=True) # recover zero expert weights
         total_variance = total_variance + zero_expert_gating_weights*F.softplus(self._zero_expert_sigma)**2 # for 1st term
-        if self._total_variance:
+        if use_total_variance:
             total_variance = total_variance + zero_expert_gating_weights*total_expectation**2 # for 2nd term (total_expectation**2==(0-total_expectation)**2)
 
         return total_expectation, total_variance**0.5

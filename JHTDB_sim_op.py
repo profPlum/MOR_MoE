@@ -14,13 +14,13 @@ from POU_net import POU_net, PPOU_net
 rfft = functools.partial(torch.fft.rfftn,dim=[0,1,2])
 irfft = functools.partial(torch.fft.irfftn,dim=[0,1,2])
 
-def divide_no_nan(a,b):
+def divide_no_nan(a,b, fill_tensor=None):
     #return a/b w/o nan values or gradient
     mask = b!=0
     b = b + ~mask #aka b[~mask] = 1
     result = a/b
     mask = torch.broadcast_to(mask, result.shape)
-    clean_result = torch.zeros_like(result)
+    clean_result = torch.zeros_like(result) if fill_tensor is None else fill_tensor.clone()
     clean_result[mask] = result[mask]
     return clean_result
 
@@ -29,8 +29,30 @@ def divide_no_nan(a,b):
 #    return torch.nan_to_num(a/b,nan=0.0, posinf=0., neginf=0.)
 
 class IdentityOp:
-    def forward(self, X):
-        return X
+    def forward(self, *args):
+        assert len(args)<=2
+        return args
+
+"""
+class DivergenceFreeConstraint(L.LightningModule):
+    def __init__(self, grid_size, domain_size):
+        ''' set grid_size=[nx,ny,nz] & domain_size=[Lx,Ly,Lz] '''
+        vars(self).update(locals()); del self.self
+        with torch.no_grad():
+            # k := freq_coordinates
+            self._k = [torch.fft.fftfreq(self.grid_size[i], d=self.domain_size[i], device=self.device) for i in range(3)]
+            self._k = torch.stack(torch.meshgrid(*self._k, indexing='ij'), axis=0)
+            self._kxk = -torch.cross(self._k, self._k, dim=0)+0j
+            self._k_norm_sq = torch.norm(self._k, dim=0)**2
+
+    def constrain(self, u_hat):
+        ''' Implements Ravi's divergence-free constraint equation: u=F^{-1}((-k x k x F(u_hat))/||k||^2) '''
+        ufftn = torch.fft.fftn(u_hat, dim=[-3,-2,-1])
+        kxkxFu = torch.cross(kxk, ufftn, dim=0)
+        Fu = kxkxFu/self._k_norm_sq
+        u = torch.fft.ifftn(Fu, dim=[-3,-2,-1])
+        return u.real
+""";
 
 class Sim(L.LightningModule):
     '''
@@ -54,6 +76,10 @@ class Sim(L.LightningModule):
         self.k = torch.tensor(np.stack(np.meshgrid(np.fft.fftfreq(nx)*nx*2.*np.pi/Lx,
                                        np.fft.fftfreq(ny)*ny*2.*np.pi/Ly,
                                        np.fft.rfftfreq(nz)*nz*2.*np.pi/Lz,indexing='ij'),axis=-1)).cfloat()
+        self.knorm2 = torch.sum(self.k**2,-1).real.float()
+
+        ## for divergence free constraint
+        #self._neg_kxk = -torch.cross(self.k, self.k, dim=-1)+0j
 
         self.x = torch.tensor(np.stack(np.meshgrid(np.arange(nx)/nx*Lx,
                                        np.arange(ny)/ny*Ly,
@@ -82,7 +108,7 @@ class Sim(L.LightningModule):
                 self.register_buffer(name, value.detach())
 
     def genIC(self):
-        h = torch.tensor(np.random.normal(0,1,(self.nx,self.ny,self.nz,3))).float()
+        h = torch.tensor(np.random.normal(0,1,(self.nx,self.ny,self.nz,3)), device=self.device, dtype=float)
         hh = rfft(h) * self.filt2[...,None]
         proj = self.k*(torch.sum(self.k*hh,axis=-1)/self.knorm2)[...,None]
         proj[0]=0
@@ -91,17 +117,44 @@ class Sim(L.LightningModule):
 
     # NOTE: u.shape==[channel, x, y, z]
     def NSupd(self,u): # Navier-stokes update
-        u = u.permute(1,2,-1,0) #torch.moveaxis(u, 0, -1)
+        u = u.permute(1,2,-1,0) # i.e. torch.moveaxis(u, 0, -1)
         uh = rfft(u)
         assert list(uh.shape)[:-1]==self.shapeh
         u2h = rfft(torch.einsum('...i,...j->...ij',u,u))
-        u = irfft(self.Ainv[...,None]*(
-            uh + self.dt*(-1.j*torch.einsum('...j,...ij->...i',self.k,u2h)
+        Fu = self.Ainv[...,None]*(
+                 uh + self.dt*(-1.j*torch.einsum('...j,...ij->...i',self.k,u2h)
                  + 1.j*divide_no_nan(torch.einsum('...i,...j,...k,...jk->...i',self.k,self.k,self.k,u2h),self.knorm2[...,None])
-                 )),
-                 s=self.shapef
-            )
+                 ))
+        u = irfft(Fu, s=self.shapef)
         return u.permute(-1,0,1,2) # i.e. torch.moveaxis(u, -1, 0)
+
+    '''
+    @property # used for divergence free constraint, it is a property for legacy reasons
+    def _neg_kxk(self):
+        try: return self._neg_kxk_
+        except AttributeError:
+            neg_kxk = -torch.cross(self.k, self.k, dim=-1)+0j
+            self.register_buffer('_neg_kxk_', neg_kxk.detach())
+            return self._neg_kxk_
+    ''';
+
+    # NOTE: u_hat.shape==[channel, x, y, z]
+    def divergence_free_constraint(self, u_hat):
+        ## e.g. this will use self.nx and self.Lx when passed 'x' as the arg
+        #freq_coords = lambda dim_char: torch.fft.fftfreq(vars(self)[f'n{dim_char}'], d=vars(self)[f'L{dim_char}'], device=self.device)
+
+        ## k := freq_coordinates
+        #k = [freq_coords('x'), freq_coords('y'), freq_coords('z')]
+        #k = torch.stack(torch.meshgrid(*k, indexing='ij'), axis=0)
+        #kxk = -torch.cross(k, k, dim=0)+0j
+
+        k = self.k.permute(-1,0,1,2)+0j # i.e. torch.moveaxis(k, -1, 0)
+        #neg_kxk = -torch.cross(k, k, dim=-1)+0j
+        Fu_hat = torch.fft.rfftn(u_hat, s=u_hat.shape[-3:])
+        kxkxFu_hat = torch.cross(-k, torch.cross(k, Fu_hat, dim=0), dim=0)
+        Fu = divide_no_nan(kxkxFu_hat, self.knorm2, fill_tensor=Fu_hat)
+        u = torch.fft.irfftn(Fu, s=u_hat.shape[-3:])
+        return u.real
 
     # set the neural operator for correction
     def set_operator(self, op):
@@ -116,14 +169,16 @@ class Sim(L.LightningModule):
         # __call__() is necessary for hooks... <- but this should already happen outside!
 
     # This needs to output intermediate time-steps to get full loss!
-    def evolve(self,u0,n,intermediate_outputs=False, intermediate_output_stride=1):
+    def evolve(self, u0, n, intermediate_outputs=False, intermediate_output_stride=1, divergence_free=False):
         u = u0
         outputs = []
         NSupd = torch.vmap(self.NSupd) # only this needs vmapping, NeuralOp is already batched
+        divergence_free_constraint = torch.vmap(self.divergence_free_constraint)
         if len(u.shape)==4: # all permute ops above assume 4 dims (before vmap)
             u = u[None] # add batch dim
         for i in range(n):
             u = self.learnedCorrection(NSupd(u))
+            if divergence_free: u = divergence_free_constraint(u)
             if u.isnan().any():
                 warnings.warn(f'Simulation has diverged into NaNs! At step: {i}')
             #assert not u.isnan().any()
@@ -137,16 +192,19 @@ class Sim(L.LightningModule):
 # For use with PPOU_net
 class UQ_Sim(Sim):
     # This needs to output intermediate time-steps to get full loss!
-    def evolve(self,u0,n,intermediate_outputs=False, intermediate_output_stride=1):
+    def evolve(self,u0,n,intermediate_outputs=False, intermediate_output_stride=1, divergence_free=False):
         u = u0
         u_outputs = []
         uq_outputs = []
         NSupd = torch.vmap(self.NSupd) # only this needs vmapping, NeuralOp is already batched
+        divergence_free_constraint = torch.vmap(self.divergence_free_constraint)
+
         if len(u.shape)==4: # all permute ops above assume 4 dims (before vmap)
             u = u[None] # add batch dim
-        uq = None
+        uq = torch.zeros(1,device=u.device, dtype=u.dtype).expand(*u.shape) # add it explicitly for identity op to work
         for i in range(n):
             u, uq = self.op.forward(NSupd(u), uq)
+            if divergence_free: u = divergence_free_constraint(u)
             if u.isnan().any() or uq.isnan().any():
                 warnings.warn(f'Simulation has diverged into NaNs! At step: {i}')
             #assert not (u.isnan().any() or uq.isnan().any())

@@ -41,7 +41,7 @@ nll_classification = lambda y_pred, y: _pt_nll_classificiation(y_pred, y)
 # NOTE: This generalizes both the simpler (constant sigma) and more general (non-constant sigma) cases!
 def nll_regression(y_pred, y, y_pred_sigma=1.0, reduction=torch.sum): # y_pred_sigma sigma can be assumed constant, but it's best if you don't
     y_pred_sigma = torch.as_tensor(y_pred_sigma, device=y_pred.device, dtype=y_pred.dtype)
-    element_wise_NLL = (y_pred-y)**2/(2*y_pred_sigma**2) + torch.log(y_pred_sigma)
+    element_wise_NLL = (y_pred-y)**2/(2*y_pred_sigma**2) + torch.log(y_pred_sigma**2)/2 # NOTE: we only use sigma**2 so it can be negative...
     return reduction(element_wise_NLL) # sum (?) over element-wise NLL
     # Sum over element-wise NLL; this is mathematically correct when you assume output UQ is independent.
 
@@ -207,7 +207,6 @@ def get_BNN_pred_distribution(bnn_model, x_input, n_samples=100, no_grad=True):#
     preds = []
     for i in range(n_samples):
         preds.append(bnn_model(x_input).cpu())
-        #if i%cleanup_freq==0: clear_cache()
     preds = torch.stack(preds, axis=0)
     clear_cache()
     return preds
@@ -242,27 +241,38 @@ class CummVar:
             return self(np.atleast_1d(X))
             # If X *is just a python scalar* then convert to numpy 1d array (of length 1)
 
-# More efficient now! It doesn't rely on pred distribution!!
-# Verified to work 3/15/24
+import utils
+
+# updated: uses laws of total variance and expectation
 def get_BNN_pred_moments(bnn_model, x_inputs, n_samples=100, no_grad=True, verbose=True):
     if no_grad:
-        bnn_model.eval()
         with torch.inference_mode():
             return get_BNN_pred_moments(bnn_model, x_inputs, n_samples=n_samples, no_grad=False, verbose=verbose)
 
-    print_interval = max(n_samples//10, 1)
-    total_pred = 0
-    cum_var = CummVar()
+    total_expectation = 0 # E[Y] = E[E[Y|Z]]
+    total_variance = 0 # Var[Y] = E[Var[Y|Z]]+Var[E[Y|Z]]
+    mus = [] # necessary for 2nd term in total variance eq.
     assert n_samples>1
     for i in range(n_samples):
-        if i%print_interval==0:
-            if verbose: print(f'{i}th moment sample')
-        pred = bnn_model(x_inputs.float())
-        total_pred += pred
-        cum_var(pred.unsqueeze(0)) # update, first dim is reduced so we add it
-    mean_pred = total_pred/n_samples
-    sd_pred = cum_var.var**0.5
-    return mean_pred, sd_pred
+        if verbose and i%print_interval==0:
+            print(f'{i}th moment sample')
+            utils.report_cuda_memory_usage(clear=False)
+        mu, sigma = bnn_model(x_inputs.float())
+        #mu = pred_i[:, :pred_i.shape[1]//2]
+        #sigma = pred_i[:, pred_i.shape[1]//2:]
+        mus.append(mu)
+
+        total_expectation = total_expectation + mu
+        total_variance = total_variance + sigma**2
+
+    # take average
+    total_expectation = total_expectation/n_samples
+    total_variance = total_variance/n_samples
+
+    # add in the explained variance term (2nd term) = Var(mus) = Var[E[Y|Z]]
+    total_variance = total_variance + sum([(mu-total_expectation)**2/len(mus) for mu in mus])
+
+    return total_expectation, total_variance**0.5
 
 # Verified to work: 5/20/21
 def _distance(p1, p2, reduce_start_dim=2):
