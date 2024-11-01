@@ -116,7 +116,7 @@ if __name__=='__main__':
                                            #schedule=torch.profiler.schedule(skip_first=10, wait=5, warmup=2, active=6, repeat=3))
 
     # Weight-only sharded checkpoints are needed to avoid problem caused by large model size
-    model_checkpoint_callback=L.callbacks.ModelCheckpoint(save_weights_only=True, monitor='val_loss/dataloader_idx_1') # monitor long-horizon loss
+    model_checkpoint_callback=L.callbacks.ModelCheckpoint(save_weights_only=True, monitor='loss')
     strategy = L.strategies.FSDPStrategy(state_dict_type='sharded')
     trainer = L.Trainer(max_epochs=max_epochs, accelerator='gpu', strategy=strategy, num_nodes=num_nodes,
                         gradient_clip_val=gradient_clip_val, gradient_clip_algorithm='value', #detect_anomaly=True,
