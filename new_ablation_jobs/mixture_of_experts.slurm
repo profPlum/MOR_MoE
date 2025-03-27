@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=PARTIAL_VI_OneCycle
+#SBATCH --job-name=mixture_of_experts        # Job name
 #SBATCH --output=logs/%x_%j.out              # Output file (%x: job-name, %j: job-id)
 #SBATCH --error=logs/%x_%j.err               # Error file (%x: job-name, %j: job-id)
 #SBATCH --exclusive
@@ -52,7 +52,7 @@ export THREE_PHASE=0 # faster decay in one cycle, usually not needed
 export VI=1 # use VI or not (in bash binary booleans have the best support for boolean logic)
 export TRIG_ENCODINGS=1 # trig encodings slow down training almost 1/3 but might give better partitions?
 export TOTAL_VARIANCE=0 # whether to use total variance for NLL
-export TIME_CHUNKING=9 # 9 is max (but only verified to work for 10 at least nodes)
+export TIME_CHUNKING=2 # 9 is max (but only verified to work for 10 at least nodes)
 export N_LAYERS=4 # number of expert layers
 export N_EXPERTS=3 # number of experts
 

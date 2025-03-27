@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=PARTIAL_VI_OneCycle
+#SBATCH --job-name=everything
 #SBATCH --output=logs/%x_%j.out              # Output file (%x: job-name, %j: job-id)
 #SBATCH --error=logs/%x_%j.err               # Error file (%x: job-name, %j: job-id)
 #SBATCH --exclusive
