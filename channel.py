@@ -6,7 +6,8 @@ import torch
 from torch.optim import lr_scheduler
 
 k_modes=[103,26,77] # can be a list, GOTCHA: don't change!
-n_experts: int=2 # number of experts in MoE
+n_experts: int=int(os.environ.get('N_EXPERTS', 3)) # number of experts in MoE
+n_layers: int=int(os.environ.get('N_LAYERS', 4)) # number of layers in the POU net
 time_chunking: int=int(os.environ.get('TIME_CHUNKING', 8)) # how many self-aware recursive steps to take
 batch_size: int=1 # batch size, with VI experts we can only fit 1 batch on 20 GPUs!
 scale_lr=True # scale with DDP batch_size
@@ -98,7 +99,7 @@ if __name__=='__main__':
     gradient_clip_val *= (time_chunking-1)**0.5
 
     # train model
-    model = SimModelClass(n_inputs=ndims, n_outputs=ndims, n_experts=n_experts, ndims=ndims, lr=lr, make_optim=make_optim, T_max=T_max,
+    model = SimModelClass(n_inputs=ndims, n_outputs=ndims, ndims=ndims, n_experts=n_experts, n_layers=n_layers, lr=lr, make_optim=make_optim, T_max=T_max,
                           one_cycle=one_cycle, three_phase=three_phase, RLoP=RLoP, RLoP_factor=RLoP_factor, RLoP_patience=RLoP_patience,
                           n_steps=time_chunking-1, k_modes=k_modes, trig_encodings=use_trig, **VI_kwd_args) #prior_cfg={'prior_sigma': prior_sigma},
                           #train_dataset_size=model_agnostic_BNN.get_dataset_size(train_dataset))

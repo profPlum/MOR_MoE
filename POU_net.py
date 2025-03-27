@@ -18,11 +18,13 @@ class FieldGatingNet(BasicLightningRegressor):
     """
     Essentially a Gating Operator that outputs class probabilities across the field.
     It is now a function of the field itself and the coordinates of the field positions!
-    Also it will implicitly add the option of a 'null expert' (an expert that just predicts 0).
+    Also if n_experts>1, it will implicitly add the option of a 'null expert' (an expert that just predicts 0).
     And it adds some small amount of noise to the gating logits to encourage exploration.
     """
     def __init__(self, n_inputs, n_experts, ndims, k=2, trig_encodings=True, noise_sd=0.0):
         super().__init__()
+        self._has_zero_expert = n_experts>1 # if we have more than one expert, we implicitly add a zero expert
+        n_experts -= 1 # we implicitly add a zero expert
         self.k = min(k, n_experts) # for (global) top-k selection
         if k<2 and n_experts>=2: warnings.warn('K<2 means the gating network might not learn to gate properly.')
         self.ndims = ndims
@@ -30,7 +32,7 @@ class FieldGatingNet(BasicLightningRegressor):
         self._trig_encodings = trig_encodings
 
         # NOTE: setting n_experts=n_experts+1 inside the gating_net implicitly adds a "ZeroExpert"
-        self._gating_net = CNN(ndims*(1+trig_encodings), n_experts+1, 1, ndims=ndims)#, **kwd_args)
+        self._gating_net = CNN(ndims*(1+trig_encodings), n_experts+1, k_size=1, ndims=ndims)#, **kwd_args)
         self._cache_forward=False # whether we should cache the forward call's outputs
         self._cached_forward_results=None # the cached forward call's outputs
         self._cached_forward_shape=None # for sanity check
@@ -57,6 +59,11 @@ class FieldGatingNet(BasicLightningRegressor):
         return pos_encodings
 
     def forward(self, X):
+        if not self._has_zero_expert: # handle special case, 1 expert means no zero expert
+            gating_weights = torch.ones(1, device=X.device, dtype=X.dtype).expand(1,1,*X.shape[-self.ndims:])
+            global_topk = torch.tensor([0], device=X.device, dtype=int)
+            return gating_weights, global_topk
+
         # this cache assumes the gating network takes no input (which currently it doesn't)
         if tuple(X.shape)==self._cached_forward_shape:
             assert self._cached_forward_results is not None
@@ -74,7 +81,7 @@ class FieldGatingNet(BasicLightningRegressor):
         global_topk = torch.topk(global_logits[:-1], self.k, dim=0, sorted=False).indices # we don't want to select null expert twice!
         global_topk = torch.cat([global_topk, torch.tensor([-1], device=global_topk.device, dtype=global_topk.dtype)])
         gating_logits = gating_logits[:, global_topk] # first dim is batch_dim
-        gating_weights = F.softmax(gating_logits, dim=1)[:,:-1]
+        gating_weights = F.softmax(gating_logits, dim=1)[:,:-1] # remove null expert
         global_topk = global_topk[:-1]
         # after the 'null expert' has influenced the softmax normalization
         # it can disappear (we won't waste any flops on it...)
@@ -142,7 +149,7 @@ class ZeroExpert(L.LightningModule):
 
 class POU_net(L.LightningModule):
     ''' POU_net minus the useless L2 regularization '''
-    def __init__(self, n_inputs, n_outputs, n_experts=3, ndims=2, lr=0.001, momentum=0.9, T_max=10,
+    def __init__(self, n_inputs, n_outputs, n_experts=4, ndims=2, lr=0.001, momentum=0.9, T_max=10,
                  one_cycle=False, three_phase=False, RLoP=False, RLoP_factor=0.9, RLoP_patience:int=25,
                  make_optim: type=torch.optim.Adam, make_expert: type=MOR_Operator.MOR_Operator,
                  make_gating_net: type=FieldGatingNet, trig_encodings=True, **kwd_args):
@@ -223,7 +230,7 @@ class POU_net(L.LightningModule):
 import model_agnostic_BNN
 
 class PPOU_net(POU_net): # Not really, it's POU+VI
-    def __init__(self, n_inputs, n_outputs, train_dataset_size, *args, total_variance=True, prior_cfg={}, **kwd_args):
+    def __init__(self, n_inputs, n_outputs, train_dataset_size, *args, total_variance=False, prior_cfg={}, **kwd_args):
         # we double output channels to have the sigma predictions too
         super().__init__(n_inputs*2, n_outputs*2, *args, **kwd_args)
 
@@ -259,7 +266,7 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
             total_variance = total_variance + sum([gating_weights[:,i:i+1]*(mu-total_expectation)**2 for i, mu in enumerate(mus)])
         mus.clear() # paranoia related to memory management
 
-        # handle zero expert
+        # handle zero expert (confirmed this doesn't require that zero expert exists, it will gracefully handle it)
         zero_expert_gating_weights = 1-gating_weights.sum(axis=1, keepdim=True) # recover zero expert weights
         total_variance = total_variance + zero_expert_gating_weights*F.softplus(self._zero_expert_sigma)**2 # for 1st term
         if self._total_variance:
