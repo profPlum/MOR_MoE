@@ -3,9 +3,9 @@
 #SBATCH --output=logs/%x_%j.out              # Output file (%x: job-name, %j: job-id)
 #SBATCH --error=logs/%x_%j.err               # Error file (%x: job-name, %j: job-id)
 #SBATCH --exclusive
-#SBATCH --nodes=10                           # Number of nodes
+#SBATCH --nodes=20                           # Number of nodes
 #SBATCH --ntasks-per-node=1                  # Tasks per node (usually 1 for PyTorch)
-#SBATCH --time=1-0:00:00                     # Maximum runtime (HH:MM:SS)
+#SBATCH --time=15:00:00                     # Maximum runtime (HH:MM:SS)
 #SBATCH --partition=glinda                   # Partition name
 #SBATCH --exclude gn78,gn71,gn54,gn60 # gn54 failed in srun echo hi... gn60 failed with unknown error, idk if others are still problematic 
 
