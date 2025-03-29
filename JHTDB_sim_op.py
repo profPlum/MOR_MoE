@@ -51,9 +51,9 @@ class Sim(L.LightningModule):
         self.Ly = Ly
         self.Lz = Lz
         self.nu = nu
-        self.k = torch.tensor(np.stack(np.meshgrid(np.fft.fftfreq(nx)*nx*2.*np.pi/Lx,
-                                       np.fft.fftfreq(ny)*ny*2.*np.pi/Ly,
-                                       np.fft.rfftfreq(nz)*nz*2.*np.pi/Lz,indexing='ij'),axis=-1)).cfloat()
+        self._k = torch.tensor(np.stack(np.meshgrid(np.fft.fftfreq(nx)*nx*2.*np.pi/Lx,
+                                        np.fft.fftfreq(ny)*ny*2.*np.pi/Ly,
+                                        np.fft.rfftfreq(nz)*nz*2.*np.pi/Lz,indexing='ij'),axis=-1)).cfloat()
 
         self.x = torch.tensor(np.stack(np.meshgrid(np.arange(nx)/nx*Lx,
                                        np.arange(ny)/ny*Ly,
@@ -88,6 +88,10 @@ class Sim(L.LightningModule):
         proj[0]=0
         u0 = irfft(hh - proj, s=self.shapef)
         return u0.permute(-1,0,1,2) # (i.e. torch.moveaxis(u0,-1,0))
+
+    @property
+    def k(self):
+        return self._k.cfloat()
 
     # NOTE: u.shape==[channel, x, y, z]
     def NSupd(self,u): # Navier-stokes update
