@@ -91,6 +91,10 @@ class Sim(L.LightningModule):
 
     @property
     def k(self):
+        # TODO: Ravi comment this line out for faster code & 90% chance of success
+        self._k = torch.as_tensor(np.stack(np.meshgrid(np.fft.fftfreq(self.nx)*self.nx*2.*np.pi/self.Lx,
+                                                       np.fft.fftfreq(self.ny)*self.ny*2.*np.pi/self.Ly,
+                                                       np.fft.rfftfreq(self.nz)*self.nz*2.*np.pi/self.Lz,indexing='ij'),axis=-1), device=self._k.device).cfloat()
         return self._k.cfloat()
 
     # NOTE: u.shape==[channel, x, y, z]
@@ -99,9 +103,10 @@ class Sim(L.LightningModule):
         uh = rfft(u)
         assert list(uh.shape)[:-1]==self.shapeh
         u2h = rfft(torch.einsum('...i,...j->...ij',u,u))
+        k = self.k # just in case we are recreating it
         u = irfft(self.Ainv[...,None]*(
-            uh + self.dt*(-1.j*torch.einsum('...j,...ij->...i',self.k,u2h)
-                 + 1.j*divide_no_nan(torch.einsum('...i,...j,...k,...jk->...i',self.k,self.k,self.k,u2h),self.knorm2[...,None])
+            uh + self.dt*(-1.j*torch.einsum('...j,...ij->...i',k,u2h)
+                 + 1.j*divide_no_nan(torch.einsum('...i,...j,...k,...jk->...i',k,k,k,u2h),self.knorm2[...,None])
                  )),
                  s=self.shapef
             )
