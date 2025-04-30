@@ -9,8 +9,8 @@ k_modes=[103,26,77] # can be a list, GOTCHA: don't change!
 n_experts: int=int(os.environ.get('N_EXPERTS', 3)) # number of experts in MoE
 n_layers: int=int(os.environ.get('N_LAYERS', 4)) # number of layers in the POU net
 time_chunking: int=int(os.environ.get('TIME_CHUNKING', 8)) # how many self-aware recursive steps to take
-batch_size: int=1 # batch size, with VI experts we can only fit 1 batch on 20 GPUs!
-scale_lr=True # scale with DDP batch_size
+batch_size: int=int(os.environ.get('BATCH_SIZE', 1)) # batch size, with VI experts we can only fit 1 batch w/ 20 A100
+scale_lr=True # multiply by DDP (total) batch_size
 lr: float=float(os.environ.get('LR', 3.125e-5)) # (standard) learning rate (will be scaled by recurisve steps)
 max_epochs=int(os.environ.get('MAX_EPOCHS', 500))
 gradient_clip_val=float(os.environ.get('GRAD_CLIP', 2.5e-3)) # grad clip adjusted based on new scaling rule
@@ -68,7 +68,7 @@ class MemMonitorCallback(L.Callback):
 
 if __name__=='__main__':
     # setup dataset
-    long_horizon_multiplier=10
+    long_horizon_multiplier=10 # longer evaluation time window is X times the shorter training time window (can e.g. detect NaNs)
     dataset = JHTDB_Channel('data/turbulence_output', time_chunking=time_chunking) # called dataloader_idx_0 in tensorboard
     dataset_long_horizon = JHTDB_Channel('data/turbulence_output', time_chunking=time_chunking*long_horizon_multiplier) # called dataloader_idx_1 in tensorboard
     _, val_long_horizon = torch.utils.data.random_split(dataset_long_horizon, [0.5, 0.5]) # 50% ensures there are two validation steps
@@ -95,14 +95,13 @@ if __name__=='__main__':
         SimModelClass = lambda **kwd_args: SimModelClass_.load_from_checkpoint(ckpt_path, **kwd_args)
 
     # scale lr & grad clip
-    if scale_lr: lr *= num_nodes
+    if scale_lr: lr *= num_nodes*batch_size
     gradient_clip_val *= (time_chunking-1)**0.5
 
     # train model
     model = SimModelClass(n_inputs=ndims, n_outputs=ndims, ndims=ndims, n_experts=n_experts, n_layers=n_layers, lr=lr, make_optim=make_optim, T_max=T_max,
                           one_cycle=one_cycle, three_phase=three_phase, RLoP=RLoP, RLoP_factor=RLoP_factor, RLoP_patience=RLoP_patience,
                           n_steps=time_chunking-1, k_modes=k_modes, trig_encodings=use_trig, **VI_kwd_args) #prior_cfg={'prior_sigma': prior_sigma},
-                          #train_dataset_size=model_agnostic_BNN.get_dataset_size(train_dataset))
 
     import os, signal
     from pytorch_lightning.loggers import TensorBoardLogger

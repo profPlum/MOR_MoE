@@ -1,21 +1,22 @@
 #!/bin/bash
-#SBATCH --job-name=PARTIAL_VI_OneCycle
+#SBATCH --job-name=VI_OneCycle
 #SBATCH --output=logs/%x_%j.out              # Output file (%x: job-name, %j: job-id)
 #SBATCH --error=logs/%x_%j.err               # Error file (%x: job-name, %j: job-id)
-#SBATCH --exclusive
-#SBATCH --nodes=10                           # Number of nodes
-#SBATCH --ntasks-per-node=1                  # Tasks per node (usually 1 for PyTorch)
+#SBATCH --ntasks=5                           # Tasks per node (usually 1 for PyTorch)
+#SBATCH --mem-per-gpu=60000                  # CPU? RAM per GPU < 1/4 of the total node RAM = 120GB
+#SBATCH --gpus-per-task=1                    # GPUs per task is 1
+#SBATCH --cpus-per-task=30                   # CORES per task for data loaders
 #SBATCH --time=1-0:00:00                     # Maximum runtime (HH:MM:SS)
-#SBATCH --partition=glinda                   # Partition name
-#SBATCH --exclude gn78,gn71,gn54,gn60 # gn54 failed in srun echo hi... gn60 failed with unknown error, idk if others are still problematic 
+#SBATCH --partition=ghx4                     # Partition name
+#SBATCH --account=beoi-dtai-gh
 
 # Not going to work anymore b/c we would need to save the entire checkpoint which causes OOM...
 # ##SBATCH --signal=SIGUSR1@90
 
 # Load modules or environment
 . ~/.bashrc
-conda activate uqops+proxy
-module load cuda/11.8.0
+conda activate uqops
+#module load cuda/11.8.0
 
 #export NCCL_DEBUG=INFO
 #export NCCL_P2P_DISABLE=1
@@ -53,6 +54,7 @@ export VI=1 # use VI or not (in bash binary booleans have the best support for b
 export TRIG_ENCODINGS=1 # trig encodings slow down training almost 1/3 but might give better partitions?
 export TOTAL_VARIANCE=0 # whether to use total variance for NLL
 export TIME_CHUNKING=9 # 9 is max (but only verified to work for 10 at least nodes)
+export BATCH_SIZE=2 # GH200 can handle batch_size=2 (it has x2 the memory of A100)
 export N_LAYERS=4 # number of expert layers
 export N_EXPERTS=3 # number of experts
 
