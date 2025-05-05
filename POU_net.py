@@ -21,18 +21,16 @@ class FieldGatingNet(BasicLightningRegressor):
     Also if n_experts>1, it will implicitly add the option of a 'null expert' (an expert that just predicts 0).
     And it adds some small amount of noise to the gating logits to encourage exploration.
     """
-    def __init__(self, n_inputs, n_experts, ndims, k=2, trig_encodings=True, noise_sd=0.0):
+    def __init__(self, n_inputs, n_experts, ndims, k=3, trig_encodings=True, noise_sd=0.0):
         super().__init__()
-        assert n_experts>1, 'This class makes no sense with only 1 expert'
+        assert n_experts>0
         assert k>1, 'K<2 means the gating network will not learn to gate properly.'
-        n_experts -= 1 # we implicitly add a zero expert
         self.k = min(k, n_experts) # for (global) top-k selection
         self.ndims = ndims
         self.noise_sd = noise_sd
         self._trig_encodings = trig_encodings
 
-        # NOTE: setting n_experts=n_experts+1 inside the gating_net implicitly adds a "ZeroExpert"
-        self._gating_net = CNN(ndims*(1+trig_encodings), n_experts+1, k_size=1, ndims=ndims)#, **kwd_args)
+        self._gating_net = CNN(ndims*(1+trig_encodings), n_experts, k_size=1, ndims=ndims)#, **kwd_args)
         self._cache_forward=False # whether we should cache the forward call's outputs
         self._cached_forward_results=None # the cached forward call's outputs
         self._cached_forward_shape=None # for sanity check
@@ -66,20 +64,14 @@ class FieldGatingNet(BasicLightningRegressor):
 
         with torch.no_grad():
             pos_encodings = self._make_positional_encodings(X.shape[-self.ndims:])
-        #pos_encodings = pos_encodings.expand(X.shape[0], *pos_encodings.shape[1:])
         gating_logits = self._gating_net(pos_encodings)
         if self.training and self.noise_sd>0: gating_logits = gating_logits + torch.randn_like(gating_logits, requires_grad=False)*self.noise_sd
         global_logits = torch.randn(gating_logits.shape[1], requires_grad=False) # random selection
         assert len(global_logits.shape)==1 # 1D
 
-        # add in the obligitory null expert (always the last index in the softmax)
-        global_topk = torch.topk(global_logits[:-1], self.k, dim=0, sorted=False).indices # we don't want to select null expert twice!
-        global_topk = torch.cat([global_topk, torch.tensor([-1], device=global_topk.device, dtype=global_topk.dtype)])
+        global_topk = torch.topk(global_logits, self.k, dim=0, sorted=False).indices
         gating_logits = gating_logits[:, global_topk] # first dim is batch_dim
-        gating_weights = F.softmax(gating_logits, dim=1)[:,:-1] # remove null expert
-        global_topk = global_topk[:-1]
-        # after the 'null expert' has influenced the softmax normalization
-        # it can disappear (we won't waste any flops on it...)
+        gating_weights = F.softmax(gating_logits, dim=1)
 
         # return results
         results = gating_weights, global_topk
@@ -146,32 +138,29 @@ class MetricsModule(L.LightningModule):
             log_metric('wMAPE')
             log_metric('sMAPE')
 
-''' # we did this implicitly instead of using the class
+# we did this implicitly instead of using the class
 class ZeroExpert(L.LightningModule):
     def __init__(self, sigma=False):
         if sigma: self._sigma=nn.Parameter(torch.randn([]))
     def forward(self, *args):
         try: return 0, F.softplus(self._sigma)
         except AttributeError: return 0
-'''
 
 class POU_net(L.LightningModule):
     ''' POU_net minus the useless L2 regularization '''
     def __init__(self, n_inputs, n_outputs, n_experts=4, ndims=2, lr=0.001, momentum=0.9, T_max=10,
                  one_cycle=False, three_phase=False, RLoP=False, RLoP_factor=0.9, RLoP_patience:int=25,
                  make_optim: type=torch.optim.Adam, make_expert: type=MOR_Operator.MOR_Operator,
-                 make_gating_net: type=FieldGatingNet, trig_encodings=True, **kwd_args):
+                 make_gating_net: type=FieldGatingNet, trig_encodings=True, zero_expert=True, **kwd_args):
         assert not (one_cycle and RLoP), 'These learning rate schedules are mututally exclusive!'
         super().__init__()
         RLoP_patience = int(RLoP_patience) # cast
         self.save_hyperparameters(ignore=['n_inputs', 'n_outputs', 'ndims', 'simulator', 'make_expert', 'make_gating_net'])
 
-        assert n_experts>0
-        if n_experts==1: make_gating_net=DummyGatingNet
+        self.experts=nn.ModuleList([make_expert(n_inputs, n_outputs, ndims=ndims, **kwd_args) for i in range(n_experts)])
+        if zero_expert: self.experts.append(ZeroExpert())
 
-        # NOTE: The gating_net implicitly adds a "ZeroExpert"
-        self.gating_net=make_gating_net(n_inputs, n_experts, ndims=ndims, trig_encodings=trig_encodings) # supports n_inputs!=2
-        self.experts=nn.ModuleList([make_expert(n_inputs, n_outputs, ndims=ndims, **kwd_args) for i in range(max(n_experts-1,1))])
+        self.gating_net=make_gating_net(n_inputs, n_experts+zero_expert, ndims=ndims, trig_encodings=trig_encodings)
 
         self.train_metrics = MetricsModule(self, n_outputs)
         self.val_metrics = MetricsModule(self, n_outputs, prefix='val_')
@@ -250,7 +239,7 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
 
         # add additional set of metrics for validating aleatoric UQ itself compared to error
         self.val_UQ_metrics = MetricsModule(self, n_outputs, prefix='val_UQ_')
-        self._zero_expert_sigma=nn.Parameter(torch.randn([1]))
+        #self._zero_expert_sigma=nn.Parameter(torch.randn([1]))
         self._total_variance=total_variance
 
     def forward(self, X, Y=None):
@@ -277,9 +266,6 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
             total_variance = total_variance + sum([gating_weights[:,i:i+1]*(mu-total_expectation)**2 for i, mu in enumerate(mus)])
         mus.clear() # paranoia related to memory management
 
-        # handle zero expert (confirmed this doesn't require that zero expert exists, it will gracefully handle it)
-        zero_expert_gating_weights = 1-gating_weights.sum(axis=1, keepdim=True) # recover zero expert weights
-        total_variance = total_variance + zero_expert_gating_weights*F.softplus(self._zero_expert_sigma)**2 # for 1st term
         if self._total_variance:
             total_variance = total_variance + zero_expert_gating_weights*total_expectation**2 # for 2nd term (total_expectation**2==(0-total_expectation)**2)
 
