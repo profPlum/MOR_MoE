@@ -8,10 +8,10 @@ from torch.optim import lr_scheduler
 k_modes=[103,26,77] # can be a list, GOTCHA: don't change!
 n_experts: int=int(os.environ.get('N_EXPERTS', 3)) # number of experts in MoE
 n_layers: int=int(os.environ.get('N_LAYERS', 4)) # number of layers in the POU net
-time_chunking: int=int(os.environ.get('TIME_CHUNKING', 8)) # how many self-aware recursive steps to take
-batch_size: int=int(os.environ.get('BATCH_SIZE', 1)) # batch size, with VI experts we can only fit 1 batch w/ 20 A100
+time_chunking: int=int(os.environ.get('TIME_CHUNKING', 9)) # how many self-aware recursive steps to take
+batch_size: int=int(os.environ.get('BATCH_SIZE', 2)) # batch size, with VI experts we can only fit 1 batch w/ 20 A100
 scale_lr=True # multiply by DDP (total) batch_size
-lr: float=float(os.environ.get('LR', 3.125e-5)) # (standard) learning rate (will be scaled by recurisve steps)
+lr: float=float(os.environ.get('LR', 1.25e-4)) # (VI) learning rate (will be scaled by recurisve steps)
 max_epochs=int(os.environ.get('MAX_EPOCHS', 500))
 gradient_clip_val=float(os.environ.get('GRAD_CLIP', 2.5e-3)) # grad clip adjusted based on new scaling rule
 make_optim=eval(f"torch.optim.{os.environ.get('OPTIM', 'Adam')}")
@@ -120,7 +120,7 @@ if __name__=='__main__':
     strategy = L.strategies.FSDPStrategy(state_dict_type='sharded')
     trainer = L.Trainer(max_epochs=max_epochs, accelerator='gpu', strategy=strategy, num_nodes=num_nodes,
                         gradient_clip_val=gradient_clip_val, gradient_clip_algorithm='value', #detect_anomaly=True,
-                        profiler=profiler, logger=logger, plugins=[SLURMEnvironment()],
+                        profiler=profiler, logger=logger, plugins=[SLURMEnvironment()], log_every_n_steps=20,
                         callbacks=[model_checkpoint_callback, MemMonitorCallback()])
 
     val_dataloaders = [val_loader, val_long_loader] # long validation loader causes various problems with profiler & GPU utilization...
