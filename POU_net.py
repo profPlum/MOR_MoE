@@ -23,10 +23,10 @@ class FieldGatingNet(BasicLightningRegressor):
     """
     def __init__(self, n_inputs, n_experts, ndims, k=2, trig_encodings=True, noise_sd=0.0):
         super().__init__()
-        self._has_zero_expert = n_experts>1 # if we have more than one expert, we implicitly add a zero expert
+        assert n_experts>1, 'This class makes no sense with only 1 expert'
+        assert k>1, 'K<2 means the gating network will not learn to gate properly.'
         n_experts -= 1 # we implicitly add a zero expert
         self.k = min(k, n_experts) # for (global) top-k selection
-        if k<2 and n_experts>=2: warnings.warn('K<2 means the gating network might not learn to gate properly.')
         self.ndims = ndims
         self.noise_sd = noise_sd
         self._trig_encodings = trig_encodings
@@ -59,11 +59,6 @@ class FieldGatingNet(BasicLightningRegressor):
         return pos_encodings
 
     def forward(self, X):
-        if not self._has_zero_expert: # handle special case, 1 expert means no zero expert
-            gating_weights = torch.ones(1, device=X.device, dtype=X.dtype).expand(1,1,*X.shape[-self.ndims:])
-            global_topk = torch.tensor([0], device=X.device, dtype=int)
-            return gating_weights, global_topk
-
         # this cache assumes the gating network takes no input (which currently it doesn't)
         if tuple(X.shape)==self._cached_forward_shape:
             assert self._cached_forward_results is not None
@@ -102,6 +97,19 @@ class FieldGatingNet(BasicLightningRegressor):
             self._cache_forward=False
             self._cached_forward_results=None # reset cache
             self._cached_forward_shape=None # reset cache
+
+class DummyGatingNet(nn.Module):
+    ''' For use with single Expert '''
+    def __init__(self, *args, ndims, **kwd_args):
+        super().__init__()
+        self.ndims=ndims
+    def forward(self, X):
+        gating_weights = torch.ones(1, device=X.device, dtype=X.dtype).expand(1,1,*X.shape[-self.ndims:]).detach()
+        global_topk = torch.tensor([0], device=X.device, dtype=int).detach()
+        return gating_weights, global_topk
+    @contextmanager
+    def cached_gating_weights(self):
+        yield
 
 # these metrics need to be seperated for validation & training!
 class MetricsModule(L.LightningModule):
@@ -158,9 +166,12 @@ class POU_net(L.LightningModule):
         RLoP_patience = int(RLoP_patience) # cast
         self.save_hyperparameters(ignore=['n_inputs', 'n_outputs', 'ndims', 'simulator', 'make_expert', 'make_gating_net'])
 
+        assert n_experts>0
+        if n_experts==1: make_gating_net=DummyGatingNet
+
         # NOTE: The gating_net implicitly adds a "ZeroExpert"
         self.gating_net=make_gating_net(n_inputs, n_experts, ndims=ndims, trig_encodings=trig_encodings) # supports n_inputs!=2
-        self.experts=nn.ModuleList([make_expert(n_inputs, n_outputs, ndims=ndims, **kwd_args) for i in range(n_experts-1)])
+        self.experts=nn.ModuleList([make_expert(n_inputs, n_outputs, ndims=ndims, **kwd_args) for i in range(max(n_experts-1,1))])
 
         self.train_metrics = MetricsModule(self, n_outputs)
         self.val_metrics = MetricsModule(self, n_outputs, prefix='val_')
