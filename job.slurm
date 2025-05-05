@@ -1,21 +1,22 @@
 #!/bin/bash
-#SBATCH --job-name=VI_OneCycle
 #SBATCH --output=logs/%x_%j.out              # Output file (%x: job-name, %j: job-id)
 #SBATCH --error=logs/%x_%j.err               # Error file (%x: job-name, %j: job-id)
-#SBATCH --ntasks=5                           # Tasks per node (usually 1 for PyTorch)
-#SBATCH --mem-per-gpu=60000                  # CPU? RAM per GPU < 1/4 of the total node RAM = 120GB
-#SBATCH --gpus-per-task=1                    # GPUs per task is 1
-#SBATCH --cpus-per-task=30                   # CORES per task for data loaders
+#SBATCH --nodes=1                            # Trying allocating a whole node to play nice with pytorch-lightning
+#SBATCH --ntasks-per-node=4                  # Tasks per node (usually 1 for PyTorch)
+#SBATCH --mem-per-gpu=120000                 # CPU? RAM per GPU < 1/4 of the total node RAM = 120GB
+#SBATCH --gpus-per-node=4                    # GPUs per task is 1
+#SBATCH --cpus-per-task=72                   # CORES per task for data loaders
 #SBATCH --time=1-0:00:00                     # Maximum runtime (HH:MM:SS)
 #SBATCH --partition=ghx4                     # Partition name
 #SBATCH --account=beoi-dtai-gh
+#SBATCH --job-name=VI_OneCycle
 
 # Not going to work anymore b/c we would need to save the entire checkpoint which causes OOM...
 # ##SBATCH --signal=SIGUSR1@90
 
 # Load modules or environment
 . ~/.bashrc
-conda activate uqops
+conda activate uqops2
 #module load cuda/11.8.0
 
 #export NCCL_DEBUG=INFO
@@ -36,13 +37,16 @@ STANDARD_LR=3.125e-5 # theoretically suggested by Adam default lr=0.001/32 s.t. 
 VI_LR=1.25e-4 # this is 4x higher than theory suggests (it is only possible b/c grad clip)
 MLE_LR=2.5e-4 # this is 8x higher than theory suggests (it is only possible b/c grad clip + determinism)
 
+## Kahuna measurements:
 # (MLE) 582 epochs takes 24 hours (with 8 nodes, measured 10/22/24)
 # (VI) 515 epochs takes 24 hours (with 12 nodes, measured 10/22/24)
 # (VI) 644 epochs takes 24 hours (with 20 nodes, measured 10/23/24)
 # (VI) 445 epochs takes 24 hours (with 10 nodes, measured 10/26/24)
 # (VI+TRIG) 333 epochs takes 24 hours (with 10 nodes, measured 10/26/24)
 # (VI+TRIG) 678 epochs takes 24 hours (with 20 nodes, measured 10/31/24)
-export MAX_EPOCHS=333 # MUST BE ACCURATELY ADJUSTED based on estimated epochs (this ensures that OneCycle is properly calibrated)
+
+# (VI+TRIG) 600 epochs takes 24 hours (with 4 GH200s, measured 4/2/25)
+export MAX_EPOCHS=600 # MUST BE ACCURATELY ADJUSTED based on estimated epochs (this ensures that OneCycle is properly calibrated)
 export LR=$VI_LR # this is 4x higher than theory suggests (it is only possible b/c grad clip)
 export GRAD_CLIP=2.5e-3 # it is best to keep this 2.5e-3 value, it will automatically be adjusted based on number of recursive timesteps
 export PRIOR_SIGMA=0.2 # approximately reflects the values of sigma at initialization
@@ -58,6 +62,9 @@ export BATCH_SIZE=2 # GH200 can handle batch_size=2 (it has x2 the memory of A10
 export N_LAYERS=4 # number of expert layers
 export N_EXPERTS=3 # number of experts
 
+## load experiment settings
+#source experiment_configs/recursive_steps.sh
+
 ## IMPORTANT: you NEED to use `python -m pytorch_lightning.utilities.consolidate_checkpoint epoch=X-step=Y.ckpt` in order to get a useable model file for resuming or prediction
 ## Once you do that you can pass the checkpoint path like below to resume a run to get even better performance than what was achievable in the first run
 #export CKPT_PATH='/home/dsdeigh/MOR_MoE/lightning_logs/PARTIAL_VI_RLoP_Extension/477516/checkpoints/epoch=206-step=7452.ckpt.consolidated'
@@ -67,6 +74,7 @@ export N_EXPERTS=3 # number of experts
 
 # Run your PyTorch Lightning script
 srun --kill-on-bad-exit python -O channel.py
+#srun --kill-on-bad-exit python -m pdb channel.py
 
 # Optional: Debugging info
 echo "Job finished at $(date)"
