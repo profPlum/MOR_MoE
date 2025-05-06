@@ -36,7 +36,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pytorch_lightning as L
 import torch.nn.functional as F
-#torch.autograd.set_detect_anomaly(True)
 torch.set_float32_matmul_precision('medium')
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
@@ -83,7 +82,8 @@ if __name__=='__main__':
 
     ndims=3
     num_nodes = int(os.environ.get('SLURM_STEP_NUM_NODES', 1)) # can be auto-detected by slurm
-    print(f'{num_nodes=}')
+    num_gpus_per_node = int(os.environ.get('SLURM_STEP_TASKS_PER_NODE', torch.cuda.device_count()))
+    print(f'{num_nodes=}, {num_gpus_per_node=}')
 
     SimModelClass, VI_kwd_args = POU_NetSimulator, {}
     if use_VI: # VI is optional
@@ -95,7 +95,7 @@ if __name__=='__main__':
         SimModelClass = lambda **kwd_args: SimModelClass_.load_from_checkpoint(ckpt_path, **kwd_args)
 
     # scale lr & grad clip
-    if scale_lr: lr *= num_nodes*batch_size
+    if scale_lr: lr *= num_nodes*num_gpus_per_node*batch_size
     gradient_clip_val *= (time_chunking-1)**0.5
 
     # train model
