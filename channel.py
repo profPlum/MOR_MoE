@@ -72,9 +72,9 @@ if __name__=='__main__':
     dataset_long_horizon = JHTDB_Channel('data/turbulence_output', time_chunking=time_chunking*long_horizon_multiplier) # called dataloader_idx_1 in tensorboard
     _, val_long_horizon = torch.utils.data.random_split(dataset_long_horizon, [0.5, 0.5]) # 50% ensures there are two validation steps
     train_dataset, val_dataset = torch.utils.data.random_split(dataset, [0.8, 0.2])
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, num_workers=16, pin_memory=True, shuffle=True, drop_last=True)
-    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=batch_size*long_horizon_multiplier, num_workers=8)
-    val_long_loader = torch.utils.data.DataLoader(val_long_horizon, batch_size=batch_size, num_workers=8)
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, num_workers=32, pin_memory=True, shuffle=True, drop_last=True)
+    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=batch_size*long_horizon_multiplier, num_workers=16)
+    val_long_loader = torch.utils.data.DataLoader(val_long_horizon, batch_size=batch_size, num_workers=16)
     print(f'{len(dataset)=}\n{len(train_loader)=}\n{len(val_dataset)=}')
 
     IC_0, Sol_0 = dataset[0]
