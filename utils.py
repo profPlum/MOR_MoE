@@ -1,3 +1,5 @@
+''' Debugging utilities '''
+
 import torch
 from torch import nn
 
@@ -46,18 +48,22 @@ def clear_cache():
     while gc.collect(): pass
     torch.cuda.empty_cache()
 
-def report_cuda_memory_usage(message='', clear=True, verbose=False):
+import sys
+
+def nvidia_smi(message='', clear_mem=False, verbose=False):
     if message: message+='\n'
-    if clear:
+    if clear_mem:
         message+='(clearing cache!)\n'
         clear_cache()
-    line = LINE(1) # fn, func, lineno
-    full_msg = '\n'+'-'*50+'\n' + f'{message}from {line}'+'\n'+'-'*50
-    full_msg += "\ntorch.cuda.memory_allocated: %fGB"%(torch.cuda.memory_allocated(0)/1024/1024/1024)
-    full_msg += "\ntorch.cuda.max_memory_allocated: %fGB"%(torch.cuda.max_memory_allocated(0)/1024/1024/1024)
+    line = LINE(1) # pid, fn, func, lineno
+    full_msg = '\n'+'-'*50+ f'\n{message}from device: {torch.cuda.current_device()}, {line}\n'+'-'*50
+    try: full_msg += f"\nGPU Utilization: {torch.cuda.utilization()}%"
+    except: print('Warning: unable to display GPU utilization try installing "pynvml" via pip', file=sys.stderr)
+    full_msg += "\ntorch.cuda.memory_allocated: %fGB"%(torch.cuda.memory_allocated()/1024/1024/1024)
+    full_msg += "\ntorch.cuda.max_memory_allocated: %fGB"%(torch.cuda.max_memory_allocated()/1024/1024/1024)
     if verbose:
-        full_msg+="\ntorch.cuda.memory_reserved: %fGB"%(torch.cuda.memory_reserved(0)/1024/1024/1024)
-        full_msg+="\ntorch.cuda.max_memory_reserved: %fGB"%(torch.cuda.max_memory_reserved(0)/1024/1024/1024)
+        full_msg+="\ntorch.cuda.memory_reserved: %fGB"%(torch.cuda.memory_reserved()/1024/1024/1024)
+        full_msg+="\ntorch.cuda.max_memory_reserved: %fGB"%(torch.cuda.max_memory_reserved()/1024/1024/1024)
     print(full_msg, flush=True)
-    torch.cuda.reset_peak_memory_stats(device='cuda') # reset since we reported it
+    torch.cuda.reset_peak_memory_stats() # reset since we reported it
     #if verbose: print(torch.cuda.memory_summary()) # way too much info

@@ -56,14 +56,13 @@ class MemMonitorCallback(L.Callback):
         self._clear_interval=clear_interval
     def on_train_epoch_end(self, trainer, pl_module):
         self._epoch_counter+=1
-        utils.report_cuda_memory_usage(clear=not (self._epoch_counter%self._clear_interval), verbose=True)
+        utils.nvidia_smi(clear_mem=not (self._epoch_counter%self._clear_interval), verbose=True)
+        print(f'SLURM_LOCALID={os.environ["SLURM_LOCALID"]}, GPU_Id={torch.cuda.current_device()}', flush=True)
+        #print(f'GPU Utilization: {torch.cuda.utilization()}')
     #def on_validation_epoch_end(self, trainer, pl_module):
     #    utils.report_cuda_memory_usage(clear=False)
 
-## wrapper to nullify the VI kwd_args (for compatibility)
-#class POU_NetSimulator(POU_NetSimulator):
-#    def __init__(self, *args, prior_cfg={}, train_dataset_size=None, **kwd_args):
-#        super().__init__(*args, **kwd_args)
+from torch.profiler import ProfilerActivity
 
 if __name__=='__main__':
     # setup dataset
@@ -101,7 +100,7 @@ if __name__=='__main__':
     # train model
     model = SimModelClass(n_inputs=ndims, n_outputs=ndims, ndims=ndims, n_experts=n_experts, n_layers=n_layers, lr=lr, make_optim=make_optim, T_max=T_max,
                           one_cycle=one_cycle, three_phase=three_phase, RLoP=RLoP, RLoP_factor=RLoP_factor, RLoP_patience=RLoP_patience,
-                          n_steps=time_chunking-1, k_modes=k_modes, trig_encodings=use_trig, **VI_kwd_args) #prior_cfg={'prior_sigma': prior_sigma},
+                          n_steps=time_chunking-1, k_modes=k_modes, trig_encodings=use_trig, **VI_kwd_args)
 
     import os, signal
     from pytorch_lightning.loggers import TensorBoardLogger
@@ -111,17 +110,17 @@ if __name__=='__main__':
     job_name = os.environ.get("SLURM_JOB_NAME", 'JHTDB_MOR_MoE')
     version = os.environ.get("SLURM_JOB_ID", None) if job_name!='interactive' else None
     logger = TensorBoardLogger("lightning_logs", name=job_name, version=version)
-    profiler = L.profilers.PyTorchProfiler(profile_memory=True)#, with_stack=False,
-                                           #on_trace_ready=torch.profiler.tensorboard_trace_handler(logger.log_dir))
-                                           #schedule=torch.profiler.schedule(skip_first=10, wait=5, warmup=2, active=6, repeat=3))
+    profiler = None #L.profilers.PyTorchProfiler(profile_memory=True)#, with_stack=False, activity=[ProfilerActivity.CPU, ProfilerActivity.CUDA]),
+                                           #on_trace_ready=torch.profiler.tensorboard_trace_handler(logger.log_dir),
+                                           #schedule=torch.profiler.schedule(skip_first=0, wait=1, warmup=1, active=3, repeat=1))
 
     # Weight-only sharded checkpoints are needed to avoid problem caused by large model size
     model_checkpoint_callback=L.callbacks.ModelCheckpoint(save_weights_only=True, monitor='val_loss/dataloader_idx_1') # monitor long-horizon loss
     strategy = L.strategies.FSDPStrategy(state_dict_type='sharded')
-    trainer = L.Trainer(max_epochs=max_epochs, accelerator='gpu', strategy=strategy, num_nodes=num_nodes,
-                        gradient_clip_val=gradient_clip_val, gradient_clip_algorithm='value', #detect_anomaly=True,
+    trainer = L.Trainer(max_epochs=max_epochs, gradient_clip_val=gradient_clip_val, gradient_clip_algorithm='value',
+                        accelerator='gpu', strategy=strategy, num_nodes=num_nodes, devices=num_gpus_per_node,
                         profiler=profiler, logger=logger, plugins=[SLURMEnvironment()], log_every_n_steps=20,
-                        callbacks=[model_checkpoint_callback, MemMonitorCallback()])
+                        callbacks=[model_checkpoint_callback, MemMonitorCallback()]) #detect_anomaly=True,
 
     val_dataloaders = [val_loader, val_long_loader] # long validation loader causes various problems with profiler & GPU utilization...
     trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_dataloaders) #, ckpt_path=ckpt_path)
