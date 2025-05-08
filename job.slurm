@@ -60,6 +60,7 @@ export TOTAL_VARIANCE=0 # whether to use total variance for NLL
 export TIME_CHUNKING=9 # 9 is max for A100 (but only verified to work for 10 at least nodes)
 export BATCH_SIZE=3 # GH200 can handle batch_size=3! (it has > x2 the memory of A100)
 export N_LAYERS=4 # number of expert layers
+export N_FILTERS=32 # number of hidden filters (aka channel size)
 export N_EXPERTS=3 # number of experts
 
 # load experiment settings

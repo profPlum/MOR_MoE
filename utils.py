@@ -3,6 +3,9 @@
 import torch
 from torch import nn
 
+def count_parameters(model):
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
 def LINE(up=0):
     import inspect, os
     frame = inspect.currentframe().f_back
@@ -48,9 +51,9 @@ def clear_cache():
     while gc.collect(): pass
     torch.cuda.empty_cache()
 
-import sys
 
 def nvidia_smi(message='', clear_mem=False, verbose=False):
+    import sys
     if message: message+='\n'
     if clear_mem:
         message+='(clearing cache!)\n'

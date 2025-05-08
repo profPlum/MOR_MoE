@@ -8,6 +8,7 @@ from torch.optim import lr_scheduler
 k_modes=[103,26,77] # can be a list, GOTCHA: don't change!
 n_experts: int=int(os.environ.get('N_EXPERTS', 3)) # number of experts in MoE
 n_layers: int=int(os.environ.get('N_LAYERS', 4)) # number of layers in the POU net
+n_filters: int=int(os.environ.get('N_FILTERS', 32)) # hidden layer width (aka # of filters)
 time_chunking: int=int(os.environ.get('TIME_CHUNKING', 9)) # how many self-aware recursive steps to take
 batch_size: int=int(os.environ.get('BATCH_SIZE', 2)) # batch size, with VI experts we can only fit 1 batch w/ 20 A100
 scale_lr=True # multiply by DDP (total) batch_size
@@ -98,9 +99,13 @@ if __name__=='__main__':
     gradient_clip_val *= (time_chunking-1)**0.5
 
     # train model
-    model = SimModelClass(n_inputs=ndims, n_outputs=ndims, ndims=ndims, n_experts=n_experts, n_layers=n_layers, lr=lr, make_optim=make_optim, T_max=T_max,
-                          one_cycle=one_cycle, three_phase=three_phase, RLoP=RLoP, RLoP_factor=RLoP_factor, RLoP_patience=RLoP_patience,
+    model = SimModelClass(n_inputs=ndims, n_outputs=ndims, ndims=ndims, n_experts=n_experts, n_layers=n_layers, hidden_channels=n_filters, make_optim=make_optim,
+                          lr=lr, T_max=T_max, one_cycle=one_cycle, three_phase=three_phase, RLoP=RLoP, RLoP_factor=RLoP_factor, RLoP_patience=RLoP_patience,
                           n_steps=time_chunking-1, k_modes=k_modes, trig_encodings=use_trig, **VI_kwd_args)
+
+    print(f'num model parameters: {utils.count_parameters(model):.2e}')
+    print('model:')
+    print(model)
 
     import os, signal
     from pytorch_lightning.loggers import TensorBoardLogger
