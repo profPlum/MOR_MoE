@@ -57,7 +57,7 @@ export THREE_PHASE=0 # faster decay in one cycle, usually not needed
 export VI=1 # use VI or not (in bash binary booleans have the best support for boolean logic)
 export TRIG_ENCODINGS=1 # trig encodings slow down training almost 1/3 but might give better partitions?
 export TOTAL_VARIANCE=0 # whether to use total variance for NLL
-export TIME_CHUNKING=9 # 9 is max for A100 (but only verified to work for 10 at least nodes)
+export TIME_CHUNKING=9 # 9 is default (b/c it is max for x10 A100s) 
 export BATCH_SIZE=3 # GH200 can handle batch_size=3! (it has > x2 the memory of A100)
 export N_LAYERS=4 # number of expert layers
 export N_FILTERS=32 # number of hidden filters (aka channel size)
@@ -67,7 +67,7 @@ export N_EXPERTS=3 # number of experts
 #source experiment_configs/control.sh
 #source experiment_configs/recursive_steps.sh
 #source experiment_configs/mixture_of_experts.sh
-source experiment_configs/everything.sh
+source experiment_configs/everything.sh # NO-OP b/c everything is already the default
 
 ## IMPORTANT: you NEED to use `python -m pytorch_lightning.utilities.consolidate_checkpoint epoch=X-step=Y.ckpt` in order to get a useable model file for resuming or prediction
 ## Once you do that you can pass the checkpoint path like below to resume a run to get even better performance than what was achievable in the first run
