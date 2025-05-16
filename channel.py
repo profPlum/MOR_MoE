@@ -3,7 +3,6 @@
 
 import os
 import torch
-from torch.optim import lr_scheduler
 
 k_modes=[103,26,77] # can be a list, GOTCHA: don't change!
 n_experts: int=int(os.environ.get('N_EXPERTS', 3)) # number of experts in MoE
@@ -30,13 +29,8 @@ RLoP_factor=0.9
 RLoP_patience=15
 
 # Import External Libraries
-import os
 import torch
-from torch import nn
-import numpy as np
-import matplotlib.pyplot as plt
 import pytorch_lightning as L
-import torch.nn.functional as F
 torch.set_float32_matmul_precision('medium')
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
@@ -45,9 +39,8 @@ torch.backends.cudnn.allow_tf32 = True
 # Import Custom Modules
 
 from lightning_utils import *
-from MOR_Operator import MOR_Operator, MOR_Layer
 from POU_net import POU_net, PPOU_net, FieldGatingNet
-from JHTDB_sim_op import PPOU_NetSimulator, POU_NetSimulator, Sim, JHTDB_Channel
+from JHTDB_sim_op import PPOU_NetSimulator, POU_NetSimulator, JHTDB_Channel
 import model_agnostic_BNN
 import utils
 
@@ -59,11 +52,6 @@ class MemMonitorCallback(L.Callback):
         self._epoch_counter+=1
         utils.nvidia_smi(clear_mem=not (self._epoch_counter%self._clear_interval), verbose=True)
         print(f'SLURM_LOCALID={os.environ["SLURM_LOCALID"]}, GPU_Id={torch.cuda.current_device()}', flush=True)
-        #print(f'GPU Utilization: {torch.cuda.utilization()}')
-    #def on_validation_epoch_end(self, trainer, pl_module):
-    #    utils.report_cuda_memory_usage(clear=False)
-
-from torch.profiler import ProfilerActivity
 
 if __name__=='__main__':
     # setup dataset
@@ -107,24 +95,24 @@ if __name__=='__main__':
     print('model:')
     print(model)
 
-    import os, signal
-    from pytorch_lightning.loggers import TensorBoardLogger
+    import os, wandb, signal
+    from pytorch_lightning.loggers import WandbLogger
     from pytorch_lightning.plugins.environments import SLURMEnvironment
     # SLURMEnvironment plugin enables auto-requeue
 
     job_name = os.environ.get("SLURM_JOB_NAME", 'JHTDB_MOR_MoE')
-    version = os.environ.get("SLURM_JOB_ID", None) if job_name!='interactive' else None
-    logger = TensorBoardLogger("lightning_logs", name=job_name, version=version)
-    profiler = None #L.profilers.PyTorchProfiler(profile_memory=True)#, with_stack=False, activity=[ProfilerActivity.CPU, ProfilerActivity.CUDA]),
-                                           #on_trace_ready=torch.profiler.tensorboard_trace_handler(logger.log_dir),
-                                           #schedule=torch.profiler.schedule(skip_first=0, wait=1, warmup=1, active=3, repeat=1))
+    version = os.environ.get("SLURM_JOB_ID", None)
+    wandb.login(key='251c77a548925cf7f08eecaf2b159ea8d49457c3')
+    logger = WandbLogger(project="MOR_MoE", log_model="all", name=job_name, version=version)
+    logger.watch(model) # For W&B to log gradients and model topology
 
     # Weight-only sharded checkpoints are needed to avoid problem caused by large model size
-    model_checkpoint_callback=L.callbacks.ModelCheckpoint(save_weights_only=True, monitor='val_loss/dataloader_idx_1') # monitor long-horizon loss
+    model_checkpoint_callback=L.callbacks.ModelCheckpoint(f"lightning_logs/{job_name}/{version}", save_weights_only=True,
+                                                          monitor='val_loss/dataloader_idx_1') # monitor long-horizon loss
     strategy = L.strategies.FSDPStrategy(state_dict_type='sharded')
     trainer = L.Trainer(max_epochs=max_epochs, gradient_clip_val=gradient_clip_val, gradient_clip_algorithm='value',
                         accelerator='gpu', strategy=strategy, num_nodes=num_nodes, devices=num_gpus_per_node,
-                        profiler=profiler, logger=logger, plugins=[SLURMEnvironment()], log_every_n_steps=20,
+                        profiler='simple', logger=logger, plugins=[SLURMEnvironment()], log_every_n_steps=20,
                         callbacks=[model_checkpoint_callback, MemMonitorCallback()]) #detect_anomaly=True,
 
     val_dataloaders = [val_loader, val_long_loader] # long validation loader causes various problems with profiler & GPU utilization...
