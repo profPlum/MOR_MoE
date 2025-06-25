@@ -6,10 +6,10 @@
 #SBATCH --mem-per-gpu=120000                 # CPU? RAM per GPU < 1/4 of the total node RAM = 120GB
 #SBATCH --gpus-per-node=4                    # GPUs per task is 1
 #SBATCH --cpus-per-task=72                   # CORES per task for data loaders
-#SBATCH --time=1-0:00:00                     # Maximum runtime (HH:MM:SS)
+#SBATCH --time=1-00:00:00                    # Maximum runtime (HH:MM:SS)
 #SBATCH --partition=ghx4                     # Partition name
 #SBATCH --account=beoi-dtai-gh
-#SBATCH --job-name=Everything
+#SBATCH --job-name=MixtureOfExperts
 
 # Not going to work anymore b/c we would need to save the entire checkpoint which causes OOM...
 # ##SBATCH --signal=SIGUSR1@90
@@ -26,7 +26,7 @@ conda activate uqops
 # Optional: Debugging info
 echo "Job started on $(hostname) at $(date)"
 echo "Running on nodes: $SLURM_NODELIST"
-echo "Allocated GPUs: $CUDA_VISIBLE_DEVICES"
+echo "Visible GPUs: $CUDA_VISIBLE_DEVICES"
 echo "batch node ip: $(host $(hostname))"
 echo "rank hostnames & Ips:"
 srun bash -c 'echo host: $SLURMD_NODENAME, rank: $PMI_RANK, slurm_proc_id: $SLURM_PROCID, $(host $(hostname))'
@@ -45,8 +45,8 @@ MLE_LR=2.5e-4 # this is 8x higher than theory suggests (it is only possible b/c 
 # (VI+TRIG) 333 epochs takes 24 hours (with 10 nodes, measured 10/26/24)
 # (VI+TRIG) 678 epochs takes 24 hours (with 20 nodes, measured 10/31/24)
 
-# (VI+TRIG) 600 epochs takes 24 hours (with 4 GH200s, measured 4/2/25)
-export MAX_EPOCHS=600 # MUST BE ACCURATELY ADJUSTED based on estimated epochs (this ensures that OneCycle is properly calibrated)
+# (VI+TRIG) 1550 epochs takes 20 hours (with 4 GH200s, measured 4/2/25)
+export MAX_EPOCHS=1550 #3100 # MUST BE ACCURATELY ADJUSTED based on estimated epochs (this ensures that OneCycle is properly calibrated)
 export LR=$VI_LR # this is 4x higher than theory suggests (it is only possible b/c grad clip)
 export GRAD_CLIP=2.5e-3 # it is best to keep this 2.5e-3 value, it will automatically be adjusted based on number of recursive timesteps
 export PRIOR_SIGMA=0.2 # approximately reflects the values of sigma at initialization
@@ -57,7 +57,7 @@ export THREE_PHASE=0 # faster decay in one cycle, usually not needed
 export VI=1 # use VI or not (in bash binary booleans have the best support for boolean logic)
 export TRIG_ENCODINGS=1 # trig encodings slow down training almost 1/3 but might give better partitions?
 export TOTAL_VARIANCE=0 # whether to use total variance for NLL
-export TIME_CHUNKING=9 # 9 is default (b/c it is max for x10 A100s) 
+export TIME_CHUNKING=10 # 10 is default now b/c we can fit it
 export BATCH_SIZE=3 # GH200 can handle batch_size=3! (it has > x2 the memory of A100)
 export N_LAYERS=4 # number of expert layers
 export N_FILTERS=32 # number of hidden filters (aka channel size)
@@ -66,8 +66,8 @@ export N_EXPERTS=3 # number of experts
 # load experiment settings
 #source experiment_configs/control.sh
 #source experiment_configs/recursive_steps.sh
-#source experiment_configs/mixture_of_experts.sh
-source experiment_configs/everything.sh # NO-OP b/c everything is already the default
+source experiment_configs/mixture_of_experts.sh
+#source experiment_configs/everything.sh # NO-OP b/c everything is already the default
 
 ## IMPORTANT: you NEED to use `python -m pytorch_lightning.utilities.consolidate_checkpoint epoch=X-step=Y.ckpt` in order to get a useable model file for resuming or prediction
 ## Once you do that you can pass the checkpoint path like below to resume a run to get even better performance than what was achievable in the first run

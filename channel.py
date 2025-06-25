@@ -53,6 +53,9 @@ class MemMonitorCallback(L.Callback):
         utils.nvidia_smi(clear_mem=not (self._epoch_counter%self._clear_interval), verbose=True)
         print(f'SLURM_LOCALID={os.environ["SLURM_LOCALID"]}, GPU_Id={torch.cuda.current_device()}', flush=True)
 
+# for ablation study
+L.seed_everything(0)
+
 if __name__=='__main__':
     # setup dataset
     long_horizon_multiplier=10 # longer evaluation time window is X times the shorter training time window (can e.g. detect NaNs)
