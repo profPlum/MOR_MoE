@@ -5,11 +5,8 @@ from torch.optim import lr_scheduler
 import pytorch_lightning as L
 from lightning_utils import *
 import MOR_Operator
-import warnings
-import random
-from contextlib import contextmanager
 
-import utils
+from contextlib import contextmanager
 
 # Verified to work: 7/18/24
 # Double verified to work (and reproduce specific partition)
@@ -26,10 +23,11 @@ class FieldGatingNet(BasicLightningRegressor):
         assert n_experts>1, 'This class makes no sense with only 1 expert'
         assert k>1, 'K<2 means the gating network will not learn to gate properly.'
         n_experts -= 1 # we implicitly add a zero expert
-        self.k = min(k, n_experts) # for (global) top-k selection
-        self.ndims = ndims
+        self._k = min(k, n_experts) # for (global) top-k selection
+        self._ndims = ndims
         self.noise_sd = noise_sd
         self._trig_encodings = trig_encodings
+        self._softmax = nn.Softmax(dim=1) # this is a injection point for the template pattern (e.g. equalized field gating net)
 
         # NOTE: setting n_experts=n_experts+1 inside the gating_net implicitly adds a "ZeroExpert"
         self._gating_net = CNN(ndims*(1+trig_encodings), n_experts+1, k_size=1, ndims=ndims)#, **kwd_args)
@@ -45,7 +43,7 @@ class FieldGatingNet(BasicLightningRegressor):
         # Create coordinate grids using torch.meshgrid
         if tuple(shape) == self._cached_mesh_shape and self._cached_mesh_grid.device==self.device:
             return self._cached_mesh_grid
-        assert len(shape)==self.ndims
+        assert len(shape)==self._ndims
         linspace = lambda dim: torch.linspace(0,1,steps=dim)
         if self._trig_encodings:
             linspace = lambda dim: torch.linspace(0,1,steps=dim+1)[:-1]*2*np.pi
@@ -65,21 +63,24 @@ class FieldGatingNet(BasicLightningRegressor):
             return self._cached_forward_results
 
         with torch.no_grad():
-            pos_encodings = self._make_positional_encodings(X.shape[-self.ndims:])
+            pos_encodings = self._make_positional_encodings(X.shape[-self._ndims:])
         #pos_encodings = pos_encodings.expand(X.shape[0], *pos_encodings.shape[1:])
-        gating_logits = self._gating_net(pos_encodings)
+        gating_logits = self._gating_net(pos_encodings) # gating_logits.shape=[batch_size, n_experts, *spatial_dims]
         if self.training and self.noise_sd>0: gating_logits = gating_logits + torch.randn_like(gating_logits, requires_grad=False)*self.noise_sd
         global_logits = torch.randn(gating_logits.shape[1], requires_grad=False) # random selection
         assert len(global_logits.shape)==1 # 1D
 
         # add in the obligitory null expert (always the last index in the softmax)
-        global_topk = torch.topk(global_logits[:-1], self.k, dim=0, sorted=False).indices # we don't want to select null expert twice!
+        global_topk = torch.topk(global_logits[:-1], self._k, dim=0, sorted=False).indices # we don't want to select null expert twice!
         global_topk = torch.cat([global_topk, torch.tensor([-1], device=global_topk.device, dtype=global_topk.dtype)])
         gating_logits = gating_logits[:, global_topk] # first dim is batch_dim
-        gating_weights = F.softmax(gating_logits, dim=1)[:,:-1] # remove null expert
-        global_topk = global_topk[:-1]
+        gating_weights = self._softmax(gating_logits) # keep null expert for now
+        # this is a injection point for the template pattern (e.g. equalized field gating net)
+
         # after the 'null expert' has influenced the softmax normalization
         # it can disappear (we won't waste any flops on it...)
+        gating_weights = gating_weights[:,:-1] # remove null expert
+        global_topk = global_topk[:-1]
 
         # return results
         results = gating_weights, global_topk
@@ -97,6 +98,32 @@ class FieldGatingNet(BasicLightningRegressor):
             self._cache_forward=False
             self._cached_forward_results=None # reset cache
             self._cached_forward_shape=None # reset cache
+
+# We decoupled this feature so it can be removed easily if needed
+class EqualizedFieldGatingNet(FieldGatingNet):
+    def __init__(self, n_inputs, n_experts, *args, **kwd_args):
+        # topk selection doesn't make sense with this feature, so k=all
+        super().__init__(n_inputs, n_experts, *args, k=n_experts-1, **kwd_args)
+        del self._softmax
+        self._softmax = self._doubly_stochastic_softmax
+
+    def _doubly_stochastic_softmax(self, gating_logits):
+        """
+        Apply doubly stochastic normalization in log space.
+        This ensures that the probability mass is distributed equally across all experts.
+        """
+
+        # sinkhorn iterations
+        for _ in range(3):
+            # Step 1: Normalize to equalize exp sum across spatial dimensions
+            spatial_dims = tuple(range(2, len(gating_logits.shape)))
+            LSE = torch.logsumexp(gating_logits, dim=spatial_dims, keepdim=True)
+            gating_logits = gating_logits - LSE # gating_logits.shape=[n_experts, *spatial_dims]
+            # Step 2: Normalize to equalize exp sum across experts
+            LSE = torch.logsumexp(gating_logits, dim=1, keepdim=True)
+            gating_logits = gating_logits - LSE
+        gating_weights = torch.exp(gating_logits)
+        return gating_weights
 
 class DummyGatingNet(nn.Module):
     ''' For use with single Expert '''
