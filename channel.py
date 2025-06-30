@@ -111,7 +111,7 @@ if __name__=='__main__':
 
     # Weight-only sharded checkpoints are needed to avoid problem caused by large model size
     model_checkpoint_callback=L.callbacks.ModelCheckpoint(f"lightning_logs/{job_name}/{version}", save_weights_only=True,
-                                                          monitor='val_loss/dataloader_idx_1') # monitor long-horizon loss
+                                                          monitor='val_loss/dataloader_idx_1', save_last=True) # monitor long-horizon loss
     strategy = L.strategies.FSDPStrategy(state_dict_type='sharded')
     trainer = L.Trainer(max_epochs=max_epochs, gradient_clip_val=gradient_clip_val, gradient_clip_algorithm='value',
                         accelerator='gpu', strategy=strategy, num_nodes=num_nodes, devices=num_gpus_per_node,
