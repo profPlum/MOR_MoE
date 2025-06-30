@@ -102,7 +102,8 @@ class FieldGatingNet(BasicLightningRegressor):
 # We decoupled this feature so it can be removed easily if needed
 class EqualizedFieldGatingNet(FieldGatingNet):
     def __init__(self, n_inputs, n_experts, *args, **kwd_args):
-        # topk selection doesn't make sense with this feature, so k=all
+        # GOTCHA: topk selection still makes sense in this case, though it might not be mathematically exact?
+        # regardless we set k=all to keep things simple, but this can be changed if needed
         super().__init__(n_inputs, n_experts, *args, k=n_experts-1, **kwd_args)
         del self._softmax
         self._softmax = self._doubly_stochastic_softmax

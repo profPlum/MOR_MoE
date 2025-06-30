@@ -63,7 +63,7 @@ export N_LAYERS=4 # number of expert layers
 export N_FILTERS=32 # number of hidden filters (aka channel size)
 export N_EXPERTS=3 # number of experts
 
-# load experiment settings
+## load experiment settings
 #source experiment_configs/control.sh
 #source experiment_configs/recursive_steps.sh
 source experiment_configs/mixture_of_experts.sh
