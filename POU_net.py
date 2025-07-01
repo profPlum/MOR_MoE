@@ -115,7 +115,7 @@ class EqualizedFieldGatingNet(FieldGatingNet):
         """
 
         # sinkhorn iterations
-        for _ in range(3):
+        for _ in range(10):
             # Step 1: Normalize to equalize exp sum across spatial dimensions
             spatial_dims = tuple(range(2, len(gating_logits.shape)))
             LSE = torch.logsumexp(gating_logits, dim=spatial_dims, keepdim=True)
