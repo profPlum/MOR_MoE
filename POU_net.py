@@ -114,16 +114,20 @@ class EqualizedFieldGatingNet(FieldGatingNet):
         This ensures that the probability mass is distributed equally across all experts.
         """
 
+        # gating_logits.shape=[n_experts, *spatial_dims]
+        gating_weights = F.softmax(gating_logits, dim=1)
+
         # sinkhorn iterations
         for _ in range(10):
-            # Step 1: Normalize to equalize exp sum across spatial dimensions
-            spatial_dims = tuple(range(2, len(gating_logits.shape)))
-            LSE = torch.logsumexp(gating_logits, dim=spatial_dims, keepdim=True)
-            gating_logits = gating_logits - LSE # gating_logits.shape=[n_experts, *spatial_dims]
-            # Step 2: Normalize to equalize exp sum across experts
-            LSE = torch.logsumexp(gating_logits, dim=1, keepdim=True)
-            gating_logits = gating_logits - LSE
-        gating_weights = torch.exp(gating_logits)
+            # Normalize to equalize sum across experts
+            gating_weights = gating_weights/torch.sum(gating_weights, dim=1, keepdim=True)
+
+            # Normalize to equalize sum across spatial dimensions
+            spatial_dims = tuple(range(2, len(gating_weights.shape)))
+            gating_weights = gating_weights/torch.sum(gating_weights, dim=spatial_dims, keepdim=True)
+
+        gating_weights = gating_weights/(gating_weights.sum(axis=1).mean())
+
         return gating_weights
 
 class DummyGatingNet(nn.Module):
