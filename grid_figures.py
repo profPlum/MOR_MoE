@@ -5,78 +5,7 @@ import matplotlib.cm
 import matplotlib.colors
 import mpl_toolkits.axes_grid1
 
-############### Deprecated API ###############
-def compare_img_seq(imgs: list, x_titles: list=None,
-                    y_title: str=None, cmap=None, normalize=True):
-    import numpy as np
-    assert type(imgs) is list
-    all_imgs = np.stack(imgs)
-    if all_imgs.min()<0 or all_imgs.max()>1 and normalize: # normalize if needed
-        print('normalizing')
-        all_imgs = (all_imgs-all_imgs.min())/all_imgs.max()
-        imgs = list(all_imgs)
-    fig, _ = plt.subplots(1,len(imgs))
-    fig.set_size_inches(len(imgs),1)
-    for i in range(len(imgs)):
-        plt.subplot(1,len(imgs),i+1)
-        plt.imshow(imgs[i], cmap=cmap)
-        plt.xticks([], [])
-        plt.yticks([], [])
-        if i==0 and y_title: plt.ylabel(y_title)
-        if x_titles and x_titles[i]:
-            plt.title(x_titles[i])
-        #plt.colorbar()
-    #plt.tight_layout()
-    plt.show()
-
-def display_3d(sol, y_title=None, x_title_func=lambda t: f't={t}',
-               img_getter=lambda sol, t: sol[:,:,t],
-               time_samples: list=None, cmap=None):
-    if x_title_func is None: x_title_func=lambda t: ''
-    img_seq = []
-    title_seq = []
-    if not time_samples:
-        time_samples = list(range(1,sol.shape[-1],max(1, int(0.5+sol.shape[-1]/10))))
-    for t in time_samples:
-        try:
-            img_seq.append(img_getter(sol, t))
-            title_seq.append(x_title_func(t))
-        except Exception as e:
-            print('Error: ', e)
-            break
-    compare_img_seq(img_seq, x_titles=title_seq, y_title=y_title, cmap=cmap)
-
-# Verified to work: 5/10/24
-def display3d_dataset(data_loader, n_sample_data=3):
-    batch = next(iter(data_loader))
-    print('batch["x"].shape=', batch['x'].shape)
-    print('batch["y"].shape=', batch['y'].shape, '\n')
-
-    import random
-    for i, datum in enumerate(random.choices(data_loader.dataset, k=n_sample_data)):
-        print('-'*50)
-        print(f'| Sample datum i={i}:') # NOTE: we skip the 3 positional embedding channels
-        print('-'*50)
-        x = datum['x'].permute([3,1,2,0])[0,:,:,:-3]
-        display_3d(x, y_title='input')
-        display_3d(datum['y'][0], y_title='output', x_title_func=lambda t: f't={t+x.shape[-1]}')
-##############################################
-
 import os, re
-
-'''
-def proportional_allocation(scalar_allocation, proportional_to_size, int_cast=True):
-    """
-    Dynamically allocates a quantity across dimensions proportionally to the size of those dimensions.
-    Such that prod(new_size)==prod([scalar_allocation]*len(proportional_to_size)).
-
-    This is equivalent to resizing a hyper-cube with side_length=scalar_allocation,
-    to be proportional to proportional_to_size while retaining the same volume.
-    """
-    c=((scalar_allocation**len(proportional_to_size))/np.prod(proportional_to_size))**(1/len(proportional_to_size))
-    new_size = np.asarray(proportional_to_size)*c
-    return list((new_size+0.5).astype(int) if int_cast else new_size)
-'''; # does same kind of dynamic allocation as for modes
 
 default_img_scale=1.45
 

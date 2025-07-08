@@ -1,7 +1,17 @@
 ''' Debugging utilities '''
 
 import torch
-from torch import nn
+import numpy as np
+
+fields = lambda x: [name for name in vars(x) if not name.startswith('_')] # utility to see public fields
+
+def tshow(x): # utility to "show" tensors without overwhelming people
+    try: x = x.cpu()
+    except: pass
+    x = np.asarray(x)
+    print('='*30)
+    print(f'{x.shape=}\n{x.dtype=}\n{x.min()=:.2e}\n{x.max()=:.2e}\n{x.mean()=:.2e}\n{x.std()=:.2e}')
+    print('='*30)
 
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -50,7 +60,6 @@ def clear_cache():
     import torch, gc
     while gc.collect(): pass
     torch.cuda.empty_cache()
-
 
 def nvidia_smi(message='', clear_mem=False, verbose=False):
     import sys

@@ -82,7 +82,7 @@ class Sim(L.LightningModule):
                 self.register_buffer(name, value.detach())
 
     def genIC(self):
-        h = torch.tensor(np.random.normal(0,1,(self.nx,self.ny,self.nz,3))).float()
+        h = torch.tensor(np.random.normal(0,1,(self.nx,self.ny,self.nz,3))).float().to(self.device)
         hh = rfft(h) * self.filt2[...,None]
         proj = self.k*(torch.sum(self.k*hh,axis=-1)/self.knorm2)[...,None]
         proj[0]=0
