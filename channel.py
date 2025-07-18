@@ -28,6 +28,18 @@ RLoP=bool(int(os.environ.get('RLoP', False))) # scheduler
 RLoP_factor=0.9
 RLoP_patience=15
 
+## original defaults:
+# TIME_CHUNKING=9 or 10
+# GRAD_CLIP=2.5e-3 --> 2.5e-3*(3 or sqrt(8))=7.5e-3 or 7.071e-03
+# VI_LR=1.25e-4 --> 1.25e-4*20=2.5e-3
+# batch_size=20 (=1x20 nodes)
+
+## new values:
+# TIME_CHUNKING=9
+# GRAD_CLIP=(2.5e-3*sqrt(8))*sqrt(9-1)=2.5e-3*8=2e-02
+# VI_LR=2.5e-3/(8*20)=1.563e-05
+# batch_size=20 (=1x20 nodes)
+
 # Import External Libraries
 import torch
 import pytorch_lightning as L
@@ -86,8 +98,8 @@ if __name__=='__main__':
         SimModelClass = lambda **kwd_args: SimModelClass_.load_from_checkpoint(ckpt_path, **kwd_args)
 
     # scale lr & grad clip
-    if scale_lr: lr *= num_nodes*num_gpus_per_node*batch_size
-    gradient_clip_val *= (time_chunking-1)**0.5
+    if scale_lr: lr *= num_nodes*num_gpus_per_node*batch_size*(time_chunking-1)
+    gradient_clip_val /= (time_chunking-1)**0.5
 
     # train model
     model = SimModelClass(n_inputs=ndims, n_outputs=ndims, ndims=ndims, n_experts=n_experts, n_layers=n_layers, hidden_channels=n_filters, make_optim=make_optim,

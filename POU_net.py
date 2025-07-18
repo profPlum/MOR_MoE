@@ -116,6 +116,7 @@ class EqualizedFieldGatingNet(FieldGatingNet):
 
         # gating_logits.shape=[n_experts, *spatial_dims]
         gating_weights = F.softmax(gating_logits, dim=1)
+        assert gating_weights.shape==gating_logits.shape
 
         # sinkhorn iterations
         for _ in range(10):
