@@ -9,7 +9,7 @@
 #SBATCH --time=1-00:00:00                    # Maximum runtime (HH:MM:SS)
 #SBATCH --partition=ghx4                     # Partition name
 #SBATCH --account=beoi-dtai-gh
-#SBATCH --job-name=MixtureOfExperts-Equalized
+#SBATCH --job-name=MixtureOfExperts-Equalized-new-scaling
 
 # Not going to work anymore b/c we would need to save the entire checkpoint which causes OOM...
 # ##SBATCH --signal=SIGUSR1@90
@@ -38,8 +38,8 @@ srun nvidia-smi
 #VI_LR=1.25e-4 # this is 4x higher than theory suggests (it is only possible b/c grad clip)
 #MLE_LR=2.5e-4 # this is 8x higher than theory suggests (it is only possible b/c grad clip + determinism)
 
-# GRAD_CLIP=(2.5e-3*sqrt(8))*sqrt(9-1)=2.5e-3*8=2e-02
-# VI_LR=2.5e-3/(8*20)=1.563e-05
+# GRAD_CLIP=(2.5e-3*sqrt(8))*sqrt((9-1)*20)=2.5e-3*16*sqrt(5)=8.944e-2
+# VI_LR=1.25e-4*20/(8*20)=1.25e-4/8=1.563e-5
 # these new values recover the old defaults with new scaling rules
 VI_LR=1.563e-5
 MLE_LR=3.125e-5
@@ -55,7 +55,7 @@ MLE_LR=3.125e-5
 # (VI+TRIG) 1550 epochs takes 20 hours (with 4 GH200s, measured 4/2/25)
 export MAX_EPOCHS=1550 #3100 # MUST BE ACCURATELY ADJUSTED based on estimated epochs (this ensures that OneCycle is properly calibrated)
 export LR=$VI_LR # this is 4x higher than theory suggests (it is only possible b/c grad clip)
-export GRAD_CLIP=2e-2 # it is best to keep this 2e-2 value, it will automatically be adjusted based on number of recursive timesteps
+export GRAD_CLIP=8.944e-2 # it is best to keep this 8.944e-2 value, it will automatically be adjusted based on number of recursive timesteps & batch_size
 export PRIOR_SIGMA=0.2 # approximately reflects the values of sigma at initialization
 export OPTIM='Adam' # RAdam is better for resuming, otherwise use Adam
 export RLoP=0 # Reduce Learning-rate on Plateu, can be useful for resuming (but otherwise keep it off!)

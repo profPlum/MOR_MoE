@@ -11,9 +11,9 @@ n_filters: int=int(os.environ.get('N_FILTERS', 32)) # hidden layer width (aka # 
 time_chunking: int=int(os.environ.get('TIME_CHUNKING', 9)) # how many self-aware recursive steps to take
 batch_size: int=int(os.environ.get('BATCH_SIZE', 2)) # batch size, with VI experts we can only fit 1 batch w/ 20 A100
 scale_lr=True # multiply by DDP (total) batch_size
-lr: float=float(os.environ.get('LR', 1.25e-4)) # (VI) learning rate (will be scaled by recurisve steps)
+lr: float=float(os.environ.get('LR', 1.563e-5)) # (VI) learning rate (will be scaled by recurisve steps)
 max_epochs=int(os.environ.get('MAX_EPOCHS', 500))
-gradient_clip_val=float(os.environ.get('GRAD_CLIP', 2.5e-3)) # grad clip adjusted based on new scaling rule
+gradient_clip_val=float(os.environ.get('GRAD_CLIP', 8.944e-2)) # grad clip adjusted based on new scaling rule
 make_optim=eval(f"torch.optim.{os.environ.get('OPTIM', 'Adam')}")
 ckpt_path=os.environ.get('CKPT_PATH', None)
 
@@ -30,14 +30,14 @@ RLoP_patience=15
 
 ## original defaults:
 # TIME_CHUNKING=9 or 10
-# GRAD_CLIP=2.5e-3 --> 2.5e-3*(3 or sqrt(8))=7.5e-3 or 7.071e-03
+# GRAD_CLIP=2.5e-3 --> 2.5e-3*(3 or sqrt(8))=7.5e-3 or 7.071e-3
 # VI_LR=1.25e-4 --> 1.25e-4*20=2.5e-3
 # batch_size=20 (=1x20 nodes)
 
 ## new values:
 # TIME_CHUNKING=9
-# GRAD_CLIP=(2.5e-3*sqrt(8))*sqrt(9-1)=2.5e-3*8=2e-02
-# VI_LR=2.5e-3/(8*20)=1.563e-05
+# GRAD_CLIP=(2.5e-3*sqrt(8))*sqrt((9-1)*20)=2.5e-3*16*sqrt(5)=8.944e-2
+# VI_LR=1.25e-4*20/(8*20)=1.25e-4/8=1.563e-5
 # batch_size=20 (=1x20 nodes)
 
 # Import External Libraries
@@ -97,9 +97,10 @@ if __name__=='__main__':
         SimModelClass_ = SimModelClass
         SimModelClass = lambda **kwd_args: SimModelClass_.load_from_checkpoint(ckpt_path, **kwd_args)
 
-    # scale lr & grad clip
-    if scale_lr: lr *= num_nodes*num_gpus_per_node*batch_size*(time_chunking-1)
-    gradient_clip_val /= (time_chunking-1)**0.5
+    # scale lr & grad clip by: the number of *output* timesteps in one full batch (this follows scaling equations)
+    scale_of_batch_data = num_nodes*num_gpus_per_node*batch_size*(time_chunking-1) # (includes time)
+    if scale_lr: lr *= scale_of_batch_data
+    gradient_clip_val /= scale_of_batch_data**0.5
 
     # train model
     model = SimModelClass(n_inputs=ndims, n_outputs=ndims, ndims=ndims, n_experts=n_experts, n_layers=n_layers, hidden_channels=n_filters, make_optim=make_optim,
@@ -124,6 +125,7 @@ if __name__=='__main__':
     # Weight-only sharded checkpoints are needed to avoid problem caused by large model size
     model_checkpoint_callback=L.callbacks.ModelCheckpoint(f"lightning_logs/{job_name}/{version}", save_weights_only=True,
                                                           monitor='val_loss/dataloader_idx_1', save_last=True) # monitor long-horizon loss
+
     strategy = L.strategies.FSDPStrategy(state_dict_type='sharded')
     trainer = L.Trainer(max_epochs=max_epochs, gradient_clip_val=gradient_clip_val, gradient_clip_algorithm='value',
                         accelerator='gpu', strategy=strategy, num_nodes=num_nodes, devices=num_gpus_per_node,
