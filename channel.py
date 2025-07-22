@@ -75,9 +75,9 @@ if __name__=='__main__':
     dataset_long_horizon = JHTDB_Channel('data/turbulence_output', time_chunking=time_chunking*long_horizon_multiplier) # called dataloader_idx_1 in tensorboard
     _, val_long_horizon = torch.utils.data.random_split(dataset_long_horizon, [0.5, 0.5]) # 50% ensures there are two validation steps
     train_dataset, val_dataset = torch.utils.data.random_split(dataset, [0.8, 0.2])
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, num_workers=32, pin_memory=True, shuffle=True, drop_last=True)
-    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=batch_size*long_horizon_multiplier, num_workers=16)
-    val_long_loader = torch.utils.data.DataLoader(val_long_horizon, batch_size=batch_size, num_workers=16)
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, num_workers=10, pin_memory=True, shuffle=True, drop_last=True)
+    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=batch_size*long_horizon_multiplier, num_workers=1, pin_memory=True)
+    val_long_loader = torch.utils.data.DataLoader(val_long_horizon, batch_size=batch_size, num_workers=2, pin_memory=True)
     print(f'{len(dataset)=}\n{len(train_loader)=}\n{len(val_dataset)=}')
 
     IC_0, Sol_0 = dataset[0]
@@ -105,7 +105,7 @@ if __name__=='__main__':
     # train model
     model = SimModelClass(n_inputs=ndims, n_outputs=ndims, ndims=ndims, n_experts=n_experts, n_layers=n_layers, hidden_channels=n_filters, make_optim=make_optim,
                           lr=lr, T_max=T_max, one_cycle=one_cycle, three_phase=three_phase, RLoP=RLoP, RLoP_factor=RLoP_factor, RLoP_patience=RLoP_patience,
-                          n_steps=time_chunking-1, k_modes=k_modes, trig_encodings=use_trig, make_gating_net=EqualizedFieldGatingNet, **VI_kwd_args)
+                          n_steps=time_chunking-1, k_modes=k_modes, trig_encodings=use_trig, **VI_kwd_args)
 
     print(f'num model parameters: {utils.count_parameters(model):.2e}')
     print('model:')
@@ -122,9 +122,15 @@ if __name__=='__main__':
     logger = WandbLogger(project="MOR_MoE", log_model="all", name=job_name, version=version)
     logger.watch(model) # For W&B to log gradients and model topology
 
-    # Weight-only sharded checkpoints are needed to avoid problem caused by large model size
-    model_checkpoint_callback=L.callbacks.ModelCheckpoint(f"lightning_logs/{job_name}/{version}", save_weights_only=True,
-                                                          monitor='val_loss/dataloader_idx_1', save_last=True) # monitor long-horizon loss
+    ## Weight-only sharded checkpoints are needed to avoid problem caused by large model size
+    #model_checkpoint_callback=L.callbacks.ModelCheckpoint(f"lightning_logs/{job_name}/{version}", save_weights_only=True,
+    #                                                      monitor='val_loss/dataloader_idx_1', save_last=True) # monitor long-horizon loss
+    model_checkpoint_callback=L.callbacks.ModelCheckpoint(
+        f"lightning_logs/{job_name}/{version}",
+        save_weights_only=True,
+        every_n_epochs=100,
+        save_top_k=-1  # Save all checkpoints
+    )
 
     strategy = L.strategies.FSDPStrategy(state_dict_type='sharded')
     trainer = L.Trainer(max_epochs=max_epochs, gradient_clip_val=gradient_clip_val, gradient_clip_algorithm='value',

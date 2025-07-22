@@ -3,13 +3,14 @@
 #SBATCH --error=logs/%x_%j.err               # Error file (%x: job-name, %j: job-id)
 #SBATCH --nodes=1                            # Trying allocating a whole node to play nice with pytorch-lightning
 #SBATCH --ntasks-per-node=4                  # Tasks per node (usually 1 for PyTorch)
-#SBATCH --mem-per-gpu=120000                 # CPU? RAM per GPU < 1/4 of the total node RAM = 120GB
+#SBATCH --mem-per-gpu=50000                  # CPU? RAM per GPU < 1/4 of the total node RAM = 120GB
 #SBATCH --gpus-per-node=4                    # GPUs per task is 1
-#SBATCH --cpus-per-task=72                   # CORES per task for data loaders
+#SBATCH --cpus-per-task=15                   # CORES per task for data loaders (72 avail per GPU)
 #SBATCH --time=1-00:00:00                    # Maximum runtime (HH:MM:SS)
 #SBATCH --partition=ghx4                     # Partition name
 #SBATCH --account=beoi-dtai-gh
-#SBATCH --job-name=MixtureOfExperts-Equalized-new-scaling
+#SBATCH --exclude=gh018 # Timeout Error...
+#SBATCH --job-name=MixtureOfExperts-new-scaling
 
 # Not going to work anymore b/c we would need to save the entire checkpoint which causes OOM...
 # ##SBATCH --signal=SIGUSR1@90
@@ -89,3 +90,5 @@ srun --kill-on-bad-exit python -O channel.py
 
 # Optional: Debugging info
 echo "Job finished at $(date)"
+echo done with job time remaining:
+squeue -h -j $SLURM_JOB_ID -O TimeLeft
