@@ -5,7 +5,7 @@
 #SBATCH --ntasks-per-node=4                  # Tasks per node (usually 1 for PyTorch)
 #SBATCH --mem-per-gpu=50000                  # CPU? RAM per GPU < 1/4 of the total node RAM = 120GB
 #SBATCH --gpus-per-node=4                    # GPUs per task is 1
-#SBATCH --cpus-per-task=15                   # CORES per task for data loaders (72 avail per GPU)
+#SBATCH --cpus-per-task=20                   # CORES per task for data loaders (72 avail per GPU)
 #SBATCH --time=1-00:00:00                    # Maximum runtime (HH:MM:SS)
 #SBATCH --partition=ghx4                     # Partition name
 #SBATCH --account=beoi-dtai-gh
@@ -76,6 +76,10 @@ export N_EXPERTS=3 # number of experts
 #source experiment_configs/recursive_steps.sh
 source experiment_configs/mixture_of_experts.sh
 #source experiment_configs/everything.sh # NO-OP b/c everything is already the default
+
+#export TIME_CHUNKING=30
+#export BATCH_SIZE=1
+#export MAX_EPOCHS=5
 
 ## IMPORTANT: you NEED to use `python -m pytorch_lightning.utilities.consolidate_checkpoint epoch=X-step=Y.ckpt` in order to get a useable model file for resuming or prediction
 ## Once you do that you can pass the checkpoint path like below to resume a run to get even better performance than what was achievable in the first run
