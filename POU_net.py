@@ -193,7 +193,7 @@ class POU_net(L.LightningModule):
     def __init__(self, n_inputs, n_outputs, n_experts=4, ndims=2, lr=0.001, momentum=0.9, T_max=10,
                  one_cycle=False, three_phase=False, RLoP=False, RLoP_factor=0.9, RLoP_patience:int=25,
                  make_optim: type=torch.optim.Adam, make_expert: type=MOR_Operator.MOR_Operator,
-                 make_gating_net: type=FieldGatingNet, trig_encodings=True, **kwd_args):
+                 make_gating_net: type=EqualizedFieldGatingNet, trig_encodings=True, **kwd_args):
         assert not (one_cycle and RLoP), 'These learning rate schedules are mututally exclusive!'
         super().__init__()
         RLoP_patience = int(RLoP_patience) # cast

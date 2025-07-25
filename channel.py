@@ -109,7 +109,7 @@ if __name__=='__main__':
     # train model
     model = SimModelClass(n_inputs=ndims, n_outputs=ndims, ndims=ndims, n_experts=n_experts, n_layers=n_layers, hidden_channels=n_filters, make_optim=make_optim,
                           lr=lr, T_max=T_max, one_cycle=one_cycle, three_phase=three_phase, RLoP=RLoP, RLoP_factor=RLoP_factor, RLoP_patience=RLoP_patience,
-                          n_steps=time_chunking-1, k_modes=k_modes, trig_encodings=use_trig, **VI_kwd_args)
+                          n_steps=time_chunking-1, k_modes=k_modes, trig_encodings=use_trig, make_gating_net=EqualizedFieldGatingNet, **VI_kwd_args)
 
     print(f'num model parameters: {utils.count_parameters(model):.2e}')
     print('model:')
