@@ -54,7 +54,7 @@ MLE_LR=3.125e-5
 # (VI+TRIG) 678 epochs takes 24 hours (with 20 nodes, measured 10/31/24)
 
 # (VI+TRIG) 1550 epochs takes 20 hours (with 4 GH200s, measured 4/2/25)
-export MAX_EPOCHS=1550 #3100 # MUST BE ACCURATELY ADJUSTED based on estimated epochs (this ensures that OneCycle is properly calibrated)
+export MAX_EPOCHS=1600 #3100 # MUST BE ACCURATELY ADJUSTED based on estimated epochs (this ensures that OneCycle is properly calibrated)
 export LR=$VI_LR # this is 4x higher than theory suggests (it is only possible b/c grad clip)
 export GRAD_CLIP=8.944e-2 # it is best to keep this 8.944e-2 value, it will automatically be adjusted based on number of recursive timesteps & batch_size
 export PRIOR_SIGMA=0.2 # approximately reflects the values of sigma at initialization
@@ -82,8 +82,8 @@ export CNN_FILTER_SIZE=3
 #source experiment_configs/mixture_of_experts.sh
 source experiment_configs/everything.sh # NO-OP b/c everything is already the default
 
-#export TIME_CHUNKING=30
-#export BATCH_SIZE=1
+#export BATCH_SIZE=27 # use same number of outputs
+#export N_EXPERTS=1
 #export MAX_EPOCHS=5
 
 ## IMPORTANT: you NEED to use `python -m pytorch_lightning.utilities.consolidate_checkpoint epoch=X-step=Y.ckpt` in order to get a useable model file for resuming or prediction
