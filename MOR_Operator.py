@@ -106,6 +106,7 @@ class MOR_Operator(BasicLightningRegressor):
     def __init__(self, in_channels=1, out_channels=1, hidden_channels=32,
                  n_layers=4, **kwd_args):
         super().__init__()
+        kwd_args['hidden_channels'] = hidden_channels # make h(x) hidden_channels=MOR_Operator.hidden_channels
         self.layers = nn.ModuleList([MOR_Layer(in_channels, hidden_channels, **kwd_args)] +
             [MOR_Layer(hidden_channels, hidden_channels, **kwd_args) for i in range(n_layers-2)]+
             [MOR_Layer(hidden_channels, out_channels, **kwd_args)])
