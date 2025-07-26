@@ -3,17 +3,17 @@
 #SBATCH --error=logs/%x_%j.err               # Error file (%x: job-name, %j: job-id)
 #SBATCH --nodes=1                            # Trying allocating a whole node to play nice with pytorch-lightning
 #SBATCH --ntasks-per-node=4                  # Tasks per node (usually 1 for PyTorch)
-#SBATCH --mem-per-gpu=50000                  # CPU? RAM per GPU < 1/4 of the total node RAM = 120GB
+#SBATCH --mem-per-gpu=120000                 # CPU? RAM per GPU < 1/4 of the total node RAM = 120GB
 #SBATCH --gpus-per-node=4                    # GPUs per task is 1
-#SBATCH --cpus-per-task=20                   # CORES per task for data loaders (72 avail per GPU)
+#SBATCH --cpus-per-task=72                   # CORES per task for data loaders (72 avail per GPU)
 #SBATCH --time=1-00:00:00                    # Maximum runtime (HH:MM:SS)
 #SBATCH --partition=ghx4                     # Partition name
 #SBATCH --account=beoi-dtai-gh
-#SBATCH --exclude=gh018 # Timeout Error...
-#SBATCH --job-name=MixtureOfExperts-new-scaling
+#SBATCH --job-name=Everything
 
 # Not going to work anymore b/c we would need to save the entire checkpoint which causes OOM...
 # ##SBATCH --signal=SIGUSR1@90
+# ##SBATCH --time=1-00:00:00                    # Maximum runtime (HH:MM:SS)
 
 # Load modules or environment
 . ~/.bashrc
@@ -71,11 +71,16 @@ export N_LAYERS=4 # number of expert layers
 export N_FILTERS=32 # number of hidden filters (aka channel size)
 export N_EXPERTS=3 # number of experts
 
+# CNN experts?
+export USE_CNN_EXPERTS=0
+export CNN_FILTER_SIZE=3
+#export CNN_FILTER_SIZE='[103,26,77]' # match k_modes...
+
 ## load experiment settings
 #source experiment_configs/control.sh
 #source experiment_configs/recursive_steps.sh
-source experiment_configs/mixture_of_experts.sh
-#source experiment_configs/everything.sh # NO-OP b/c everything is already the default
+#source experiment_configs/mixture_of_experts.sh
+source experiment_configs/everything.sh # NO-OP b/c everything is already the default
 
 #export TIME_CHUNKING=30
 #export BATCH_SIZE=1

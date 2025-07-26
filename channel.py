@@ -17,6 +17,9 @@ gradient_clip_val=float(os.environ.get('GRAD_CLIP', 8.944e-2)) # grad clip adjus
 make_optim=eval(f"torch.optim.{os.environ.get('OPTIM', 'Adam')}")
 ckpt_path=os.environ.get('CKPT_PATH', None)
 
+use_CNN_experts=bool(int(os.environ.get('USE_CNN_EXPERTS', False))) # TODO: make equal to k_modes??
+CNN_filter_size=eval(str(os.environ.get('CNN_FILTER_SIZE', 3))) # only used if use_CNN_experts=True
+assert type(CNN_filter_size) in [int, list, tuple]
 use_total_variance=bool(int(os.environ.get('TOTAL_VARIANCE', False)))
 use_trig = bool(int(os.environ.get('TRIG_ENCODINGS', True))) # Ravi's trig encodings
 use_VI = bool(int(os.environ.get('VI', True))) # whether to enable VI
@@ -49,7 +52,7 @@ torch.backends.cudnn.allow_tf32 = True
 # the flags above make roughly 14% of all ops use tensor cores!
 
 # Import Custom Modules
-
+from MOR_Operator import MOR_Operator
 from lightning_utils import *
 from POU_net import POU_net, PPOU_net, FieldGatingNet, EqualizedFieldGatingNet
 from JHTDB_sim_op import PPOU_NetSimulator, POU_NetSimulator, JHTDB_Channel
@@ -92,11 +95,11 @@ if __name__=='__main__':
     num_gpus_per_node = int(os.environ.get('SLURM_STEP_TASKS_PER_NODE', torch.cuda.device_count()))
     print(f'{num_nodes=}, {num_gpus_per_node=}')
 
-    SimModelClass, VI_kwd_args = POU_NetSimulator, {}
+    SimModelClass, optional_kwd_args = POU_NetSimulator, {}
     if use_VI: # VI is optional
         SimModelClass = PPOU_NetSimulator
-        VI_kwd_args = {'prior_cfg': {'prior_sigma': prior_sigma}, 'train_dataset_size': model_agnostic_BNN.get_dataset_size(train_dataset),
-                       'total_variance': use_total_variance}
+        optional_kwd_args = {'prior_cfg': {'prior_sigma': prior_sigma}, 'train_dataset_size': model_agnostic_BNN.get_dataset_size(train_dataset),
+                             'total_variance': use_total_variance}
     if ckpt_path: # secretly use the load from checkpoint api if needed
         SimModelClass_ = SimModelClass
         SimModelClass = lambda **kwd_args: SimModelClass_.load_from_checkpoint(ckpt_path, **kwd_args)
@@ -106,10 +109,16 @@ if __name__=='__main__':
     if scale_lr: lr *= scale_of_batch_data
     gradient_clip_val /= scale_of_batch_data**0.5
 
+    optional_kwd_args['k_modes']=k_modes # assuming MOR_Operator expert
+    if use_CNN_experts: # (else)
+        #CNN_ = lambda *args, k_modes=None, **kwd_args: CNN() # wrapper?
+        del optional_kwd_args['k_modes'] # (else)
+        optional_kwd_args |= {'make_expert': CNN, 'k_size': CNN_filter_size, 'skip_connections': True}
+
     # train model
     model = SimModelClass(n_inputs=ndims, n_outputs=ndims, ndims=ndims, n_experts=n_experts, n_layers=n_layers, hidden_channels=n_filters, make_optim=make_optim,
                           lr=lr, T_max=T_max, one_cycle=one_cycle, three_phase=three_phase, RLoP=RLoP, RLoP_factor=RLoP_factor, RLoP_patience=RLoP_patience,
-                          n_steps=time_chunking-1, k_modes=k_modes, trig_encodings=use_trig, make_gating_net=EqualizedFieldGatingNet, **VI_kwd_args)
+                          n_steps=time_chunking-1, trig_encodings=use_trig, make_gating_net=EqualizedFieldGatingNet, **optional_kwd_args)
 
     print(f'num model parameters: {utils.count_parameters(model):.2e}')
     print('model:')

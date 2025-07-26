@@ -28,16 +28,19 @@ dumb_vmap = lambda func: lambda X: torch.stack([func(x) for x in X])
 # Verified to work 7/19/24
 #class LightningSequential(nn.Sequential, BasicLightningRegressor): pass
 class LightningSequential(BasicLightningRegressor):
-    def __init__(self, *layers):
+    def __init__(self, *layers, skip_connections=False):
         super().__init__()
         self.layers=nn.ModuleList(layers)
-    def forward(self, x):
-        # Explicitly only call modules in the layers module list
-        for module in self.layers:
-            x = module(x)
-        return x
+        self.skip_connections = skip_connections
+    def forward(self, X):
+        X = self.layers[0](X)
+        for layer in self.layers[1:-1]:
+            if self.skip_connections: X=layer(X)+X
+            else: X=layer(X)
+        return self.layers[-1](X)
+
 def CNN(in_size=1, out_size=1, k_size=1, ndims=2,
-        n_layers=4, filters=32, activation=nn.SiLU):
+        n_layers=4, hidden_channels=32, activation=nn.SiLU, skip_connections=False):
     assert n_layers>=1
     assert ndims in [1,2,3]
     ConvLayer = [nn.Conv1d, nn.Conv2d, nn.Conv3d][ndims-1]
@@ -49,8 +52,8 @@ def CNN(in_size=1, out_size=1, k_size=1, ndims=2,
     if n_layers==1: # special case, just 1 linear "projection" layer
         layers = [CNN_layer(in_size,out_size,nn.Identity)]
     else:
-        layers = [CNN_layer(in_size,filters)] + \
-                 [CNN_layer(filters,filters) for i in range(n_layers-2)] + \
-                 [CNN_layer(filters,out_size, nn.Identity)]
+        layers = [CNN_layer(in_size,hidden_channels)] + \
+                 [CNN_layer(hidden_channels,hidden_channels) for i in range(n_layers-2)] + \
+                 [CNN_layer(hidden_channels,out_size, nn.Identity)]
 
-    return LightningSequential(*layers)
+    return LightningSequential(*layers, skip_connections=skip_connections)
