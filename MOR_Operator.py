@@ -30,7 +30,7 @@ def make_rfft_corner_slices(img1_shape, img2_shape, fft_dims=None, rfft=True, ve
 class MOR_Layer(BasicLightningRegressor):
     """ A single Nd MOR operator layer. """
     def __init__(self, in_channels=1, out_channels=1, k_modes=32, ndims=2,
-                 mlp_second=False, **kwd_args):
+                 mlp_second=False, group_norm=False, **kwd_args):
         super().__init__()
         vars(self).update(locals()); del self.self
 
@@ -51,6 +51,7 @@ class MOR_Layer(BasicLightningRegressor):
         g_channels = [in_channels, out_channels]
         if mlp_second: mlp_channels, g_channels = g_channels, mlp_channels
 
+        if group_norm: self.group_norm_layer = nn.GroupNorm(1, in_channels)
         self.g_mode_params = make_g(*g_channels)
         self.h_mlp=CNN(*mlp_channels, k_size=1, n_layers=2, ndims=ndims, **kwd_args)
 
@@ -58,6 +59,10 @@ class MOR_Layer(BasicLightningRegressor):
         u = torch.as_tensor(u).to(self.device)
         assert len(u.shape)==2+self.ndims # +1 for batch, +1 for channels
         # u.shape==[batch, in_channels, x, y, ...]
+
+        # if it doesn't exist then don't use group norm!
+        try: u=self.group_norm_layer(u)
+        except AttributeError: pass
 
         # Apply point-wise MLP nonlinearity h(u)
         if not self.mlp_second: u = self.h_mlp(u)
@@ -107,9 +112,9 @@ class MOR_Operator(BasicLightningRegressor):
                  n_layers=4, **kwd_args):
         super().__init__()
         kwd_args['hidden_channels'] = hidden_channels # make h(x) hidden_channels=MOR_Operator.hidden_channels
-        self.layers = nn.ModuleList([MOR_Layer(in_channels, hidden_channels, **kwd_args)] +
-            [MOR_Layer(hidden_channels, hidden_channels, **kwd_args) for i in range(n_layers-2)]+
-            [MOR_Layer(hidden_channels, out_channels, **kwd_args)])
+        self.layers = nn.ModuleList([MOR_Layer(in_channels, hidden_channels, group_norm=False, **kwd_args)] +
+            [MOR_Layer(hidden_channels, hidden_channels, group_norm=True, **kwd_args) for i in range(n_layers-2)]+
+            [MOR_Layer(hidden_channels, out_channels, group_norm=True, **kwd_args)])
 
         #ndims = {'ndims': kwd_args['ndims']} if 'ndims' in kwd_args else {}
         #ProjLayer = lambda *args, **kwd_args: CNN(*args, n_layers=1, **ndims, **kwd_args)
