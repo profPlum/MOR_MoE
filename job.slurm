@@ -65,7 +65,7 @@ export THREE_PHASE=0 # faster decay in one cycle, usually not needed
 export VI=1 # use VI or not (in bash binary booleans have the best support for boolean logic)
 export TRIG_ENCODINGS=1 # gives better (nearly periodic) partitions
 export TIME_CHUNKING=10 # 10 is default now b/c we can fit it in GH200s
-export BATCH_SIZE=3 # GH200 can handle batch_size=3! (it has > x2 the memory of A100)
+export BATCH_SIZE=2 # GH200 can handle batch_size=2! (it has > x2 the memory of A100)
 export N_LAYERS=4 # number of expert layers
 export N_FILTERS=32 # number of hidden filters (aka channel size)
 export N_EXPERTS=3 # number of experts
