@@ -46,13 +46,13 @@ def CNN(in_size=1, out_size=1, k_size=1, ndims=2,
     ConvLayer = [nn.Conv1d, nn.Conv2d, nn.Conv3d][ndims-1]
 
     # automatically use settings & apply activation
-    CNN_layer = lambda in_size, out_size, activation=activation: \
-        nn.Sequential(ConvLayer(in_size, out_size, k_size, padding='same'), activation())
+    CNN_layer = lambda in_size, out_size, activation=activation, group_norm=skip_connections: \
+        nn.Sequential(*[nn.GroupNorm(1,in_size)]*group_norm+[ConvLayer(in_size, out_size, k_size, padding='same'), activation()])
 
     if n_layers==1: # special case, just 1 linear "projection" layer
-        layers = [CNN_layer(in_size,out_size,nn.Identity)]
+        layers = [CNN_layer(in_size,out_size,nn.Identity, group_norm=False)]
     else:
-        layers = [CNN_layer(in_size,hidden_channels)] + \
+        layers = [CNN_layer(in_size,hidden_channels, group_norm=False)] + \
                  [CNN_layer(hidden_channels,hidden_channels) for i in range(n_layers-2)] + \
                  [CNN_layer(hidden_channels,out_size, nn.Identity)]
 
