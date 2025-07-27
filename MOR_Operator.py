@@ -119,5 +119,5 @@ class MOR_Operator(BasicLightningRegressor):
     def forward(self, X):
         X = self.layers[0](X)
         for layer in self.layers[1:-1]:
-            X=layer(X)+X # skip connections
+            X=(layer(X)+X)/2 # skip connections
         return self.layers[-1](X)

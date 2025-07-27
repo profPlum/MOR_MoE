@@ -35,7 +35,7 @@ class LightningSequential(BasicLightningRegressor):
     def forward(self, X):
         X = self.layers[0](X)
         for layer in self.layers[1:-1]:
-            if self.skip_connections: X=layer(X)+X
+            if self.skip_connections: X=(layer(X)+X)/2
             else: X=layer(X)
         return self.layers[-1](X)
 
