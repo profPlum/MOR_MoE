@@ -103,8 +103,11 @@ if __name__=='__main__':
 
     # scale lr & grad clip by: the number of *output* timesteps in one full batch (this follows scaling equations)
     scale_of_batch_data = num_nodes*num_gpus_per_node*batch_size*(time_chunking-1) # (includes time)
+    print(f'b4 scaling: {lr=}, {gradient_clip_val=}')
     if scale_lr: lr *= scale_of_batch_data
     gradient_clip_val /= scale_of_batch_data**0.5
+    print(f'after scaling: {lr=}, {gradient_clip_val=}')
+    print(f'{scale_of_batch_data=}')
 
     # train model
     model = SimModelClass(n_inputs=ndims, n_outputs=ndims, ndims=ndims, n_experts=n_experts, n_layers=n_layers, hidden_channels=n_filters, make_optim=make_optim,
