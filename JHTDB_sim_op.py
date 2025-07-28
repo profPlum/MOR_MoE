@@ -190,6 +190,13 @@ class POU_NetSimulator(POU_net):
         finally:
             self.n_steps=org_steps
 
+    def training_step(self, batch, batch_idx=None, val=False):
+        loss=super().training_step(batch, batch_idx=batch_idx, val=val)
+        assert self.training == (not val)
+        if not loss.isfinite() and self.training: raise RuntimeError('NaN loss! aborting training')
+        # be careful! training_step is used by validation_step too!
+        return loss
+
 # This is it! It should do full aleatoric + epistemic UQ with VI
 # Verified that forward parametrize-caching is redundant here 10/8/24
 class PPOU_NetSimulator(POU_NetSimulator, PPOU_net):
