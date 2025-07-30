@@ -316,7 +316,8 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
         if self._total_variance:
             total_variance = total_variance + zero_expert_gating_weights*total_expectation**2 # for 2nd term (total_expectation**2==(0-total_expectation)**2)
 
-        assert (total_variance**0.5 > 1e-9).all()
+        assert (total_variance**0.5 > 1e-9).all(), 'vanishing sigma --> NaNs'
+        assert (abs(total_expectation)<100).all(), 'exploding mu --> NaNs'
         return total_expectation, total_variance**0.5
 
     '''
