@@ -69,7 +69,7 @@ class MemMonitorCallback(L.Callback):
         print(f'SLURM_LOCALID={os.environ["SLURM_LOCALID"]}, GPU_Id={torch.cuda.current_device()}', flush=True)
 
 # for ablation study
-L.seed_everything(0)
+L.seed_everything(int(os.environ.get('SEED', 0)))
 
 # we can literally fit the entire dataset into memory... its only 16GB total
 preload_dataset = lambda dataset: torch.utils.data.TensorDataset(*next(iter(torch.utils.data.DataLoader(dataset, batch_size=len(dataset)))))

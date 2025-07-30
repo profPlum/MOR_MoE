@@ -283,7 +283,7 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
 
         # add additional set of metrics for validating aleatoric UQ itself compared to error
         self.val_UQ_metrics = MetricsModule(self, n_outputs, prefix='val_UQ_')
-        self._zero_expert_sigma=nn.Parameter(torch.randn([1]))
+        self._zero_expert_rho=nn.Parameter(torch.randn([1]))
         self._total_variance=total_variance
 
     def forward(self, X, Y=None):
@@ -312,10 +312,11 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
 
         # handle zero expert (confirmed this doesn't require that zero expert exists, it will gracefully handle it)
         zero_expert_gating_weights = 1-gating_weights.sum(axis=1, keepdim=True) # recover zero expert weights
-        total_variance = total_variance + zero_expert_gating_weights*F.softplus(self._zero_expert_sigma)**2 # for 1st term
+        total_variance = total_variance + zero_expert_gating_weights*F.softplus(self._zero_expert_rho)**2 # for 1st term
         if self._total_variance:
             total_variance = total_variance + zero_expert_gating_weights*total_expectation**2 # for 2nd term (total_expectation**2==(0-total_expectation)**2)
 
+        assert (total_variance**0.5 > 1e-9).all()
         return total_expectation, total_variance**0.5
 
     '''

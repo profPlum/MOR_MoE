@@ -32,7 +32,7 @@ echo "batch node ip: $(host $(hostname))"
 echo "rank hostnames & Ips:"
 srun bash -c 'echo host: $SLURMD_NODENAME, rank: $PMI_RANK, slurm_proc_id: $SLURM_PROCID, $(host $(hostname))'
 echo srun nvidia-smi:
-srun nvidia-smi
+srun --ntasks-per-node=1 nvidia-smi
 
 ## Old values:
 #STANDARD_LR=3.125e-5 # theoretically suggested by Adam default lr=0.001/32 s.t. 32 is default batch size
@@ -63,9 +63,8 @@ export RLoP=0 # Reduce Learning-rate on Plateu, can be useful for resuming (but 
 export ONE_CYCLE=$((! RLoP)) # OneCycle warmup & decay lr schedule. Really important for scaling to multiple GPUs!
 export THREE_PHASE=0 # faster decay in one cycle, usually not needed
 export VI=1 # use VI or not (in bash binary booleans have the best support for boolean logic)
-export TRIG_ENCODINGS=1 # trig encodings slow down training almost 1/3 but might give better partitions?
-export TOTAL_VARIANCE=0 # whether to use total variance for NLL
-export TIME_CHUNKING=10 # 10 is default now b/c we can fit it
+export TRIG_ENCODINGS=1 # gives better (nearly periodic) partitions
+export TIME_CHUNKING=10 # 10 is default now b/c we can fit it in GH200s
 export BATCH_SIZE=3 # GH200 can handle batch_size=3! (it has > x2 the memory of A100)
 export N_LAYERS=4 # number of expert layers
 export N_FILTERS=32 # number of hidden filters (aka channel size)
@@ -75,6 +74,7 @@ export N_EXPERTS=3 # number of experts
 export USE_CNN_EXPERTS=0
 export CNN_FILTER_SIZE=3
 #export CNN_FILTER_SIZE='[103,26,77]' # match k_modes...
+#export N_LAYERS=12 N_EXPERTS=1 #LR=1e-7
 
 ## load experiment settings
 #source experiment_configs/control.sh
@@ -82,6 +82,7 @@ export CNN_FILTER_SIZE=3
 #source experiment_configs/mixture_of_experts.sh
 source experiment_configs/everything.sh # NO-OP b/c everything is already the default
 
+#export SEED=$RANDOM # random behavior (but consistent splitting)
 #export BATCH_SIZE=27 # use same number of outputs
 #export N_EXPERTS=1
 #export MAX_EPOCHS=5
@@ -89,9 +90,6 @@ source experiment_configs/everything.sh # NO-OP b/c everything is already the de
 ## IMPORTANT: you NEED to use `python -m pytorch_lightning.utilities.consolidate_checkpoint epoch=X-step=Y.ckpt` in order to get a useable model file for resuming or prediction
 ## Once you do that you can pass the checkpoint path like below to resume a run to get even better performance than what was achievable in the first run
 #export CKPT_PATH='/home/dsdeigh/MOR_MoE/lightning_logs/PARTIAL_VI_RLoP_Extension/477516/checkpoints/epoch=206-step=7452.ckpt.consolidated'
-#export CKPT_PATH='/home/dsdeigh/MOR_MoE/lightning_logs/PARTIAL_VI_RLoP_Extension/477516/checkpoints/epoch=114-step=4140.ckpt.consolidated'
-#export CKPT_PATH='/home/dsdeigh/MOR_MoE/lightning_logs/PARTIAL_VI_OneCycle_RecursiveClip=2.5e-3/467132/checkpoints/epoch=867-step=31248.ckpt.consolidated'
-#export CKPT_PATH='/home/dsdeigh/MOR_MoE/lightning_logs/VI_OneCycle_RecursiveClip=2.5e-3_Trig/465271/checkpoints/epoch=242-step=3888.ckpt.consolidated'
 
 # Run your PyTorch Lightning script
 srun --kill-on-bad-exit python -O channel.py
