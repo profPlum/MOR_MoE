@@ -41,7 +41,8 @@ nll_classification = lambda y_pred, y: _pt_nll_classificiation(y_pred, y)
 # NOTE: This generalizes both the simpler (constant sigma) and more general (non-constant sigma) cases!
 def nll_regression(y_pred, y, y_pred_sigma=1.0, reduction=torch.sum): # y_pred_sigma sigma can be assumed constant, but it's best if you don't
     y_pred_sigma = torch.as_tensor(y_pred_sigma, device=y_pred.device, dtype=y_pred.dtype)
-    element_wise_NLL = (y_pred-y)**2/(2*y_pred_sigma**2) + torch.log(y_pred_sigma)
+    #element_wise_NLL = (y_pred-y)**2/(2*y_pred_sigma**2) + torch.log(y_pred_sigma) # old version
+    element_wise_NLL = 0.5*((y_pred-y)/y_pred_sigma)**2 + torch.log(y_pred_sigma) # more numerically stable (don't square small sigmas b4 division)
     return reduction(element_wise_NLL) # sum (?) over element-wise NLL
     # Sum over element-wise NLL; this is mathematically correct when you assume output UQ is independent.
 
