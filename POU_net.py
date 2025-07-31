@@ -318,9 +318,9 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
         if self._total_variance:
             total_variance = total_variance + zero_expert_gating_weights*total_expectation**2 # for 2nd term (total_expectation**2==(0-total_expectation)**2)
 
-        eps=1e-5
+        eps=1e-4 # adding eps is better than clamping
         std = total_variance**0.5 + eps
-        #std = std.clamp(min=eps)
+        #std = std.clamp(min=eps) # clamping is worse than eps
         total_expectation = torch.tanh(total_expectation*(2/5))*5
         return total_expectation, std
 
