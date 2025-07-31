@@ -81,7 +81,9 @@ def preload_dataset(dataset):
         X, y = dataset[i]
         Xs.append(X)
         ys.append(y)
-    return torch.utils.data.TensorDataset(torch.stack(Xs), torch.stack(ys))
+    Xs, ys = torch.stack(Xs), torch.stack(ys)
+    print(f'dataset min={min(Xs.min(),ys.min())}, max={max(Xs.max(),ys.max())}')
+    return torch.utils.data.TensorDataset(Xs, ys)
 
 if __name__=='__main__':
     # setup dataset
