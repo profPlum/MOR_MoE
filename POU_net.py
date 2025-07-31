@@ -155,6 +155,7 @@ class MetricsModule(L.LightningModule):
         self.prefix=prefix
 
         self.r2_score = torchmetrics.R2Score(num_outputs=n_outputs)
+        self.MAE = torchmetrics.MeanAbsoluteError()
         self.explained_variance = torchmetrics.ExplainedVariance()
         self.wMAPE = torchmetrics.WeightedMeanAbsolutePercentageError()
         self.sMAPE = torchmetrics.SymmetricMeanAbsolutePercentageError()
@@ -178,6 +179,7 @@ class MetricsModule(L.LightningModule):
             log_metric('explained_variance')
             log_metric('wMAPE')
             log_metric('sMAPE')
+            log_metric('MAE')
 
 ''' # we did this implicitly instead of using the class
 class ZeroExpert(L.LightningModule):
@@ -352,9 +354,8 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
         super()._log_metrics(y_pred_mu, y, val=val) # log regular mu metrics & lr (implicitly)
 
         if not val: return # UQ metrics for training would be overkill...
-        sigma_to_mad_coef = 0.7978865 # this magic constant can be multiplied with sigma of a 1d guassian to obtain the MAD! E[|X-E[X]|] (expected absolute error)
+        sigma_to_mad_coef = (2/torch.pi)**0.5 # this magic constant can be multiplied with sigma of a 1d guassian to obtain the MAD! E[|X-E[X]|] (expected absolute error)
         with torch.inference_mode():
             y_abs_error=(y-y_pred_mu).abs() # y_pred_mu is to y, as y_pred_sigma is to y_abs_error
             y_pred_MAD = y_pred_sigma*sigma_to_mad_coef
             self.val_UQ_metrics.log_metrics(y_pred_MAD, y_abs_error)
-            self.log(f'val_UQ_MAE', (y_abs_error-y_pred_MAD).abs().mean(), sync_dist=True, on_epoch=True, on_step=False)
