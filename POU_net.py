@@ -299,9 +299,10 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
         total_variance = 0 # Var[Y] = E[Var[Y|Z]]+Var[E[Y|Z]]
         mus = [] # necessary for 2nd term in total variance eq.
 
-        # enforce sigma to be within [0,50]
-        #sigmoid_constraint = lambda x: F.sigmoid(x)*50
-        sigma_constraint = lambda x, max_val=50: F.softplus(x)*(1-F.sigmoid(x-max_val-4))
+        # enforce sigma to be within (0,50]
+        eps=5e-4 # adding eps is better than clamping
+        sigma_constraint = lambda x: F.sigmoid(x)*50 + eps
+        #sigma_constraint = lambda x, max_val=50: F.softplus(x)*((1-F.sigmoid(x-max_val-4)).clamp(min=0)) + eps
 
         for i, k_i in enumerate(topk):
             pred_i = self.experts[k_i](X)
@@ -320,13 +321,13 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
         zero_expert_gating_weights = 1-gating_weights.sum(axis=1, keepdim=True) # recover zero expert weights
         total_variance = total_variance + zero_expert_gating_weights*sigma_constraint(self._zero_expert_rho)**2 # for 1st term
         if self._total_variance: # for 2nd term (total_expectation**2==(0-total_expectation)**2)
-            total_variance = total_variance + zero_expert_gating_weights*total_expectation**2 
+            total_variance = total_variance + zero_expert_gating_weights*total_expectation**2
 
-        assert torch.isfinite(total_variance).all()
-        assert torch.isfinite(total_expectation).all()
+        if self.training:
+            assert torch.isfinite(total_variance).all()
+            assert torch.isfinite(total_expectation).all()
 
-        eps=1e-4 # adding eps is better than clamping
-        std = total_variance**0.5 + eps
+        std = total_variance**0.5
         total_expectation = torch.tanh(total_expectation*(2/5))*5
         return total_expectation, std
 
