@@ -285,7 +285,8 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
 
         # add additional set of metrics for validating aleatoric UQ itself compared to error
         self.val_UQ_metrics = MetricsModule(self, n_outputs, prefix='val_UQ_')
-        self._zero_expert_rho=nn.Parameter(torch.randn([1]))
+        self._zero_expert_rho=nn.Parameter(torch.randn(1))
+        self.register_buffer('_curriculum_eps', torch.tensor(0.1)) # target is 1e-4
         self._total_variance=total_variance
 
     def forward(self, X, Y=None):
@@ -299,10 +300,9 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
         total_variance = 0 # Var[Y] = E[Var[Y|Z]]+Var[E[Y|Z]]
         mus = [] # necessary for 2nd term in total variance eq.
 
-        # enforce sigma to be within (0,50]
-        eps=1e-4 # adding eps is better than clamping
-        #sigma_constraint = lambda x: F.sigmoid(x)*50 + eps # Not good b/c upper bound makes derivative too high
-        sigma_constraint = lambda x, max_val=50: F.softplus(x)*(1-F.sigmoid(x-max_val-4)) + eps # this is a LOT better than a sigmoid constraint
+        # enforce sigma to be within (0,50] (adding eps is better than clamping)
+        #sigma_constraint = lambda x: F.sigmoid(x)*50 + self._curriculum_eps # Not good b/c upper bound makes derivative too high
+        sigma_constraint = lambda x, max_val=50: F.softplus(x)*(1-F.sigmoid(x-max_val-4)) + self._curriculum_eps # this is a LOT better than a sigmoid constraint
 
         for i, k_i in enumerate(topk):
             pred_i = self.experts[k_i](X)
@@ -343,10 +343,18 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
         return mu_pred, sigma_pred
     '''
 
+    @property
+    def _decay_rate(self):
+        assert self.training
+        target_epsilon=1e-4 # this was the previous default
+        return (target_epsilon/self._curriculum_eps)**(1/self.trainer.estimated_stepping_batches)
+
     def training_step(self, batch, batch_idx=None, val=False):
         X, y = batch
         y_pred_all = self(X)
         y_pred_mu, y_pred_sigma = y_pred_all
+
+        if self.training: self._curriculum_eps*=self._decay_rate
 
         #num_batches = len(self.trainer.train_dataloader.dataset)//self.trainer.train_dataloader.batch_size # sneakily extract from PL
         kl_loss = self.get_kl_loss()#/(num_batches*y.numel()) # (weighted)
