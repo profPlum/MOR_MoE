@@ -39,7 +39,7 @@ class MOR_Layer(BasicLightningRegressor):
                 k_modes = ndims*[k_modes]
         def make_g(in_channels, out_channels):
             g_shape = [in_channels, out_channels]+k_modes[:ndims-1] + [k_modes[-1]//2+1, 2]
-            scale = 5e-3 #1.0/(in_channels**0.5)#out_channels) # similar to xavier initializaiton
+            scale = 5e-3 #1.0/(in_channels**0.5)#out_channels) # similar to kaiming initializaiton
             param = torch.randn(*g_shape)*scale
             #torch.nn.init.kaiming_normal_(param, nonlinearity='relu')
             #torch.nn.init.xavier_uniform_(param)
@@ -60,7 +60,7 @@ class MOR_Layer(BasicLightningRegressor):
         assert len(u.shape)==2+self.ndims # +1 for batch, +1 for channels
         # u.shape==[batch, in_channels, x, y, ...]
 
-        # if it doesn't exist then don't use group norm!
+        # if it doesn't exist then don't use norm!
         try: u=self.batch_norm_layer(u)
         except AttributeError: pass
 

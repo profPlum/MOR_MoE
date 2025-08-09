@@ -6,7 +6,7 @@ import numpy as np
 fields = lambda x: [name for name in vars(x) if not name.startswith('_')] # utility to see public fields
 
 def tshow(x): # utility to "show" tensors without overwhelming people
-    try: x = x.cpu()
+    try: x = x.cpu().detach()
     except: pass
     x = np.asarray(x)
     print('='*30)
