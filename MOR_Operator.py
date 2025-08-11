@@ -72,24 +72,25 @@ class MOR_Layer(BasicLightningRegressor):
         fft_dims = list(range(-self.ndims, 0))
         u_fft = torch.fft.rfftn(u, dim=fft_dims)
 
-        # Pad the g_mode_params (this will drop extra modes)
         g = torch.view_as_complex(self.g_mode_params) # Convert to complex dtype (makes shape "correct")
         g_padded_shape = list(g.shape[:-self.ndims])+list(u_fft.shape[-self.ndims:]) # fuse shapes
 
-        # insert G into G_padded s.t. it applies a low pass filter
+        # insert G into "G_padded" s.t. it applies a low pass filter
+        # & Apply learned weights in the Fourier domain (einsum does channel reduction)
         if tuple(g.shape)==tuple(g_padded_shape):
-            g_padded=g # special optimization to juice out an extra time-step
-        else:
+            g_padded=g # special optimization to juice out an extra time-step: just one einsum
+            g_padded = g_padded[None] # add batch dimension
+            assert u_fft.shape[1]==g_padded.shape[1]==g.shape[0] # check channel compatibility
+            u_fft = torch.einsum('bi...,bio...->bo...', u_fft, g_padded) # LEGEND: [b,i,o]:=[batch,in,out] (dimensions)
+        else: # really we just insert the einsum piece-wise into u_fft_out (padded), since it's more efficient
             warnings.warn('Not using special optimization! tuple(g.shape)!=tuple(g_padded_shape)')
-            g_padded = torch.zeros(*g_padded_shape, dtype=g.dtype, device=g.device)
-            for corner in make_rfft_corner_slices(g_padded.shape, g.shape, fft_dims=fft_dims, verbose=False):
-                g_padded[corner] = g[corner]
-        g_padded = g_padded[None] # add batch dimension
-
-        # Apply learned weights in the Fourier domain (einsum does channel reduction)
-        assert u_fft.shape[1]==g_padded.shape[1]==g.shape[0] # check channel compatibility
-        u_fft = torch.einsum('bi...,bio...->bo...', u_fft, g_padded) # keeps channel size the same! (but einsum is still needed)
-        # LEGEND: [b,i,o]:=[batch,in,out] (dimensions)
+            # NOTE: einsum only changes the number of channels! [batch, g_out_channels, *spatial_dims]
+            u_fft_out = torch.zeros(u_fft.shape[0], g.shape[1], *u_fft.shape[2:], dtype=u_fft.dtype, device=u_fft.device)
+            assert u_fft.shape[1]==g.shape[0]
+            for corner in make_rfft_corner_slices(g_padded_shape, g.shape, fft_dims=fft_dims, verbose=False):
+                u_fft_out[corner] = torch.einsum('bi...,bio...->bo...', u_fft[corner], g[corner][None]) #[None] adds batch dimension to g
+                # LEGEND: [b,i,o]:=[batch,in,out] (dimensions)
+            u_fft = u_fft_out
 
         # Apply inverse Fourier transform
         u_ifft = torch.fft.irfftn(u_fft, s=u.shape[-self.ndims:], dim=fft_dims).real
