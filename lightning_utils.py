@@ -19,7 +19,6 @@ class BasicLightningRegressor(L.LightningModule):
         return loss
     def validation_step(self, batch, batch_idx=None):
         loss = self.training_step(batch, batch_idx, val=True)
-        self.log('hp_metric', loss, sync_dist=True)
         return loss
 
 # useful for debugging when vmap won't work
@@ -40,7 +39,8 @@ class LightningSequential(BasicLightningRegressor):
         return self.layers[-1](X)
 
 def CNN(in_size=1, out_size=1, k_size=1, ndims=2,
-        n_layers=4, hidden_channels=32, activation=nn.SiLU, skip_connections=False):
+        n_layers=4, hidden_channels=32, activation=nn.SiLU,
+        skip_connections=False, scale_weights=False):
     assert n_layers>=1
     assert ndims in [1,2,3]
     ConvLayer = [nn.Conv1d, nn.Conv2d, nn.Conv3d][ndims-1]
@@ -57,4 +57,12 @@ def CNN(in_size=1, out_size=1, k_size=1, ndims=2,
                  [CNN_layer(hidden_channels,hidden_channels) for i in range(n_layers-2)] + \
                  [CNN_layer(hidden_channels,out_size, nn.Identity)]
 
-    return LightningSequential(*layers, skip_connections=skip_connections)
+    @torch.no_grad()
+    def scale_weights(m):
+        scale=5e-3 # same scaling constant found in FNO
+        for p in m.parameters(recurse=True):
+            p *= scale
+    if scale_weights: layers[-1].apply(scale_weights)
+    model = LightningSequential(*layers, skip_connections=skip_connections)
+    # if scale_weights: model.apply(scale_weights)
+    return model

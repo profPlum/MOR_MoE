@@ -127,7 +127,7 @@ if __name__=='__main__':
     if use_CNN_experts: # (else)
         #CNN_ = lambda *args, k_modes=None, **kwd_args: CNN() # wrapper?
         del optional_kwd_args['k_modes'] # (else)
-        optional_kwd_args |= {'make_expert': CNN, 'k_size': CNN_filter_size, 'skip_connections': True}
+        optional_kwd_args |= {'make_expert': CNN, 'k_size': CNN_filter_size, 'skip_connections': True, 'scale_weights': True}
 
     # train model
     model = SimModelClass(n_inputs=ndims, n_outputs=ndims, ndims=ndims, n_experts=n_experts, n_layers=n_layers, hidden_channels=n_filters, make_optim=make_optim,

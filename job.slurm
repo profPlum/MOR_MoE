@@ -9,7 +9,7 @@
 #SBATCH --time=1-00:00:00                    # Maximum runtime (HH:MM:SS)
 #SBATCH --partition=ghx4                     # Partition name
 #SBATCH --account=beoi-dtai-gh
-#SBATCH --job-name=Everything
+#SBATCH --job-name=CNN-K6-scaled-LL
 
 # Not going to work anymore b/c we would need to save the entire checkpoint which causes OOM...
 # ##SBATCH --signal=SIGUSR1@90
@@ -71,16 +71,16 @@ export N_FILTERS=32 # number of hidden filters (aka channel size)
 export N_EXPERTS=3 # number of experts
 
 # CNN experts?
-export USE_CNN_EXPERTS=0
-export CNN_FILTER_SIZE=3
+export USE_CNN_EXPERTS=1
+export CNN_FILTER_SIZE=6
 #export CNN_FILTER_SIZE='[103,26,77]' # match k_modes...
-#export N_LAYERS=12 N_EXPERTS=1 #LR=1e-7
+export N_LAYERS=12 N_EXPERTS=1 #LR=1e-7
 
 ## load experiment settings
 #source experiment_configs/control.sh
 #source experiment_configs/recursive_steps.sh
 #source experiment_configs/mixture_of_experts.sh
-source experiment_configs/everything.sh # NO-OP b/c everything is already the default
+#source experiment_configs/everything.sh # NO-OP b/c everything is already the default
 
 #export SEED=$RANDOM # random behavior (but consistent splitting)
 #export BATCH_SIZE=27 # use same number of outputs
