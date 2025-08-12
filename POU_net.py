@@ -290,7 +290,7 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
 
     def forward(self, X, Y=None):
         ''' crazy forward method that does everything needed for total variance of mixture distribution with zero expert '''
-        X = torch.as_tensor(X).to(self.device)
+        X = torch.as_tensor(X, device=self.device)
         if Y is None: Y = torch.zeros(1,device=X.device, dtype=X.dtype).expand(*X.shape)
         X = torch.cat([X,Y], axis=1)
 
@@ -300,9 +300,9 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
         mus = [] # necessary for 2nd term in total variance eq.
 
         # enforce sigma to be within (0,50]
-        eps=5e-4 # adding eps is better than clamping
-        sigma_constraint = lambda x: F.sigmoid(x)*50 + eps
-        #sigma_constraint = lambda x, max_val=50: F.softplus(x)*((1-F.sigmoid(x-max_val-4)).clamp(min=0)) + eps
+        eps=1e-4 # adding eps is better than clamping
+        #sigma_constraint = lambda x: F.sigmoid(x)*50 + eps # Not good b/c upper bound makes derivative too high
+        sigma_constraint = lambda x, max_val=50: F.softplus(x)*(1-F.sigmoid(x-max_val-4)) + eps # this is a LOT better than a sigmoid constraint
 
         for i, k_i in enumerate(topk):
             pred_i = self.experts[k_i](X)
