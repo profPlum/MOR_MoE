@@ -113,15 +113,16 @@ class MOR_Operator(BasicLightningRegressor):
                  n_layers=4, **kwd_args):
         super().__init__()
         kwd_args['hidden_channels'] = hidden_channels # make h(x) hidden_channels=MOR_Operator.hidden_channels
-        self.layers = nn.ModuleList([MOR_Layer(in_channels, hidden_channels, batch_norm=False, **kwd_args)] +
-            [MOR_Layer(hidden_channels, hidden_channels, batch_norm=True, **kwd_args) for i in range(n_layers-2)]+
-            [MOR_Layer(hidden_channels, out_channels, batch_norm=True, **kwd_args)])
+        #self.layers = nn.ModuleList([MOR_Layer(in_channels, hidden_channels, batch_norm=False, **kwd_args)] +
+        #    [MOR_Layer(hidden_channels, hidden_channels, batch_norm=True, **kwd_args) for i in range(n_layers-2)]+
+        #    [MOR_Layer(hidden_channels, out_channels, batch_norm=True, **kwd_args)])
 
-        #ndims = {'ndims': kwd_args['ndims']} if 'ndims' in kwd_args else {}
-        #ProjLayer = lambda *args, **kwd_args: CNN(*args, n_layers=1, **ndims, **kwd_args)
-        #self.layers = nn.ModuleList([ProjLayer(in_channels, hidden_channels)] +
-        #    [MOR_Layer(hidden_channels, hidden_channels, **kwd_args) for i in range(n_layers)]+
-        #    [ProjLayer(hidden_channels, out_channels)])
+        assert 'mlp_second' not in kwd_args
+        ndims = {'ndims': kwd_args['ndims']} if 'ndims' in kwd_args else {}
+        ProjLayer = lambda *args, **kwd_args: CNN(*args, n_layers=2, **ndims, **kwd_args)
+        self.layers = nn.ModuleList([MOR_Layer(in_channels, hidden_channels, batch_norm=False, **kwd_args)] + #[ProjLayer(in_channels, hidden_channels)] +
+            [MOR_Layer(hidden_channels, hidden_channels, batch_norm=True, **kwd_args) for i in range(n_layers-1)]+
+            [ProjLayer(hidden_channels, out_channels, scale_weights=True)]) # this is like having an extra h(x) at the end
     def forward(self, X):
         X = self.layers[0](X)
         for layer in self.layers[1:-1]:
