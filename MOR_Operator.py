@@ -29,8 +29,7 @@ def make_rfft_corner_slices(img1_shape, img2_shape, fft_dims=None, rfft=True, ve
 
 class MOR_Layer(BasicLightningRegressor):
     """ A single Nd MOR operator layer. """
-    def __init__(self, in_channels=1, out_channels=1, k_modes=32, ndims=2,
-                 mlp_second=False, batch_norm=False, **kwd_args):
+    def __init__(self, in_channels=1, out_channels=1, k_modes=32, ndims=2, batch_norm=True, **kwd_args):
         super().__init__()
         vars(self).update(locals()); del self.self
 
@@ -41,32 +40,30 @@ class MOR_Layer(BasicLightningRegressor):
             g_shape = [in_channels, out_channels]+k_modes[:ndims-1] + [k_modes[-1]//2+1, 2]
             scale = 5e-3 #1.0/(in_channels**0.5)#out_channels) # similar to kaiming initializaiton
             param = torch.randn(*g_shape)*scale
-            #torch.nn.init.kaiming_normal_(param, nonlinearity='relu')
-            #torch.nn.init.xavier_uniform_(param)
-            #print(f'{param.std().item()}')
             return nn.Parameter(param)
 
         # Define the weights in the Fourier domain (complex values)
         mlp_channels = [in_channels]*2
         g_channels = [in_channels, out_channels]
-        if mlp_second: mlp_channels, g_channels = g_channels, mlp_channels
+        #if mlp_second: mlp_channels, g_channels = g_channels, mlp_channels
 
         BatchNormLayer = [nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d][ndims-1]
         if batch_norm: self.batch_norm_layer = BatchNormLayer(in_channels)
+
         self.g_mode_params = make_g(*g_channels)
         self.h_mlp=CNN(*mlp_channels, k_size=1, n_layers=2, ndims=ndims, output_activation=True, **kwd_args)
 
     def forward(self, u):
-        u = torch.as_tensor(u).to(self.device)
+        u = torch.as_tensor(u, device=self.device)
         assert len(u.shape)==2+self.ndims # +1 for batch, +1 for channels
         # u.shape==[batch, in_channels, x, y, ...]
 
-        # if it doesn't exist then don't use norm!
-        try: u=self.batch_norm_layer(u)
+        # use the batch norm layer if it's here
+        try: u = self.batch_norm_layer(u)
         except AttributeError: pass
 
         # Apply point-wise MLP nonlinearity h(u)
-        if not self.mlp_second: u = self.h_mlp(u)
+        u = self.h_mlp(u)
 
         # Apply Fourier transform (last ndims need to be spatial!)
         # should FFT the last self.ndims modes, also we pad (if needed) to make low-pass work
@@ -99,9 +96,6 @@ class MOR_Layer(BasicLightningRegressor):
 
         assert u_ifft.shape[-self.ndims:]==u.shape[-self.ndims:]
 
-        # Apply point-wise MLP nonlinearity h(u)
-        if self.mlp_second: u_ifft = self.h_mlp(u_ifft)
-
         return u_ifft
 
 class MOR_Operator(BasicLightningRegressor):
@@ -110,20 +104,18 @@ class MOR_Operator(BasicLightningRegressor):
     Without skip-connections this operator doesn't work at all
     (assuming multiple layers), b/c of 1 channel bottleneck & b/c
     """
-    def __init__(self, in_channels=1, out_channels=1, hidden_channels=32,
-                 n_layers=4, **kwd_args):
+    def __init__(self, in_channels=1, out_channels=1, hidden_channels=32, n_layers=4, **kwd_args):
         super().__init__()
         kwd_args['hidden_channels'] = hidden_channels # make h(x) hidden_channels=MOR_Operator.hidden_channels
         #self.layers = nn.ModuleList([MOR_Layer(in_channels, hidden_channels, batch_norm=False, **kwd_args)] +
         #    [MOR_Layer(hidden_channels, hidden_channels, batch_norm=True, **kwd_args) for i in range(n_layers-2)]+
         #    [MOR_Layer(hidden_channels, out_channels, batch_norm=True, **kwd_args)])
 
-        assert 'mlp_second' not in kwd_args
         ndims = {'ndims': kwd_args['ndims']} if 'ndims' in kwd_args else {}
         ProjLayer = lambda *args, **kwd_args: CNN(*args, n_layers=2, **ndims, **kwd_args)
         self.layers = nn.ModuleList([MOR_Layer(in_channels, hidden_channels, batch_norm=False, **kwd_args)] + #[ProjLayer(in_channels, hidden_channels)] +
-            [MOR_Layer(hidden_channels, hidden_channels, batch_norm=True, **kwd_args) for i in range(n_layers-1)]+
-            [ProjLayer(hidden_channels, out_channels, scale_weights=True)]) # this is like having an extra h(x) at the end
+            [MOR_Layer(hidden_channels, hidden_channels, batch_norm=True, input_activation=True, **kwd_args) for i in range(n_layers-1)]+
+            [ProjLayer(hidden_channels, out_channels, scale_weights=True, input_activation=True)]) # this is like having an extra h(x) at the end
     def forward(self, X):
         X = self.layers[0](X)
         for layer in self.layers[1:-1]:
