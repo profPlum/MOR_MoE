@@ -39,7 +39,7 @@ class LightningSequential(BasicLightningRegressor):
         return self.layers[-1](X)
 
 def CNN(in_size=1, out_size=1, k_size=1, ndims=2, n_layers=4, hidden_channels=32, activation=nn.SiLU,
-        skip_connections=False, scale_weights=False, output_activation=False, input_activation=False):
+        skip_connections=False, scale_outputs=False, output_activation=False, input_activation=False):
     assert n_layers>=1
     assert ndims in [1,2,3]
     ConvLayer = [nn.Conv1d, nn.Conv2d, nn.Conv3d][ndims-1]
@@ -57,13 +57,6 @@ def CNN(in_size=1, out_size=1, k_size=1, ndims=2, n_layers=4, hidden_channels=32
                  [CNN_layer(hidden_channels,hidden_channels) for i in range(n_layers-2)] + \
                  [CNN_layer(hidden_channels,out_size)]
     if output_activation: layers[-1].append(activation()) # add output activation
-
-    @torch.no_grad()
-    def scale_weights_(m):
-        scale=5e-3 # same scaling constant found in FNO
-        for p in m.parameters(recurse=False):
-            p *= scale
-    if scale_weights: layers[-1].apply(scale_weights_)
+    if scale_outputs: layers[-1].append(BatchNormLayer(out_size))
     model = LightningSequential(*layers, skip_connections=skip_connections)
-    # if scale_weights: model.apply(scale_weights)
     return model

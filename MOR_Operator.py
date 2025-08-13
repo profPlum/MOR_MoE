@@ -115,7 +115,7 @@ class MOR_Operator(BasicLightningRegressor):
         ProjLayer = lambda *args, **kwd_args: CNN(*args, n_layers=2, **ndims, **kwd_args)
         self.layers = nn.ModuleList([MOR_Layer(in_channels, hidden_channels, batch_norm=False, **kwd_args)] + #[ProjLayer(in_channels, hidden_channels)] +
             [MOR_Layer(hidden_channels, hidden_channels, batch_norm=True, input_activation=True, **kwd_args) for i in range(n_layers-1)]+
-            [ProjLayer(hidden_channels, out_channels, scale_weights=True, input_activation=True)]) # this is like having an extra h(x) at the end
+            [ProjLayer(hidden_channels, out_channels, scale_outputs=True, input_activation=True)]) # this is like having an extra h(x) at the end
     def forward(self, X):
         X = self.layers[0](X)
         for layer in self.layers[1:-1]:
