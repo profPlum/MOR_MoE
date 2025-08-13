@@ -51,7 +51,8 @@ class MOR_Layer(BasicLightningRegressor):
         g_channels = [in_channels, out_channels]
         if mlp_second: mlp_channels, g_channels = g_channels, mlp_channels
 
-        if batch_norm: self.batch_norm_layer = nn.BatchNorm3d(in_channels)
+        BatchNormLayer = [nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d][ndims-1]
+        if batch_norm: self.batch_norm_layer = BatchNormLayer(in_channels)
         self.g_mode_params = make_g(*g_channels)
         self.h_mlp=CNN(*mlp_channels, k_size=1, n_layers=2, ndims=ndims, **kwd_args)
 
