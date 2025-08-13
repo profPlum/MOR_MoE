@@ -40,22 +40,24 @@ class LightningSequential(BasicLightningRegressor):
 
 def CNN(in_size=1, out_size=1, k_size=1, ndims=2,
         n_layers=4, hidden_channels=32, activation=nn.SiLU,
-        skip_connections=False, scale_weights=False):
+        skip_connections=False, scale_weights=False, output_activation=False):
     assert n_layers>=1
     assert ndims in [1,2,3]
     ConvLayer = [nn.Conv1d, nn.Conv2d, nn.Conv3d][ndims-1]
     BatchNormLayer = [nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d][ndims-1]
+
+    output_activation=activation if output_activation else nn.Identity
 
     # automatically use settings & apply activation
     CNN_layer = lambda in_size, out_size, activation=activation, batch_norm=skip_connections: \
         nn.Sequential(*[BatchNormLayer(in_size)]*batch_norm+[ConvLayer(in_size, out_size, k_size, padding='same'), activation()])
 
     if n_layers==1: # special case, just 1 linear "projection" layer
-        layers = [CNN_layer(in_size,out_size,nn.Identity, batch_norm=False)]
+        layers = [CNN_layer(in_size,out_size,output_activation, batch_norm=False)]
     else:
         layers = [CNN_layer(in_size,hidden_channels, batch_norm=False)] + \
                  [CNN_layer(hidden_channels,hidden_channels) for i in range(n_layers-2)] + \
-                 [CNN_layer(hidden_channels,out_size, nn.Identity)]
+                 [CNN_layer(hidden_channels,out_size, output_activation)]
 
     @torch.no_grad()
     def scale_weights(m):

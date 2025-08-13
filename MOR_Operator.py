@@ -54,7 +54,7 @@ class MOR_Layer(BasicLightningRegressor):
         BatchNormLayer = [nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d][ndims-1]
         if batch_norm: self.batch_norm_layer = BatchNormLayer(in_channels)
         self.g_mode_params = make_g(*g_channels)
-        self.h_mlp=CNN(*mlp_channels, k_size=1, n_layers=2, ndims=ndims, **kwd_args)
+        self.h_mlp=CNN(*mlp_channels, k_size=1, n_layers=2, ndims=ndims, output_activation=True, **kwd_args)
 
     def forward(self, u):
         u = torch.as_tensor(u).to(self.device)
