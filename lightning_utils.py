@@ -60,7 +60,7 @@ def CNN(in_size=1, out_size=1, k_size=1, ndims=2,
     @torch.no_grad()
     def scale_weights(m):
         scale=5e-3 # same scaling constant found in FNO
-        for p in m.parameters(recurse=True):
+        for p in m.parameters(recurse=False):
             p *= scale
     if scale_weights: layers[-1].apply(scale_weights)
     model = LightningSequential(*layers, skip_connections=skip_connections)
