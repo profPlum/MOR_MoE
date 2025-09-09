@@ -14,11 +14,8 @@ dependencies:
   - jupyter
   - pytorch-gpu==2.4.0
   - pytorch-lightning==2.4.0
-  - tensorflow
   - pip
   - pip:
-      - papermill
-      - tensorboard==2.11.0
-      - torch-tb-profiler==0.4.3
+      - wandb==0.19.11
       - pynvml
 prefix: /home/dsdeigh/miniforge3/envs/uqops
