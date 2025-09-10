@@ -122,14 +122,12 @@ class EqualizedFieldGatingNet(FieldGatingNet):
 
         # sinkhorn iterations
         for _ in range(10):
-            # Normalize to equalize sum across experts
-            gating_weights = gating_weights/torch.sum(gating_weights, dim=1, keepdim=True)
-
             # Normalize to equalize sum across spatial dimensions
             spatial_dims = tuple(range(2, len(gating_weights.shape)))
             gating_weights = gating_weights/torch.sum(gating_weights, dim=spatial_dims, keepdim=True)
 
-        gating_weights = gating_weights/(gating_weights.sum(axis=1).mean())
+            # Normalize to equalize sum across experts
+            gating_weights = gating_weights/torch.sum(gating_weights, dim=1, keepdim=True)
 
         return gating_weights
 
@@ -323,12 +321,13 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
         if self._total_variance: # for 2nd term (total_expectation**2==(0-total_expectation)**2)
             total_variance = total_variance + zero_expert_gating_weights*total_expectation**2
 
-        if self.training:
-            assert torch.isfinite(total_variance).all()
-            assert torch.isfinite(total_expectation).all()
-
         std = total_variance**0.5
         total_expectation = torch.tanh(total_expectation*(2/5))*5
+
+        if self.training:
+            assert torch.isfinite(std).all()
+            assert torch.isfinite(total_expectation).all()
+
         return total_expectation, std
 
     '''
