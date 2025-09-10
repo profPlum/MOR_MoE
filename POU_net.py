@@ -91,9 +91,11 @@ class FieldGatingNet(BasicLightningRegressor):
 
     @contextmanager
     def cached_gating_weights(self):
+        if self._cache_forward:
+            yield; return # if we cache recursively this inner context should NO-OP
         try:
             self._cache_forward=True # tell forward to cache
-            yield # yeild nothing during with statement
+            yield # yield nothing during with statement
         finally:
             self._cache_forward=False
             self._cached_forward_results=None # reset cache
@@ -240,7 +242,7 @@ class POU_net(L.LightningModule):
 
     # Verified to work 7/19/24
     def forward(self, X):
-        X = torch.as_tensor(X).to(self.device)
+        X = torch.as_tensor(X, device=self.device)
         gating_weights, topk = self.gating_net(X)
         prediction = 0
         for i, k_i in enumerate(topk):
@@ -257,8 +259,6 @@ class POU_net(L.LightningModule):
 
     def validation_step(self, batch, batch_idx=None, data_loader_idx=0):
         loss = self.training_step(batch, batch_idx, val=True)
-        if data_loader_idx==0:
-            self.log('hp_metric', loss.item(), sync_dist=True)
         return loss
 
     def _log_metrics(self, y_pred, y, val=False):
@@ -336,11 +336,17 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
     def forward(self, X, Y=None):
         if Y is None: Y = torch.zeros(1,device=X.device, dtype=X.dtype).expand(*X.shape)
         X = torch.cat([X,Y], axis=1)
-        pred = super().forward(X)
 
-        mu_pred = pred[:, :pred.shape[1]//2]
-        sigma_pred = F.softplus(pred[:, pred.shape[1]//2:])
-        return mu_pred, sigma_pred
+        # this context works recursively
+        with self.gating_net.cached_gating_weights():
+            mu_pred, rho_pred = super().forward(X).tensor_split(2, dim=1)
+
+            # handle zero expert (confirmed this doesn't require that zero expert exists, it will gracefully handle it)
+            gating_weights, topk = self.gating_net(X) # this is cached and requires no compute
+            zero_expert_gating_weights = 1-gating_weights.sum(axis=1, keepdim=True) # recover zero expert weights
+            rho_pred = rho_pred + zero_expert_gating_weights*self._zero_expert_rho # add zero expert contrib
+
+        return mu_pred, F.softplus(rho_pred)
     '''
 
     def training_step(self, batch, batch_idx=None, val=False):
