@@ -156,9 +156,9 @@ class MetricsModule(L.LightningModule):
 
         self.r2_score = torchmetrics.R2Score(num_outputs=n_outputs)
         self.MAE = torchmetrics.MeanAbsoluteError()
-        self.explained_variance = torchmetrics.ExplainedVariance()
-        self.wMAPE = torchmetrics.WeightedMeanAbsolutePercentageError()
         self.sMAPE = torchmetrics.SymmetricMeanAbsolutePercentageError()
+        #self.wMAPE = torchmetrics.WeightedMeanAbsolutePercentageError()
+        #self.explained_variance = torchmetrics.ExplainedVariance()
 
     def log_metrics(self, y_pred, y):
         with torch.inference_mode():
@@ -176,10 +176,10 @@ class MetricsModule(L.LightningModule):
 
             # we specify the metric itself for the first one to enable a different metric name
             log_metric('R^2', self.r2_score, prog_bar=not self.prefix)
-            log_metric('explained_variance')
-            log_metric('wMAPE')
-            log_metric('sMAPE')
             log_metric('MAE')
+            log_metric('sMAPE')
+            #log_metric('explained_variance')
+            #log_metric('wMAPE')
 
 ''' # we did this implicitly instead of using the class
 class ZeroExpert(L.LightningModule):
