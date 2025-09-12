@@ -32,6 +32,7 @@ def get_kl_loss(m):
     for layer in m.modules():
         if hasattr(layer, "kl_loss"):
             kl_loss += layer.kl_loss()
+    assert torch.isfinite(kl_loss) or not kl_loss.requires_grad, f'kl_loss={kl_loss.item()}'
     return kl_loss
 
 _pt_nll_classificiation = torch.nn.NLLLoss(reduction='sum') # sum needed for the true NLL
@@ -39,12 +40,17 @@ nll_classification = lambda y_pred, y: _pt_nll_classificiation(y_pred, y)
 
 # Truest NLL! (for regression)
 # NOTE: This generalizes both the simpler (constant sigma) and more general (non-constant sigma) cases!
-def nll_regression(y_pred, y, y_pred_sigma=1.0, reduction=torch.sum): # y_pred_sigma sigma can be assumed constant, but it's best if you don't
+def nll_regression(y_pred, y, y_pred_sigma=1.0, reduction=torch.mean): # y_pred_sigma sigma can be assumed constant, but it's best if you don't
     y_pred_sigma = torch.as_tensor(y_pred_sigma, device=y_pred.device, dtype=y_pred.dtype)
     #element_wise_NLL = (y_pred-y)**2/(2*y_pred_sigma**2) + torch.log(y_pred_sigma) # old version
     element_wise_NLL = 0.5*((y_pred-y)/y_pred_sigma)**2 + torch.log(y_pred_sigma) # more numerically stable (don't square small sigmas b4 division)
     return reduction(element_wise_NLL) # sum (?) over element-wise NLL
     # Sum over element-wise NLL; this is mathematically correct when you assume output UQ is independent.
+
+def nll_R2(y_pred, y, y_pred_sigma=1.0):
+    our_nll = nll_regression(y_pred, y, y_pred_sigma=y_pred_sigma, reduction=torch.mean)
+    baseline_nll = nll_regression(y.mean(axis=0, keepdim=True), y, y_pred_sigma=y.std(axis=0, keepdim=True), reduction=torch.mean)
+    return 1-torch.exp(our_nll - baseline_nll) # = 1-exp(our_nll)/exp(baseline_nll)
 
 _get_rho = lambda sigma: np.log(np.expm1(sigma)+1e-20)
 
