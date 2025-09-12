@@ -277,7 +277,7 @@ class POU_net(L.LightningModule):
 import model_agnostic_BNN
 
 class PPOU_net(POU_net): # Not really, it's POU+VI
-    def __init__(self, n_inputs, n_outputs, train_dataset_size, *args, total_variance=False, prior_cfg={}, **kwd_args):
+    def __init__(self, n_inputs, n_outputs, train_dataset_size, *args, prior_cfg={}, **kwd_args):
         # we double output channels to have the sigma predictions too
         super().__init__(n_inputs*2, n_outputs*2, *args, **kwd_args)
 
@@ -287,55 +287,6 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
         # add additional set of metrics for validating aleatoric UQ itself compared to error
         self.val_UQ_metrics = MetricsModule(self, n_outputs, prefix='val_UQ_')
         self._zero_expert_rho=nn.Parameter(torch.randn([1]))
-        self._total_variance=total_variance
-        assert not total_variance
-
-    """
-    def forward(self, X, Y=None):
-        ''' crazy forward method that does everything needed for total variance of mixture distribution with zero expert '''
-        X = torch.as_tensor(X, device=self.device)
-        if Y is None: Y = torch.zeros(1,device=X.device, dtype=X.dtype).expand(*X.shape)
-        X = torch.cat([X,Y], axis=1)
-
-        gating_weights, topk = self.gating_net(X)
-        total_expectation = 0 # E[Y] = E[E[Y|Z]]
-        total_variance = 0 # Var[Y] = E[Var[Y|Z]]+Var[E[Y|Z]]
-        mus = [] # necessary for 2nd term in total variance eq.
-
-        # enforce sigma to be within (0,50]
-        eps=1e-4 # adding eps is better than clamping
-        #sigma_constraint = lambda x: F.sigmoid(x)*50 + eps # Not good b/c upper bound makes derivative too high
-        sigma_constraint = lambda x, max_val=50: F.softplus(x)*(1-F.sigmoid(x-max_val-4)) + eps # this is a LOT better than a sigmoid constraint
-
-        for i, k_i in enumerate(topk):
-            pred_i = self.experts[k_i](X)
-            mu = pred_i[:, :pred_i.shape[1]//2]
-            sigma = sigma_constraint(pred_i[:, pred_i.shape[1]//2:]) # enforce positivity
-            mus.append(mu)
-
-            total_expectation = total_expectation + gating_weights[:,i:i+1]*mu
-            total_variance = total_variance + gating_weights[:,i:i+1]*sigma**2
-
-        if self._total_variance: # add in the explained variance term (2nd term) = Var(mus) = Var[E[Y|Z]]
-            total_variance = total_variance + sum([gating_weights[:,i:i+1]*(mu-total_expectation)**2 for i, mu in enumerate(mus)])
-        mus.clear() # paranoia related to memory management
-
-        # handle zero expert (confirmed this doesn't require that zero expert exists, it will gracefully handle it)
-        zero_expert_gating_weights = 1-gating_weights.sum(axis=1, keepdim=True).clip(max=1.0) # recover zero expert weights
-        assert (zero_expert_gating_weights>=0).all()
-        total_variance = total_variance + zero_expert_gating_weights*sigma_constraint(self._zero_expert_rho)**2 # for 1st term
-        if self._total_variance: # for 2nd term (total_expectation**2==(0-total_expectation)**2)
-            total_variance = total_variance + zero_expert_gating_weights*total_expectation**2
-
-        std = total_variance**0.5
-        total_expectation = torch.tanh(total_expectation*(2/5))*5
-
-        if self.training:
-            assert torch.isfinite(std).all()
-            assert torch.isfinite(total_expectation).all()
-
-        return total_expectation, std
-    """
 
     # original forward before probabilistic considerations
     def forward(self, X, Y=None):

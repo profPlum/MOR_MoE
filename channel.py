@@ -20,7 +20,6 @@ ckpt_path=os.environ.get('CKPT_PATH', None)
 use_CNN_experts=bool(int(os.environ.get('USE_CNN_EXPERTS', False))) # TODO: make equal to k_modes??
 CNN_filter_size=eval(str(os.environ.get('CNN_FILTER_SIZE', 3))) # only used if use_CNN_experts=True
 assert type(CNN_filter_size) in [int, list, tuple]
-use_total_variance=bool(int(os.environ.get('TOTAL_VARIANCE', False)))
 use_trig = bool(int(os.environ.get('TRIG_ENCODINGS', True))) # Ravi's trig encodings
 use_VI = bool(int(os.environ.get('VI', True))) # whether to enable VI
 prior_sigma=float(os.environ.get('PRIOR_SIGMA', 0.2)) # this prior sigma almost matches he sigma of initialization
@@ -109,11 +108,7 @@ if __name__=='__main__':
     SimModelClass, optional_kwd_args = POU_NetSimulator, {}
     if use_VI: # VI is optional
         SimModelClass = PPOU_NetSimulator
-        optional_kwd_args = {'prior_cfg': {'prior_sigma': prior_sigma}, 'train_dataset_size': model_agnostic_BNN.get_dataset_size(train_dataset),
-                             'total_variance': use_total_variance}
-    if ckpt_path: # secretly use the load from checkpoint api if needed
-        SimModelClass_ = SimModelClass
-        SimModelClass = lambda **kwd_args: SimModelClass_.load_from_checkpoint(ckpt_path, **kwd_args)
+        optional_kwd_args = {'prior_cfg': {'prior_sigma': prior_sigma}, 'train_dataset_size': model_agnostic_BNN.get_dataset_size(train_dataset)}
 
     # scale lr & grad clip by: the number of *output* timesteps in one full batch (this follows scaling equations)
     scale_of_batch_data = num_nodes*num_gpus_per_node*batch_size*(time_chunking-1) # (includes time)
@@ -125,7 +120,6 @@ if __name__=='__main__':
 
     optional_kwd_args['k_modes']=k_modes # assuming MOR_Operator expert
     if use_CNN_experts: # (else)
-        #CNN_ = lambda *args, k_modes=None, **kwd_args: CNN() # wrapper?
         del optional_kwd_args['k_modes'] # (else)
         optional_kwd_args |= {'make_expert': CNN, 'k_size': CNN_filter_size, 'skip_connections': True, 'scale_outputs': True}
 
@@ -154,17 +148,17 @@ if __name__=='__main__':
     #                                                      monitor='val_loss/dataloader_idx_1', save_last=True) # monitor long-horizon loss
     model_checkpoint_callback=L.callbacks.ModelCheckpoint(
         f"lightning_logs/{job_name}/{version}",
-        save_weights_only=True,
+        save_weights_only=False, # we can do this now I don't think it effects peak memory (it does effect size though)
         every_n_epochs=100,
-        save_top_k=-1  # Save all checkpoints
+        #save_top_k=-1,  # Save all checkpoints
+        #save_last=True
     )
 
-    strategy = L.strategies.FSDPStrategy(state_dict_type='sharded')
+    strategy = L.strategies.FSDPStrategy(state_dict_type='sharded') # sharded reduces peak memory usage but still allows resuming in full!
     trainer = L.Trainer(max_epochs=max_epochs, gradient_clip_val=gradient_clip_val, gradient_clip_algorithm='value',
                         accelerator='gpu', strategy=strategy, num_nodes=num_nodes, devices=num_gpus_per_node,
                         profiler='simple', logger=logger, plugins=[SLURMEnvironment()], log_every_n_steps=20,
-                        callbacks=[model_checkpoint_callback, MemMonitorCallback()]) #detect_anomaly=True,
+                        callbacks=[model_checkpoint_callback, MemMonitorCallback()])
 
     val_dataloaders = [val_loader, val_long_loader] # long validation loader causes various problems with profiler & GPU utilization...
-    trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_dataloaders) #, ckpt_path=ckpt_path)
-    #trainer.validate(model=model, dataloaders=val_dataloaders) #, ckpt_path=ckpt_path)
+    trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_dataloaders, ckpt_path=ckpt_path)
