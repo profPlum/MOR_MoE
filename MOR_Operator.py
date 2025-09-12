@@ -29,7 +29,7 @@ def make_rfft_corner_slices(img1_shape, img2_shape, fft_dims=None, rfft=True, ve
 
 class MOR_Layer(BasicLightningRegressor):
     """ A single Nd MOR operator layer. """
-    def __init__(self, in_channels=1, out_channels=1, k_modes=32, ndims=2, batch_norm=True, **kwd_args):
+    def __init__(self, in_channels=1, out_channels=1, k_modes=32, ndims=2, num_h_layers=2, batch_norm=True, **kwd_args):
         super().__init__()
         vars(self).update(locals()); del self.self
 
@@ -51,7 +51,7 @@ class MOR_Layer(BasicLightningRegressor):
         if batch_norm: self.batch_norm_layer = BatchNormLayer(in_channels)
 
         self.g_mode_params = make_g(*g_channels)
-        self.h_mlp=CNN(*mlp_channels, k_size=1, n_layers=2, ndims=ndims, output_activation=True, **kwd_args)
+        self.h_mlp=CNN(*mlp_channels, k_size=1, n_layers=num_h_layers, ndims=ndims, output_activation=True, **kwd_args)
 
     def forward(self, u):
         u = torch.as_tensor(u, device=self.device)
@@ -114,7 +114,7 @@ class MOR_Operator(BasicLightningRegressor):
         ndims = {'ndims': kwd_args['ndims']} if 'ndims' in kwd_args else {}
         ProjLayer = lambda *args, **kwd_args: CNN(*args, n_layers=2, **ndims, **kwd_args)
         self.layers = nn.ModuleList([MOR_Layer(in_channels, hidden_channels, batch_norm=False, **kwd_args)] + #[ProjLayer(in_channels, hidden_channels)] +
-            [MOR_Layer(hidden_channels, hidden_channels, batch_norm=True, input_activation=True, **kwd_args) for i in range(n_layers-1)]+
+            [MOR_Layer(hidden_channels, hidden_channels, num_h_layers=1, batch_norm=True, input_activation=True, **kwd_args) for i in range(n_layers-1)] +
             [ProjLayer(hidden_channels, out_channels, scale_outputs=True, input_activation=True)]) # this is like having an extra h(x) at the end
     def forward(self, X):
         X = self.layers[0](X)
