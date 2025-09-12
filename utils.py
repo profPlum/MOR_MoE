@@ -79,3 +79,32 @@ def nvidia_smi(message='', clear_mem=False, verbose=False):
     print(full_msg, flush=True)
     torch.cuda.reset_peak_memory_stats() # reset since we reported it
     #if verbose: print(torch.cuda.memory_summary()) # way too much info
+
+def module_finite_check(module):
+    """
+    Visits all parameters inside a module by name and prints their name, shape, and finite status.
+
+    Args:
+        module: PyTorch module to inspect
+    """
+    module_name = module.__class__.__name__
+    print(f"\n{'='*60}")
+    print(f"Parameter inspection for {module_name}")
+    print(f"{'='*60}")
+
+    all_finite = True
+    for name, param in module.named_parameters():
+        # Get shape
+        shape = list(param.shape)
+
+        # Check for finite values (not NaN or Inf)
+        is_finite = torch.isfinite(param).all()
+        all_finite=all_finite and is_finite # check if every thing is finite
+
+        # Print parameter info
+        print(f"Parameter: {name}")
+        print(f"  Shape: {shape}")
+        print(f"  Finite status: {is_finite}")
+        print("-" * 40)
+    print(f'All finite? {all_finite}')
+    print(f"{'='*60}\n")
