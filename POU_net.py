@@ -116,19 +116,22 @@ class EqualizedFieldGatingNet(FieldGatingNet):
         This ensures that the probability mass is distributed equally across all experts.
         """
 
-        # gating_logits.shape=[n_experts, *spatial_dims]
-        gating_weights = F.softmax(gating_logits, dim=1)
-        assert gating_weights.shape==gating_logits.shape
+        assert gating_logits.isfinite().all()
 
         # sinkhorn iterations
         for _ in range(10):
-            # Normalize to equalize sum across spatial dimensions
-            spatial_dims = tuple(range(2, len(gating_weights.shape)))
-            gating_weights = gating_weights/torch.sum(gating_weights, dim=spatial_dims, keepdim=True)
+            # Step 1: Normalize to equalize exp sum across spatial dimensions
+            spatial_dims = tuple(range(2, len(gating_logits.shape)))
+            LSE = torch.logsumexp(gating_logits, dim=spatial_dims, keepdim=True)
+            gating_logits = gating_logits - LSE # gating_logits.shape=[n_experts, *spatial_dims]
+            # Step 2: Normalize to equalize exp sum across experts
+            LSE = torch.logsumexp(gating_logits, dim=1, keepdim=True)
+            gating_logits = gating_logits - LSE
+        gating_weights = torch.exp(gating_logits)
+        gating_weights = gating_weights / gating_weights.sum(axis=1, keepdim=True) # slightly more exact
+        gating_weights = gating_weights / gating_weights.sum(axis=1, keepdim=True) # slightly more exact
 
-            # Normalize to equalize sum across experts
-            gating_weights = gating_weights/torch.sum(gating_weights, dim=1, keepdim=True)
-
+        assert gating_weights.isfinite().all()
         return gating_weights
 
 class DummyGatingNet(nn.Module):
@@ -285,7 +288,9 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
         self.val_UQ_metrics = MetricsModule(self, n_outputs, prefix='val_UQ_')
         self._zero_expert_rho=nn.Parameter(torch.randn([1]))
         self._total_variance=total_variance
+        assert not total_variance
 
+    """
     def forward(self, X, Y=None):
         ''' crazy forward method that does everything needed for total variance of mixture distribution with zero expert '''
         X = torch.as_tensor(X, device=self.device)
@@ -316,7 +321,8 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
         mus.clear() # paranoia related to memory management
 
         # handle zero expert (confirmed this doesn't require that zero expert exists, it will gracefully handle it)
-        zero_expert_gating_weights = 1-gating_weights.sum(axis=1, keepdim=True) # recover zero expert weights
+        zero_expert_gating_weights = 1-gating_weights.sum(axis=1, keepdim=True).clip(max=1.0) # recover zero expert weights
+        assert (zero_expert_gating_weights>=0).all()
         total_variance = total_variance + zero_expert_gating_weights*sigma_constraint(self._zero_expert_rho)**2 # for 1st term
         if self._total_variance: # for 2nd term (total_expectation**2==(0-total_expectation)**2)
             total_variance = total_variance + zero_expert_gating_weights*total_expectation**2
@@ -329,8 +335,8 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
             assert torch.isfinite(total_expectation).all()
 
         return total_expectation, std
+    """
 
-    '''
     # original forward before probabilistic considerations
     def forward(self, X, Y=None):
         if Y is None: Y = torch.zeros(1,device=X.device, dtype=X.dtype).expand(*X.shape)
@@ -342,11 +348,14 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
 
             # handle zero expert (confirmed this doesn't require that zero expert exists, it will gracefully handle it)
             gating_weights, topk = self.gating_net(X) # this is cached and requires no compute
-            zero_expert_gating_weights = 1-gating_weights.sum(axis=1, keepdim=True) # recover zero expert weights
+            zero_expert_gating_weights = 1-gating_weights.sum(axis=1, keepdim=True).clip(max=1.0) # recover zero expert weights
             rho_pred = rho_pred + zero_expert_gating_weights*self._zero_expert_rho # add zero expert contrib
 
-        return mu_pred, F.softplus(rho_pred)
-    '''
+        if self.training:
+            assert mu_pred.isfinite().all()
+            assert rho_pred.isfinite().all()
+
+        return torch.tanh(mu_pred*(2/5))*5, F.softplus(rho_pred)+1e-4
 
     def training_step(self, batch, batch_idx=None, val=False):
         X, y = batch
