@@ -1,6 +1,6 @@
 import os, sys, warnings
-import h5py
 from glob import glob
+import h5py
 
 import torch
 import functools
@@ -32,6 +32,7 @@ class IdentityOp:
     def forward(self, X):
         return X
 
+# Private to force access through (P)POU_NetSimulator.Sim
 class _Sim(L.LightningModule):
     '''
     Raw Sim[ulator] class that solves naiver stokes with learned model correction.
@@ -207,7 +208,6 @@ class PPOU_NetSimulator(POU_NetSimulator, PPOU_net):
     def __init__(self, *args, simulator: Sim=Sim(), **kwd_args):
         super().__init__(*args, simulator=simulator, **kwd_args)
 
-# TODO: load & store dataset in one big hdf5 file (more efficient I/O)
 # Verified to work: 8/23/24
 class JHTDB_Channel(torch.utils.data.Dataset):
     '''
@@ -217,9 +217,11 @@ class JHTDB_Channel(torch.utils.data.Dataset):
     def __init__(self, path:str, time_chunking=5, stride:int|list|tuple=1):
         self.time_chunking=time_chunking
         self.path=path
-        if type(stride) is int: stride=[stride]*3
+        if type(stride) in [int,float]: stride=[stride]*3
         else: assert len(stride)==3 # we will not pool time because it breaks PDE timestep & stability and pytorch cannot do it easily
-        self.pool = torch.nn.AvgPool3d(stride)
+        scale_factor = tuple(1/np.asarray(stride).astype(float))
+        self.pool = lambda x: torch.nn.functional.interpolate(x, scale_factor=scale_factor, mode='area')
+        # comparable to torch.nn.AvgPool3d(stride) but supports fractional stride
 
     def __len__(self):
         return len(glob(f'{self.path}/*.h5'))//(self.time_chunking)

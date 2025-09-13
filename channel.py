@@ -6,7 +6,7 @@ import torch
 
 k_modes=None # None=maximum (e.g. [103,26,77]) can be a list, GOTCHA: don't change!
 stride=eval(str(os.environ.get('STRIDE', 1))) # strides data and k_modes if k_modes=None
-assert type(stride) in [int, list, tuple]
+assert type(stride) in [int, float, list, tuple]
 n_experts: int=int(os.environ.get('N_EXPERTS', 3)) # number of experts in MoE
 n_layers: int=int(os.environ.get('N_LAYERS', 4)) # number of layers in the POU net
 n_filters: int=int(os.environ.get('N_FILTERS', 32)) # hidden layer width (aka # of filters)

@@ -69,7 +69,7 @@ export BATCH_SIZE=2 # GH200 can handle batch_size=2! (it has > x2 the memory of 
 export N_LAYERS=4 # number of expert layers
 export N_FILTERS=32 # number of hidden filters (aka channel size)
 export N_EXPERTS=3 # number of experts
-export STRIDE=1 # e.g. [4,2,3] for smaller experiments
+export STRIDE=1 # e.g. 1.5 or a crazy list [1.5,1.3,1.8] for smaller experiments
 
 # CNN experts?
 export USE_CNN_EXPERTS=0
