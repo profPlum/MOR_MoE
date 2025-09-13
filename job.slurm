@@ -3,13 +3,13 @@
 #SBATCH --error=logs/%x_%j.err               # Error file (%x: job-name, %j: job-id)
 #SBATCH --nodes=1                            # Trying allocating a whole node to play nice with pytorch-lightning
 #SBATCH --ntasks-per-node=4                  # Tasks per node (usually 1 for PyTorch)
-#SBATCH --mem-per-gpu=120000                 # CPU? RAM per GPU < 1/4 of the total node RAM = 120GB
+#SBATCH --mem-per-gpu=115GB                  # CPU? RAM per GPU < 1/4 of the total node RAM = 120GB
 #SBATCH --gpus-per-node=4                    # GPUs per task is 1
 #SBATCH --cpus-per-task=72                   # CORES per task for data loaders (72 avail per GPU)
 #SBATCH --time=1-00:00:00                    # Maximum runtime (HH:MM:SS)
 #SBATCH --partition=ghx4                     # Partition name
 #SBATCH --account=beoi-dtai-gh
-#SBATCH --job-name=Everything 
+#SBATCH --job-name=Everything
 
 # Not going to work anymore b/c we would need to save the entire checkpoint which causes OOM...
 # ##SBATCH --signal=SIGUSR1@90
@@ -83,11 +83,11 @@ export CNN_FILTER_SIZE=6
 #source experiment_configs/mixture_of_experts.sh
 source experiment_configs/everything.sh # NO-OP b/c everything is already the default
 
-#export STRIDE=[4,2,3]
+#export STRIDE=1.412 # stride 1.412 + batch_size=12 gives near 90% utilization of just 1 GH200!
+#export BATCH_SIZE=12
 #export SEED=$RANDOM # random behavior (but consistent splitting)
 #export N_EXPERTS=1
 #export MAX_EPOCHS=5
-#export BATCH_SIZE=5
 
 ## IMPORTANT: you NEED to use `python -m pytorch_lightning.utilities.consolidate_checkpoint epoch=X-step=Y.ckpt` in order to get a useable model file for resuming or prediction
 ## Once you do that you can pass the checkpoint path like below to resume a run to get even better performance than what was achievable in the first run
