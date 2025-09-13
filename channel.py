@@ -4,7 +4,9 @@
 import os
 import torch
 
-k_modes=[103,26,77] # can be a list, GOTCHA: don't change!
+k_modes=None # None=maximum (e.g. [103,26,77]) can be a list, GOTCHA: don't change!
+stride=eval(str(os.environ.get('STRIDE', 1))) # strides data and k_modes if k_modes=None
+assert type(stride) in [int, list, tuple]
 n_experts: int=int(os.environ.get('N_EXPERTS', 3)) # number of experts in MoE
 n_layers: int=int(os.environ.get('N_LAYERS', 4)) # number of layers in the POU net
 n_filters: int=int(os.environ.get('N_FILTERS', 32)) # hidden layer width (aka # of filters)
@@ -87,8 +89,8 @@ def preload_dataset(dataset):
 if __name__=='__main__':
     # setup dataset
     long_horizon_multiplier=10 # longer evaluation time window is X times the shorter training time window (can e.g. detect NaNs)
-    dataset = preload_dataset(JHTDB_Channel('data/turbulence_output', time_chunking=time_chunking)) # called dataloader_idx_0 in tensorboard
-    dataset_long_horizon = JHTDB_Channel('data/turbulence_output', time_chunking=time_chunking*long_horizon_multiplier) # called dataloader_idx_1 in tensorboard
+    dataset = preload_dataset(JHTDB_Channel('data/turbulence_output', time_chunking=time_chunking, stride=stride)) # called dataloader_idx_0 in tensorboard
+    dataset_long_horizon = JHTDB_Channel('data/turbulence_output', time_chunking=time_chunking*long_horizon_multiplier, stride=stride) # called dataloader_idx_1 in tensorboard
     _, val_long_horizon = torch.utils.data.random_split(dataset_long_horizon, [0.5, 0.5]) # 50% ensures there are two validation steps
     val_long_horizon = preload_dataset(val_long_horizon) # pre-load only the subset we use
     train_dataset, val_dataset = torch.utils.data.random_split(dataset, [0.8, 0.2])
@@ -99,6 +101,11 @@ if __name__=='__main__':
 
     IC_0, Sol_0 = dataset[0]
     print(f'{IC_0.shape=}\n{Sol_0.shape=}')
+
+    field_size = list(IC_0.shape[1:])
+    if k_modes is None: # default=max (potentially adjusted for stride)
+        k_modes=field_size # e.g. [103,26,77]
+        assert len(k_modes)==3
 
     ndims=3
     num_nodes = int(os.environ.get('SLURM_STEP_NUM_NODES', 1)) # can be auto-detected by slurm
@@ -123,10 +130,11 @@ if __name__=='__main__':
         del optional_kwd_args['k_modes'] # (else)
         optional_kwd_args |= {'make_expert': CNN, 'k_size': CNN_filter_size, 'skip_connections': True, 'scale_outputs': True}
 
-    # train model
+    # NOTE: we need to update field size based on the stride
+    simulator = SimModelClass.Sim(*field_size) # Sim(ulator) class (e.g. Sim or Sim_UQ), first 3 args are X,Y,Z dimensions
     model = SimModelClass(n_inputs=ndims, n_outputs=ndims, ndims=ndims, n_experts=n_experts, n_layers=n_layers, hidden_channels=n_filters, make_optim=make_optim,
                           lr=lr, T_max=T_max, one_cycle=one_cycle, three_phase=three_phase, RLoP=RLoP, RLoP_factor=RLoP_factor, RLoP_patience=RLoP_patience,
-                          n_steps=time_chunking-1, trig_encodings=use_trig, make_gating_net=EqualizedFieldGatingNet, **optional_kwd_args)
+                          n_steps=time_chunking-1, trig_encodings=use_trig, make_gating_net=EqualizedFieldGatingNet, simulator=simulator, **optional_kwd_args)
 
     print(f'num model parameters: {utils.count_parameters(model):.2e}')
     print('model:')
@@ -154,6 +162,7 @@ if __name__=='__main__':
         #save_last=True
     )
 
+    # train model
     strategy = L.strategies.FSDPStrategy(state_dict_type='sharded') # sharded reduces peak memory usage but still allows resuming in full!
     trainer = L.Trainer(max_epochs=max_epochs, gradient_clip_val=gradient_clip_val, gradient_clip_algorithm='value',
                         accelerator='gpu', strategy=strategy, num_nodes=num_nodes, devices=num_gpus_per_node,

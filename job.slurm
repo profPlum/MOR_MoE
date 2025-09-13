@@ -69,6 +69,7 @@ export BATCH_SIZE=2 # GH200 can handle batch_size=2! (it has > x2 the memory of 
 export N_LAYERS=4 # number of expert layers
 export N_FILTERS=32 # number of hidden filters (aka channel size)
 export N_EXPERTS=3 # number of experts
+export STRIDE=1 # e.g. [4,2,3] for smaller experiments
 
 # CNN experts?
 export USE_CNN_EXPERTS=0
@@ -81,12 +82,12 @@ export CNN_FILTER_SIZE=6
 #source experiment_configs/recursive_steps.sh
 #source experiment_configs/mixture_of_experts.sh
 source experiment_configs/everything.sh # NO-OP b/c everything is already the default
-#export BATCH_SIZE=5
 
+#export STRIDE=[4,2,3]
 #export SEED=$RANDOM # random behavior (but consistent splitting)
-#export BATCH_SIZE=27 # use same number of outputs
 #export N_EXPERTS=1
 #export MAX_EPOCHS=5
+#export BATCH_SIZE=5
 
 ## IMPORTANT: you NEED to use `python -m pytorch_lightning.utilities.consolidate_checkpoint epoch=X-step=Y.ckpt` in order to get a useable model file for resuming or prediction
 ## Once you do that you can pass the checkpoint path like below to resume a run to get even better performance than what was achievable in the first run

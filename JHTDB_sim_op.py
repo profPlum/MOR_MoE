@@ -11,10 +11,10 @@ import pytorch_lightning as L
 from lightning_utils import *
 from POU_net import POU_net, PPOU_net
 
-rfft = functools.partial(torch.fft.rfftn,dim=[0,1,2])
-irfft = functools.partial(torch.fft.irfftn,dim=[0,1,2])
+_rfft = functools.partial(torch.fft.rfftn,dim=[0,1,2])
+_irfft = functools.partial(torch.fft.irfftn,dim=[0,1,2])
 
-def divide_no_nan(a,b):
+def _divide_no_nan(a,b):
     #return a/b w/o nan values or gradient
     mask = b!=0
     b = b + ~mask #aka b[~mask] = 1
@@ -32,7 +32,7 @@ class IdentityOp:
     def forward(self, X):
         return X
 
-class Sim(L.LightningModule):
+class _Sim(L.LightningModule):
     '''
     Raw Sim[ulator] class that solves naiver stokes with learned model correction.
     We wrapped Dr. Patel's original code to do axis swapping
@@ -83,21 +83,21 @@ class Sim(L.LightningModule):
 
     def genIC(self):
         h = torch.tensor(np.random.normal(0,1,(self.nx,self.ny,self.nz,3))).float().to(self.device)
-        hh = rfft(h) * self.filt2[...,None]
+        hh = _rfft(h) * self.filt2[...,None]
         proj = self.k*(torch.sum(self.k*hh,axis=-1)/self.knorm2)[...,None]
         proj[0]=0
-        u0 = irfft(hh - proj, s=self.shapef)
+        u0 = _irfft(hh - proj, s=self.shapef)
         return u0.permute(-1,0,1,2) # (i.e. torch.moveaxis(u0,-1,0))
 
     # NOTE: u.shape==[channel, x, y, z]
     def NSupd(self,u): # Navier-stokes update
         u = u.permute(1,2,-1,0) #torch.moveaxis(u, 0, -1)
-        uh = rfft(u)
+        uh = _rfft(u)
         assert list(uh.shape)[:-1]==self.shapeh
-        u2h = rfft(torch.einsum('...i,...j->...ij',u,u))
-        u = irfft(self.Ainv[...,None]*(
+        u2h = _rfft(torch.einsum('...i,...j->...ij',u,u))
+        u = _irfft(self.Ainv[...,None]*(
             uh + self.dt*(-1.j*torch.einsum('...j,...ij->...i',self.k,u2h)
-                 + 1.j*divide_no_nan(torch.einsum('...i,...j,...k,...jk->...i',self.k,self.k,self.k,u2h),self.knorm2[...,None])
+                 + 1.j*_divide_no_nan(torch.einsum('...i,...j,...k,...jk->...i',self.k,self.k,self.k,u2h),self.knorm2[...,None])
                  )),
                  s=self.shapef
             )
@@ -135,7 +135,7 @@ class Sim(L.LightningModule):
         # remove artificial batch dimension only if it was added
 
 # For use with PPOU_net
-class UQ_Sim(Sim):
+class _UQ_Sim(_Sim):
     # This needs to output intermediate time-steps to get full loss!
     def evolve(self,u0,n,intermediate_outputs=False, intermediate_output_stride=1):
         u = u0
@@ -164,8 +164,11 @@ class UQ_Sim(Sim):
 
 class POU_NetSimulator(POU_net):
     ''' Combines the POU_net with the raw Sim[ulator] class (internally). '''
+    Sim=_Sim # Sim class for this class (e.g. Sim or Sim_UQ)
     def __init__(self, *args, n_steps: int, simulator: Sim=Sim(), **kwd_args):
         super().__init__(*args, **kwd_args)
+        assert issubclass(self.Sim, _Sim) # should be a descendant of Sim (sanity check)
+        if type(simulator) is not self.Sim: raise TypeError(f"You must provide a Sim(ulator) of the correct class={self.SimClass}")
         simulator.set_operator(super()) # this will internally call super().forward(X)
         self.simulator = simulator
         self.n_steps = n_steps # n timesteps for PDE evolution
@@ -200,7 +203,8 @@ class POU_NetSimulator(POU_net):
 # This is it! It should do full aleatoric + epistemic UQ with VI
 # Verified that forward parametrize-caching is redundant here 10/8/24
 class PPOU_NetSimulator(POU_NetSimulator, PPOU_net):
-    def __init__(self, *args, simulator: Sim=UQ_Sim(), **kwd_args):
+    Sim=_UQ_Sim # Sim class for this class (e.g. Sim or Sim_UQ)
+    def __init__(self, *args, simulator: Sim=Sim(), **kwd_args):
         super().__init__(*args, simulator=simulator, **kwd_args)
 
 # TODO: load & store dataset in one big hdf5 file (more efficient I/O)
@@ -210,9 +214,13 @@ class JHTDB_Channel(torch.utils.data.Dataset):
     Dataset for the JHTDB autoregressive problem... It is not possible to make
     this predict everything at once because that would make the dataset size=1.
     '''
-    def __init__(self, path:str, time_chunking=5):
+    def __init__(self, path:str, time_chunking=5, stride:int|list|tuple=1):
         self.time_chunking=time_chunking
         self.path=path
+        if type(stride) is int: stride=[stride]*3
+        else: assert len(stride)==3 # we will not pool time because it breaks PDE timestep & stability and pytorch cannot do it easily
+        self.pool = torch.nn.AvgPool3d(stride)
+
     def __len__(self):
         return len(glob(f'{self.path}/*.h5'))//(self.time_chunking)
     def __getitem__(self, index):
@@ -226,8 +234,12 @@ class JHTDB_Channel(torch.utils.data.Dataset):
                     raise OSError(f'Unable to open file: "{self.path}/channel_t={i}.h5"')
                 else: raise
             velocity_fields.append(files[-1][f'Velocity_{i:04}']) # :04 zero pads to 4 digits
-        velocity_fields = torch.as_tensor(np.stack(velocity_fields)).swapaxes(0, -1) # put time in the back
-        velocity_fields = velocity_fields.swapaxes(1, -2) # swap x & z so that the dimensions are in order: x,y,z
+        velocity_fields = torch.as_tensor(np.stack(velocity_fields).T) # reverse dimensions order [T,Z,Y,X,C] --> [C,X,Y,Z,T]
+        velocity_fields = self.pool(velocity_fields.moveaxis(-1,0)).moveaxis(0,-1) # time dimension is (temporarily) treated as batch dimension
+        velocity_fields = velocity_fields.float() # make sure to use single precision! (after pooling) because double is too expensive!!
+
+        # IC_0.shape=[C,X,Y,Z] e.g. torch.Size([3, 103, 26, 77])
+        # Sol_0.shape=[C,X,Y,Z,T] e.g. torch.Size([3, 103, 26, 77, 9])
         return velocity_fields[...,0], velocity_fields[...,1:] # X=IC, Y=sol
 
 if __name__=='__main__':
@@ -241,7 +253,7 @@ if __name__=='__main__':
     nu = 0.003
     # timestep
     dt = 1e-5
-    sim = Sim(nx,ny,nz,Lx,Ly,Lz,nu,dt)
+    sim = _Sim(nx,ny,nz,Lx,Ly,Lz,nu,dt)
 
     # generate initial condition (IC)
     u0 = sim.genIC()
