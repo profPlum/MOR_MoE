@@ -54,7 +54,7 @@ MLE_LR=3.125e-5
 # (VI+TRIG) 678 epochs takes 24 hours (with 20 nodes, measured 10/31/24)
 
 # (VI+TRIG) 1550 epochs takes 20 hours (with 4 GH200s, measured 4/2/25)
-export MAX_EPOCHS=1600 #3100 # MUST BE ACCURATELY ADJUSTED based on estimated epochs (this ensures that OneCycle is properly calibrated)
+export MAX_EPOCHS=1600 # MUST BE ACCURATELY ADJUSTED based on estimated epochs (this ensures that OneCycle is properly calibrated)
 export LR=$VI_LR # this is 4x higher than theory suggests (it is only possible b/c grad clip)
 export GRAD_CLIP=8.944e-2 # it is best to keep this 8.944e-2 value, it will automatically be adjusted based on number of recursive timesteps & batch_size
 export PRIOR_SIGMA=0.2 # approximately reflects the values of sigma at initialization
@@ -74,7 +74,7 @@ export STRIDE=1 # e.g. 1.5 or a crazy list [1.5,1.3,1.8] for smaller experiments
 
 # CNN experts?
 export USE_CNN_EXPERTS=0
-export CNN_FILTER_SIZE=6
+export CNN_FILTER_SIZE=4 # 4 for stride~=1.5, 6 for full STRIDE=1
 #export CNN_FILTER_SIZE='[103,26,77]' # match k_modes...
 #export N_LAYERS=11 N_EXPERTS=1
 
