@@ -125,6 +125,11 @@ if __name__=='__main__':
     print(f'after scaling: {lr=}, {gradient_clip_val=}')
     print(f'{scale_of_batch_data=}')
 
+    if ckpt_path: # secretly use the load from checkpoint api if needed
+        SimModelClass_ = SimModelClass
+        SimModelClass = lambda **kwd_args: SimModelClass_.load_from_checkpoint(ckpt_path, **kwd_args)
+        SimModelClass.Sim = SimModelClass_.Sim
+
     optional_kwd_args['k_modes']=k_modes # assuming MOR_Operator expert
     if use_CNN_experts: # (else)
         del optional_kwd_args['k_modes'] # (else)
@@ -156,7 +161,7 @@ if __name__=='__main__':
     #                                                      monitor='val_loss/dataloader_idx_1', save_last=True) # monitor long-horizon loss
     model_checkpoint_callback=L.callbacks.ModelCheckpoint(
         f"lightning_logs/{job_name}/{version}",
-        save_weights_only=False, # we can do this now I don't think it effects peak memory (it does effect size though)
+        save_weights_only=True, # weights only does indeed affect peak memory but not by much
         every_n_epochs=100,
         #save_top_k=-1,  # Save all checkpoints
         #save_last=True
@@ -170,4 +175,4 @@ if __name__=='__main__':
                         callbacks=[model_checkpoint_callback, MemMonitorCallback()])
 
     val_dataloaders = [val_loader, val_long_loader] # long validation loader causes various problems with profiler & GPU utilization...
-    trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_dataloaders, ckpt_path=ckpt_path)
+    trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_dataloaders)#, ckpt_path=ckpt_path)
