@@ -19,6 +19,7 @@ gradient_clip_val=float(os.environ.get('GRAD_CLIP', 8.944e-2)) # grad clip adjus
 make_optim=eval(f"torch.optim.{os.environ.get('OPTIM', 'Adam')}")
 ckpt_path=os.environ.get('CKPT_PATH', None)
 
+use_normalized_MoE=bool(int(os.environ.get('USE_NORMALIZED_MOE', True)))
 use_CNN_experts=bool(int(os.environ.get('USE_CNN_EXPERTS', False))) # TODO: make equal to k_modes??
 CNN_filter_size=eval(str(os.environ.get('CNN_FILTER_SIZE', 3))) # only used if use_CNN_experts=True
 assert type(CNN_filter_size) in [int, list, tuple]
@@ -135,11 +136,13 @@ if __name__=='__main__':
         del optional_kwd_args['k_modes'] # (else)
         optional_kwd_args |= {'make_expert': CNN, 'k_size': CNN_filter_size, 'skip_connections': True, 'scale_outputs': True}
 
+
     # NOTE: we need to update field size based on the stride
     simulator = SimModelClass.Sim(*field_size) # Sim(ulator) class (e.g. Sim or Sim_UQ), first 3 args are X,Y,Z dimensions
+    make_gating_net = EqualizedFieldGatingNet if use_normalized_MoE else FieldGatingNet
     model = SimModelClass(n_inputs=ndims, n_outputs=ndims, ndims=ndims, n_experts=n_experts, n_layers=n_layers, hidden_channels=n_filters, make_optim=make_optim,
                           lr=lr, T_max=T_max, one_cycle=one_cycle, three_phase=three_phase, RLoP=RLoP, RLoP_factor=RLoP_factor, RLoP_patience=RLoP_patience,
-                          n_steps=time_chunking-1, trig_encodings=use_trig, make_gating_net=EqualizedFieldGatingNet, simulator=simulator, **optional_kwd_args)
+                          n_steps=time_chunking-1, trig_encodings=use_trig, make_gating_net=make_gating_net, simulator=simulator, **optional_kwd_args)
 
     print(f'num model parameters: {utils.count_parameters(model):.5e}')
     print('model:')
