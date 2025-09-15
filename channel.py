@@ -163,7 +163,7 @@ if __name__=='__main__':
     )
 
     # train model
-    strategy = L.strategies.FSDPStrategy(state_dict_type='sharded') # sharded reduces peak memory usage but still allows resuming in full!
+    strategy = L.strategies.FSDPStrategy(state_dict_type='sharded') if num_nodes*num_gpus_per_node > 1 else 'auto' # sharded reduces peak memory usage but still allows resuming in full!
     trainer = L.Trainer(max_epochs=max_epochs, gradient_clip_val=gradient_clip_val, gradient_clip_algorithm='value',
                         accelerator='gpu', strategy=strategy, num_nodes=num_nodes, devices=num_gpus_per_node,
                         profiler='simple', logger=logger, plugins=[SLURMEnvironment()], log_every_n_steps=20,
