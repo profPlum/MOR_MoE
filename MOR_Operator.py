@@ -103,7 +103,7 @@ class MOR_Operator(BasicLightningRegressor):
     Without skip-connections this operator doesn't work at all
     (assuming multiple layers), b/c of 1 channel bottleneck & b/c
     """
-    def __init__(self, in_channels=1, out_channels=1, hidden_channels=32, n_layers=4, hidden_norm_groups=4, out_norm_groups=1, **kwd_args):
+    def __init__(self, in_channels=1, out_channels=1, hidden_channels=32, n_layers=4, hidden_norm_groups=1, out_norm_groups=1, **kwd_args):
         super().__init__()
         kwd_args['hidden_channels'] = hidden_channels # make h(x) hidden_channels=MOR_Operator.hidden_channels
 

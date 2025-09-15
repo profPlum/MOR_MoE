@@ -279,7 +279,7 @@ import model_agnostic_BNN
 class PPOU_net(POU_net): # Not really, it's POU+VI
     def __init__(self, n_inputs, n_outputs, train_dataset_size, *args, prior_cfg={}, **kwd_args):
         # we double output channels to have the sigma predictions too
-        super().__init__(n_inputs*2, n_outputs*2, *args, out_norm_groups=2, **kwd_args)
+        super().__init__(n_inputs*2, n_outputs*2, *args, **kwd_args)
 
         # make VI reparameterize our entire model
         model_agnostic_BNN.model_agnostic_dnn_to_bnn(self, train_dataset_size, prior_cfg=prior_cfg)
