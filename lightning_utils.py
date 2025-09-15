@@ -3,7 +3,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import pytorch_lightning as L
 import torchmetrics
-import torch.utils.checkpoint as checkpoint
 import numpy as np
 
 # Verified to work 7/19/24
@@ -43,20 +42,19 @@ def CNN(in_size=1, out_size=1, k_size=1, ndims=2, n_layers=4, hidden_channels=32
     assert n_layers>=1
     assert ndims in [1,2,3]
     ConvLayer = [nn.Conv1d, nn.Conv2d, nn.Conv3d][ndims-1]
-    BatchNormLayer = [nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d][ndims-1]
 
     # automatically use settings & apply activation
-    CNN_layer = lambda in_size, out_size, activation=activation, batch_norm=skip_connections: \
-        nn.Sequential(*([BatchNormLayer(in_size)]*batch_norm+[activation(), ConvLayer(in_size, out_size, k_size, padding='same')]))
+    CNN_layer = lambda in_size, out_size, activation=activation, use_norm_layer=skip_connections: \
+        nn.Sequential(*([nn.GroupNorm(1, in_size)]*use_norm_layer+[activation(), ConvLayer(in_size, out_size, k_size, padding='same')]))
 
     input_activation=activation if input_activation else nn.Identity # choose input activation
     if n_layers==1: # special case, just 1 linear "projection" layer
-        layers = [CNN_layer(in_size, out_size, input_activation, batch_norm=False)]
+        layers = [CNN_layer(in_size, out_size, input_activation, use_norm_layer=False)]
     else:
-        layers = [CNN_layer(in_size,hidden_channels,input_activation, batch_norm=False)] + \
+        layers = [CNN_layer(in_size,hidden_channels,input_activation, use_norm_layer=False)] + \
                  [CNN_layer(hidden_channels,hidden_channels) for i in range(n_layers-2)] + \
                  [CNN_layer(hidden_channels,out_size)]
     if output_activation: layers[-1].append(activation()) # add output activation
-    if scale_outputs: layers[-1].append(BatchNormLayer(out_size))
+    if scale_outputs: layers[-1].append(nn.GroupNorm(1,out_size))
     model = LightningSequential(*layers, skip_connections=skip_connections)
     return model
