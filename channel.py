@@ -134,7 +134,8 @@ if __name__=='__main__':
     optional_kwd_args['k_modes']=k_modes # assuming MOR_Operator expert
     if use_CNN_experts: # (else)
         del optional_kwd_args['k_modes'] # (else)
-        optional_kwd_args |= {'make_expert': CNN, 'k_size': CNN_filter_size, 'skip_connections': True, 'scale_outputs': True}
+        CNN_expert = lambda *args, out_norm_groups=1, **kwd_args: CNN(*args, out_norm_groups=out_norm_groups, skip_connections=True, **kwd_args)
+        optional_kwd_args |= {'make_expert': CNN_expert, 'k_size': CNN_filter_size} #, 'skip_connections': True}
 
 
     # NOTE: we need to update field size based on the stride

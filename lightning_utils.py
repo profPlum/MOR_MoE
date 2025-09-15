@@ -37,15 +37,19 @@ class LightningSequential(BasicLightningRegressor):
             else: X=layer(X)
         return self.layers[-1](X)
 
+# GroupNorm but you can specify num_groups=0 to disable it
+ToggleableGroupNorm = lambda num_groups, in_channels: (nn.GroupNorm(num_groups, in_channels) if num_groups>0 else nn.Identity())
+
 def CNN(in_size=1, out_size=1, k_size=1, ndims=2, n_layers=4, hidden_channels=32, activation=nn.SiLU,
-        skip_connections=False, scale_outputs=False, output_activation=False, input_activation=False):
+        skip_connections=False, hidden_norm_groups=1, out_norm_groups=0, output_activation=False, input_activation=False):
+    ''' set hidden_norm_groups=0 or out_norm_groups=0 to disable the group norm there '''
     assert n_layers>=1
     assert ndims in [1,2,3]
     ConvLayer = [nn.Conv1d, nn.Conv2d, nn.Conv3d][ndims-1]
 
     # automatically use settings & apply activation
     CNN_layer = lambda in_size, out_size, activation=activation, use_norm_layer=skip_connections: \
-        nn.Sequential(*([nn.GroupNorm(1, in_size)]*use_norm_layer+[activation(), ConvLayer(in_size, out_size, k_size, padding='same')]))
+        nn.Sequential(*([ToggleableGroupNorm(hidden_norm_groups, in_size)]*use_norm_layer+[activation(), ConvLayer(in_size, out_size, k_size, padding='same')]))
 
     input_activation=activation if input_activation else nn.Identity # choose input activation
     if n_layers==1: # special case, just 1 linear "projection" layer
@@ -55,6 +59,6 @@ def CNN(in_size=1, out_size=1, k_size=1, ndims=2, n_layers=4, hidden_channels=32
                  [CNN_layer(hidden_channels,hidden_channels) for i in range(n_layers-2)] + \
                  [CNN_layer(hidden_channels,out_size)]
     if output_activation: layers[-1].append(activation()) # add output activation
-    if scale_outputs: layers[-1].append(nn.GroupNorm(1,out_size))
+    layers[-1].append(ToggleableGroupNorm(out_norm_groups, out_size))
     model = LightningSequential(*layers, skip_connections=skip_connections)
     return model

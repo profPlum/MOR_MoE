@@ -29,7 +29,8 @@ def make_rfft_corner_slices(img1_shape, img2_shape, fft_dims=None, rfft=True, ve
 
 class MOR_Layer(BasicLightningRegressor):
     """ A single Nd MOR operator layer. """
-    def __init__(self, in_channels=1, out_channels=1, k_modes=32, ndims=2, num_h_layers=1, use_norm_layer=True, **kwd_args):
+    def __init__(self, in_channels=1, out_channels=1, k_modes=32, ndims=2, num_h_layers=1, norm_groups=1, **kwd_args):
+        ''' pass norm_groups=0 to disable group norm or >1 for better group norm '''
         super().__init__()
         vars(self).update(locals()); del self.self
 
@@ -47,7 +48,7 @@ class MOR_Layer(BasicLightningRegressor):
         g_channels = [in_channels, out_channels]
         #if mlp_second: mlp_channels, g_channels = g_channels, mlp_channels
 
-        if use_norm_layer: self.norm_layer = nn.GroupNorm(1, in_channels)
+        self.norm_layer = ToggleableGroupNorm(norm_groups, in_channels)
 
         self.g_mode_params = make_g(*g_channels)
         self.h_mlp=CNN(*mlp_channels, k_size=1, n_layers=num_h_layers, ndims=ndims, output_activation=True, **kwd_args)
@@ -57,9 +58,8 @@ class MOR_Layer(BasicLightningRegressor):
         assert len(u.shape)==2+self.ndims # +1 for batch, +1 for channels
         # u.shape==[batch, in_channels, x, y, ...]
 
-        # use the batch norm layer if it's here
-        try: u = self.norm_layer(u)
-        except AttributeError: pass
+        # use the norm layer if it's here
+        u = self.norm_layer(u)
 
         # Apply point-wise MLP nonlinearity h(u)
         u = self.h_mlp(u)
@@ -103,15 +103,15 @@ class MOR_Operator(BasicLightningRegressor):
     Without skip-connections this operator doesn't work at all
     (assuming multiple layers), b/c of 1 channel bottleneck & b/c
     """
-    def __init__(self, in_channels=1, out_channels=1, hidden_channels=32, n_layers=4, **kwd_args):
+    def __init__(self, in_channels=1, out_channels=1, hidden_channels=32, n_layers=4, hidden_norm_groups=4, out_norm_groups=1, **kwd_args):
         super().__init__()
         kwd_args['hidden_channels'] = hidden_channels # make h(x) hidden_channels=MOR_Operator.hidden_channels
 
         ndims = {'ndims': kwd_args['ndims']} if 'ndims' in kwd_args else {} # always pass ndims, NOTE: kwd_args inside lambda not the same as outside
         ProjLayer = lambda *args, **kwd_args: CNN(*args, n_layers=2, **ndims, **kwd_args)
-        self.layers = nn.ModuleList([MOR_Layer(in_channels, hidden_channels, num_h_layers=2, use_norm_layer=False, **kwd_args)] + #[ProjLayer(in_channels, hidden_channels)] +
-            [MOR_Layer(hidden_channels, hidden_channels, num_h_layers=1, use_norm_layer=True, input_activation=True, **kwd_args) for i in range(n_layers-1)] +
-            [ProjLayer(hidden_channels, out_channels, scale_outputs=True, input_activation=True)]) # this is like having an extra h(x) at the end
+        self.layers = nn.ModuleList([MOR_Layer(in_channels, hidden_channels, num_h_layers=2, norm_groups=0, **kwd_args)] +
+            [MOR_Layer(hidden_channels, hidden_channels, num_h_layers=1, norm_groups=hidden_norm_groups, input_activation=True, **kwd_args) for i in range(n_layers-1)] +
+            [ProjLayer(hidden_channels, out_channels, out_norm_groups=out_norm_groups, input_activation=True)]) # this is like having an extra h(x) at the end
     def forward(self, X):
         X = self.layers[0](X)
         for layer in self.layers[1:-1]:
