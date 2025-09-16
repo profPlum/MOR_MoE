@@ -97,8 +97,8 @@ if __name__=='__main__':
     val_long_horizon = preload_dataset(val_long_horizon) # pre-load only the subset we use
     train_dataset, val_dataset = torch.utils.data.random_split(dataset, [0.8, 0.2])
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, pin_memory=True, shuffle=True, drop_last=True)
-    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=batch_size*long_horizon_multiplier)
-    val_long_loader = torch.utils.data.DataLoader(val_long_horizon, batch_size=batch_size)
+    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=batch_size*long_horizon_multiplier, pin_memory=True)
+    val_long_loader = torch.utils.data.DataLoader(val_long_horizon, batch_size=batch_size, pin_memory=True)
     print(f'{len(dataset)=}\n{len(train_loader)=}\n{len(val_dataset)=}')
 
     IC_0, Sol_0 = dataset[0]
@@ -167,7 +167,6 @@ if __name__=='__main__':
         f"lightning_logs/{job_name}/{version}",
         save_weights_only=True, # weights only does indeed affect peak memory but not by much
         every_n_epochs=100,
-        #save_top_k=-1,  # Save all checkpoints
         #save_last=True
     )
 
