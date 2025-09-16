@@ -4,7 +4,8 @@
 import os
 import torch
 
-k_modes=None # None=maximum (e.g. [103,26,77]) can be a list, GOTCHA: don't change!
+k_modes=eval(str(os.environ.get('K_MODES', None))) # None=maximum (e.g. [103,26,77]) can be a list, GOTCHA: don't change!
+assert type(k_modes) in [int, list, tuple]
 stride=eval(str(os.environ.get('STRIDE', 1))) # strides data and k_modes if k_modes=None
 assert type(stride) in [int, float, list, tuple]
 n_experts: int=int(os.environ.get('N_EXPERTS', 3)) # number of experts in MoE
@@ -136,7 +137,6 @@ if __name__=='__main__':
         del optional_kwd_args['k_modes'] # (else)
         CNN_expert = lambda *args, out_norm_groups=1, **kwd_args: CNN(*args, out_norm_groups=out_norm_groups, skip_connections=True, **kwd_args)
         optional_kwd_args |= {'make_expert': CNN_expert, 'k_size': CNN_filter_size} #, 'skip_connections': True}
-
 
     # NOTE: we need to update field size based on the stride
     simulator = SimModelClass.Sim(*field_size) # Sim(ulator) class (e.g. Sim or Sim_UQ), first 3 args are X,Y,Z dimensions

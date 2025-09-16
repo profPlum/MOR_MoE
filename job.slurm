@@ -71,6 +71,7 @@ export N_LAYERS=4 # number of expert layers
 export N_FILTERS=32 # number of hidden filters (aka channel size)
 export N_EXPERTS=3 # number of experts
 export STRIDE=1 # e.g. 1.5 or a crazy list [1.5,1.3,1.8] for smaller experiments
+#export K_MODES=4 # 4 for stride~=1.5, 6 for full STRIDE=1, use this for comparison of FNO to CNN
 
 # CNN experts?
 export USE_CNN_EXPERTS=0
