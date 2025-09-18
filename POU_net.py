@@ -201,7 +201,6 @@ class POU_net(L.LightningModule):
                  make_gating_net: type=EqualizedFieldGatingNet, trig_encodings=True, **kwd_args):
         assert not (one_cycle and RLoP), 'These learning rate schedules are mututally exclusive!'
         super().__init__()
-        RLoP_patience = int(RLoP_patience) # cast
         self.save_hyperparameters(ignore=['n_inputs', 'n_outputs', 'ndims', 'simulator', 'make_expert', 'make_gating_net'])
 
         assert n_experts>0
@@ -306,7 +305,8 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
             assert mu_pred.isfinite().all()
             assert rho_pred.isfinite().all()
 
-        return torch.tanh(mu_pred*(2/5))*5, F.softplus(rho_pred)+1e-4
+        mu_max = 2 # when this is two the fraction on the inside disappears making it simpler to explain (also training data in [-0.1,1.2])
+        return torch.tanh(mu_pred*(2/mu_max))*mu_max, F.softplus(rho_pred)+1e-4
 
     def training_step(self, batch, batch_idx=None, val=False):
         X, y = batch
