@@ -103,12 +103,13 @@ class FieldGatingNet(BasicLightningRegressor):
 
 # We decoupled this feature so it can be removed easily if needed
 class EqualizedFieldGatingNet(FieldGatingNet):
-    def __init__(self, n_inputs, n_experts, *args, **kwd_args):
+    def __init__(self, n_inputs, n_experts, *args, n_sinkhorn_iterations=10, **kwd_args):
         # GOTCHA: topk selection still makes sense in this case, though it might not be mathematically exact?
         # regardless we set k=all to keep things simple, but this can be changed if needed
         super().__init__(n_inputs, n_experts, *args, k=n_experts-1, **kwd_args)
         del self._softmax
         self._softmax = self._doubly_stochastic_softmax
+        self.n_sinkhorn_iterations=n_sinkhorn_iterations
 
     def _doubly_stochastic_softmax(self, gating_logits):
         """
@@ -119,7 +120,7 @@ class EqualizedFieldGatingNet(FieldGatingNet):
         assert gating_logits.isfinite().all()
 
         # sinkhorn iterations
-        for _ in range(10):
+        for _ in range(self.n_sinkhorn_iterations):
             # Step 1: Normalize to equalize exp sum across spatial dimensions
             spatial_dims = tuple(range(2, len(gating_logits.shape)))
             LSE = torch.logsumexp(gating_logits, dim=spatial_dims, keepdim=True)
