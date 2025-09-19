@@ -159,6 +159,8 @@ if __name__=='__main__':
     wandb.login(key='251c77a548925cf7f08eecaf2b159ea8d49457c3')
     logger = WandbLogger(project="MOR_MoE", name=job_name, version=version)#, log_model="all")
     #logger.watch(model) # For W&B to log gradients and model topology
+    logger.experiment.config['grad_clip'] = gradient_clip_val
+    logger.experiment.config['prior_sigma'] = prior_sigma
 
     ## Weight-only sharded checkpoints are needed to avoid problem caused by large model size
     #model_checkpoint_callback=L.callbacks.ModelCheckpoint(f"lightning_logs/{job_name}/{version}", save_weights_only=True,
