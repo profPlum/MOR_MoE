@@ -9,7 +9,7 @@
 #SBATCH --time=1-00:00:00                    # Maximum runtime (HH:MM:SS)
 #SBATCH --partition=ghx4                     # Partition name
 #SBATCH --account=beoi-dtai-gh
-#SBATCH --job-name=Everything-small
+#SBATCH --job-name=WNO-small
 
 # Not going to work anymore b/c we would need to save the entire checkpoint which causes OOM...
 # ##SBATCH --signal=SIGUSR1@90
@@ -78,17 +78,22 @@ export USE_CNN_EXPERTS=0
 export CNN_FILTER_SIZE=6 # 4 for stride~=1.5, 6 for full STRIDE=1
 #export N_LAYERS=10 N_EXPERTS=1
 
+# WNO3d experts?
+export USE_WNO3D_EXPERTS=1 # To use WNO3d experts: set USE_WNO3D_EXPERTS=1 and USE_CNN_EXPERTS=0
+export WNO3D_LEVEL=2 # wavelet decomposition level (default 2, higher = more detailed wavelet analysis)
+export STRIDE='[1.609,1.625,1.203]' #'[1.515,1.625,1.481]'
+
 ## load experiment settings
 #source experiment_configs/control.sh
 #source experiment_configs/recursive_steps.sh
 #source experiment_configs/mixture_of_experts.sh
 #source experiment_configs/mixture_of_experts_normalized.sh
-source experiment_configs/everything.sh # NO-OP b/c everything is already the default
+#source experiment_configs/everything.sh # NO-OP b/c everything is already the default
 
-export STRIDE=1.47 # 1.47 for 68 GB mem target & near 88% utilization
+#export STRIDE=1.47 # 1.47 for 68 GB mem target & near 88% utilization
 export BATCH_SIZE=$((BATCH_SIZE*4)) # simulate 4 nodes
+export N_EXPERTS=1
 #export SEED=$RANDOM # random behavior (but consistent splitting)
-#export N_EXPERTS=1
 #export MAX_EPOCHS=5
 
 ## IMPORTANT: you NEED to use `python -m pytorch_lightning.utilities.consolidate_checkpoint epoch=X-step=Y.ckpt` in order to get a useable model file for resuming or prediction

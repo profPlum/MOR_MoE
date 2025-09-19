@@ -22,8 +22,15 @@ ckpt_path=os.environ.get('CKPT_PATH', None)
 
 use_normalized_MoE=bool(int(os.environ.get('USE_NORMALIZED_MOE', True)))
 use_CNN_experts=bool(int(os.environ.get('USE_CNN_EXPERTS', False)))
+use_WNO3d_experts=bool(int(os.environ.get('USE_WNO3D_EXPERTS', False))) # whether to use WNO3d as experts
+WNO3d_level=int(os.environ.get('WNO3D_LEVEL', 2)) # wavelet decomposition level for WNO3d (default 2)
 CNN_filter_size=eval(str(os.environ.get('CNN_FILTER_SIZE', 6))) # only used if use_CNN_experts=True
 assert type(CNN_filter_size) in [int, list, tuple]
+
+# Validate that only one expert type is selected
+expert_types = [use_CNN_experts, use_WNO3d_experts]
+assert sum(expert_types) <= 1, f"Only one expert type can be selected. Currently selected: CNN={use_CNN_experts}, WNO3d={use_WNO3d_experts}"
+
 use_trig = bool(int(os.environ.get('TRIG_ENCODINGS', True))) # Ravi's trig encodings
 out_norm_groups = int(os.environ.get('OUT_NORM_GROUPS', 1)) # 0 or 1 or maybe 2 (whether or not to use output layer norm) keep it at one generally
 use_VI = bool(int(os.environ.get('VI', True))) # whether to enable VI
@@ -62,6 +69,12 @@ from POU_net import POU_net, PPOU_net, FieldGatingNet, EqualizedFieldGatingNet
 from JHTDB_sim_op import PPOU_NetSimulator, POU_NetSimulator, JHTDB_Channel
 import model_agnostic_BNN
 import utils
+
+# Import WNO3d if using WNO3d experts
+if use_WNO3d_experts:
+    import sys
+    sys.path.append('/u/ddeighan/MOR_MoE/WNO/Version 2.0.0')
+    from wno3d_NS import WNO3d
 
 class MemMonitorCallback(L.Callback):
     def __init__(self, clear_interval=40):
@@ -109,6 +122,7 @@ if __name__=='__main__':
     print(f'{IC_0.shape=}\n{Sol_0.shape=}')
 
     field_size = list(IC_0.shape[1:])
+    print(f'{field_size=}')
     if k_modes is None: # default=max (potentially adjusted for stride)
         k_modes=field_size # e.g. [103,26,77]
         assert len(k_modes)==3
@@ -136,11 +150,14 @@ if __name__=='__main__':
         SimModelClass = lambda **kwd_args: SimModelClass_.load_from_checkpoint(ckpt_path, **kwd_args)
         SimModelClass.Sim = SimModelClass_.Sim
 
-    optional_kwd_args['k_modes']=k_modes # assuming MOR_Operator expert
-    if use_CNN_experts: # (else)
-        del optional_kwd_args['k_modes'] # (else)
+    if use_CNN_experts:
         CNN_expert = lambda *args, out_norm_groups=1, **kwd_args: CNN(*args, out_norm_groups=out_norm_groups, skip_connections=True, **kwd_args)
         optional_kwd_args |= {'make_expert': CNN_expert, 'k_size': CNN_filter_size} #, 'skip_connections': True}
+    elif use_WNO3d_experts:
+        # POU_net calls: make_expert(n_inputs, n_outputs, ndims=ndims, **kwd_args)
+        # WNO3d needs: (in_channels, out_channels, size, **other_args)
+        optional_kwd_args |= {'make_expert': WNO3d, 'size': field_size, 'level': WNO3d_level}
+    else: optional_kwd_args['k_modes']=k_modes # assuming MOR_Operator expert
 
     # NOTE: we need to update field size based on the stride
     simulator = SimModelClass.Sim(*field_size) # Sim(ulator) class (e.g. Sim or Sim_UQ), first 3 args are X,Y,Z dimensions
