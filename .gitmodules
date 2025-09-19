@@ -1,0 +1,3 @@
+[submodule "WNO"]
+	path = WNO
+	url = git@github.com:TapasTripura/WNO.git
