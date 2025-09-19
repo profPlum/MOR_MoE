@@ -56,7 +56,7 @@ MLE_LR=3.125e-5
 # (VI+TRIG) 1550 epochs takes 20 hours (with 4 GH200s, measured 4/2/25)
 export MAX_EPOCHS=1600 # MUST BE ACCURATELY ADJUSTED based on estimated epochs (this ensures that OneCycle is properly calibrated)
 export LR=$VI_LR # this is 4x higher than theory suggests (it is only possible b/c grad clip)
-export GRAD_CLIP=8.944e-2 # it is best to keep this 8.944e-2 value, it will automatically be adjusted based on number of recursive timesteps & batch_size
+export GRAD_CLIP=50 #8.944e-2 # it is best to keep this 8.944e-2 value, it will automatically be adjusted based on number of recursive timesteps & batch_size
 export PRIOR_SIGMA=0.2 # approximately reflects the values of sigma at initialization
 export OPTIM='Adam' # RAdam is better for resuming, otherwise use Adam
 export RLoP=0 # Reduce Learning-rate on Plateu, can be useful for resuming (but otherwise keep it off!)
