@@ -73,7 +73,7 @@ import utils
 # Import WNO3d if using WNO3d experts
 if use_WNO3d_experts:
     import sys
-    sys.path.append('/u/ddeighan/MOR_MoE/WNO/Version 2.0.0')
+    sys.path.append('/u/ddeighan/MOR_MoE/WNO/Version_2.0.0')
     from wno3d_NS import WNO3d
 
 class MemMonitorCallback(L.Callback):
