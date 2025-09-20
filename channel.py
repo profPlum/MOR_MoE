@@ -5,7 +5,7 @@ import os
 import torch
 
 k_modes=eval(str(os.environ.get('K_MODES', None))) # None=maximum (e.g. [103,26,77]) can be a list, GOTCHA: don't change!
-assert type(k_modes) in [int, list, tuple]
+assert k_modes is None or type(k_modes) in [int, list, tuple]
 stride=eval(str(os.environ.get('STRIDE', 1))) # strides data and k_modes if k_modes=None
 assert type(stride) in [int, float, list, tuple]
 n_experts: int=int(os.environ.get('N_EXPERTS', 3)) # number of experts in MoE
@@ -159,18 +159,17 @@ if __name__=='__main__':
     wandb.login(key='251c77a548925cf7f08eecaf2b159ea8d49457c3')
     logger = WandbLogger(project="MOR_MoE", name=job_name, version=version)#, log_model="all")
     #logger.watch(model) # For W&B to log gradients and model topology
-    logger.experiment.config['grad_clip'] = gradient_clip_val
-    logger.experiment.config['prior_sigma'] = prior_sigma
+    #logger.experiment.config.update({'grad_clip': gradient_clip_val, 'prior_sigma': prior_sigma})
 
-    ## Weight-only sharded checkpoints are needed to avoid problem caused by large model size
-    #model_checkpoint_callback=L.callbacks.ModelCheckpoint(f"lightning_logs/{job_name}/{version}", save_weights_only=True,
-    #                                                      monitor='val_loss/dataloader_idx_1', save_last=True) # monitor long-horizon loss
-    model_checkpoint_callback=L.callbacks.ModelCheckpoint(
-        f"lightning_logs/{job_name}/{version}",
-        save_weights_only=True, # weights only does indeed affect peak memory but not by much
-        every_n_epochs=100,
-        #save_last=True
-    )
+    # Weight-only sharded checkpoints are needed to avoid problem caused by large model size
+    model_checkpoint_callback=L.callbacks.ModelCheckpoint(f"lightning_logs/{job_name}/{version}", save_weights_only=True,
+                                                          monitor='val_loss/dataloader_idx_1', save_last=False) # monitor long-horizon loss
+    #model_checkpoint_callback=L.callbacks.ModelCheckpoint(
+    #    f"lightning_logs/{job_name}/{version}",
+    #    save_weights_only=True, # weights only does indeed affect peak memory but not by much
+    #    every_n_epochs=100,
+    #    #save_last=True
+    #)
 
     # train model
     strategy = L.strategies.FSDPStrategy(state_dict_type='sharded') if num_nodes*num_gpus_per_node > 1 else 'auto' # sharded reduces peak memory usage but still allows resuming in full!
@@ -181,3 +180,6 @@ if __name__=='__main__':
 
     val_dataloaders = [val_loader, val_long_loader] # long validation loader causes various problems with profiler & GPU utilization...
     trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_dataloaders)#, ckpt_path=ckpt_path)
+
+    # save last checkpoint
+    trainer.save_checkpoint(f"lightning_logs/{job_name}/{version}/last.ckpt", weights_only=True)
