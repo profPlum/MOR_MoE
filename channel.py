@@ -90,15 +90,18 @@ def preload_dataset(dataset):
 
 if __name__=='__main__':
     # setup dataset
-    long_horizon_multiplier=10 # longer evaluation time window is X times the shorter training time window (can e.g. detect NaNs)
+    long_horizon = 100 # fix long horizon at 100 steps now (for consistent comparison metric across configs), this can e.g. detect NaNs
+    long_horizon_multiplier = long_horizon/time_chunking # longer evaluation time window is X times the shorter training time window (can e.g. detect NaNs)
+    long_horizon_batch_size = max(1,int(batch_size/long_horizon_multiplier)) # scale down batch size proprotionally to timechunking scale up
+
     dataset = preload_dataset(JHTDB_Channel('data/turbulence_output', time_chunking=time_chunking, stride=stride)) # called dataloader_idx_0 in tensorboard
-    dataset_long_horizon = JHTDB_Channel('data/turbulence_output', time_chunking=time_chunking*long_horizon_multiplier, stride=stride) # called dataloader_idx_1 in tensorboard
+    dataset_long_horizon = JHTDB_Channel('data/turbulence_output', time_chunking=long_horizon, stride=stride) # called dataloader_idx_1 in tensorboard
     _, val_long_horizon = torch.utils.data.random_split(dataset_long_horizon, [0.5, 0.5]) # 50% ensures there are two validation steps
     val_long_horizon = preload_dataset(val_long_horizon) # pre-load only the subset we use
     train_dataset, val_dataset = torch.utils.data.random_split(dataset, [0.8, 0.2])
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, pin_memory=True, shuffle=True, drop_last=True)
-    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=batch_size*long_horizon_multiplier, pin_memory=True)
-    val_long_loader = torch.utils.data.DataLoader(val_long_horizon, batch_size=batch_size, pin_memory=True)
+    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=int(long_horizon_batch_size*long_horizon_multiplier), pin_memory=True)
+    val_long_loader = torch.utils.data.DataLoader(val_long_horizon, batch_size=long_horizon_batch_size, pin_memory=True)
     print(f'{len(dataset)=}\n{len(train_loader)=}\n{len(val_dataset)=}')
 
     IC_0, Sol_0 = dataset[0]
