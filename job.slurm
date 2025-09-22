@@ -56,7 +56,7 @@ MLE_LR=3.125e-5
 # (VI+TRIG) 1550 epochs takes 20 hours (with 4 GH200s, measured 4/2/25)
 export MAX_EPOCHS=1600 # MUST BE ACCURATELY ADJUSTED based on estimated epochs (this ensures that OneCycle is properly calibrated)
 export LR=$VI_LR # this is 4x higher than theory suggests (it is only possible b/c grad clip)
-export GRAD_CLIP=50 #8.944e-2 # it is best to keep this 8.944e-2 value, it will automatically be adjusted based on number of recursive timesteps & batch_size
+export GRAD_CLIP=50 # it is best to keep this value, it will automatically be adjusted based on number of recursive timesteps & batch_size
 export PRIOR_SIGMA=0.2 # approximately reflects the values of sigma at initialization
 export OPTIM='Adam' # RAdam is better for resuming, otherwise use Adam
 export RLoP=0 # Reduce Learning-rate on Plateu, can be useful for resuming (but otherwise keep it off!)
@@ -76,8 +76,7 @@ export STRIDE=1 # e.g. 1.5 or a crazy list [1.5,1.3,1.8] for smaller experiments
 # CNN experts?
 export USE_CNN_EXPERTS=0
 export CNN_FILTER_SIZE=4 # 4 for stride~=1.5, 6 for full STRIDE=1
-#export CNN_FILTER_SIZE='[103,26,77]' # match k_modes...
-#export N_LAYERS=11 N_EXPERTS=1
+#export N_LAYERS=10 N_EXPERTS=1
 
 ## load experiment settings
 #source experiment_configs/control.sh
@@ -86,7 +85,7 @@ export CNN_FILTER_SIZE=4 # 4 for stride~=1.5, 6 for full STRIDE=1
 #source experiment_configs/mixture_of_experts_normalized.sh
 source experiment_configs/everything.sh # NO-OP b/c everything is already the default
 
-export STRIDE=1.443 # 1.443 for 68 GB mem target & near 90% utilization
+export STRIDE=1.47 # 1.47 for 68 GB mem target & near 88% utilization
 export BATCH_SIZE=$((BATCH_SIZE*4)) # simulate 4 nodes
 #export SEED=$RANDOM # random behavior (but consistent splitting)
 #export N_EXPERTS=1

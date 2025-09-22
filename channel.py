@@ -16,13 +16,13 @@ batch_size: int=int(os.environ.get('BATCH_SIZE', 2)) # batch size, with VI exper
 scale_lr=True # multiply by DDP (total) batch_size
 lr: float=float(os.environ.get('LR', 1.563e-5)) # (VI) learning rate (will be scaled by recurisve steps)
 max_epochs=int(os.environ.get('MAX_EPOCHS', 500))
-gradient_clip_val=float(os.environ.get('GRAD_CLIP', 8.944e-2)) # grad clip adjusted based on new scaling rule
+gradient_clip_val=float(os.environ.get('GRAD_CLIP', 50)) # grad clip adjusted based on new scaling rule
 make_optim=eval(f"torch.optim.{os.environ.get('OPTIM', 'Adam')}")
 ckpt_path=os.environ.get('CKPT_PATH', None)
 
 use_normalized_MoE=bool(int(os.environ.get('USE_NORMALIZED_MOE', True)))
-use_CNN_experts=bool(int(os.environ.get('USE_CNN_EXPERTS', False))) # TODO: make equal to k_modes??
-CNN_filter_size=eval(str(os.environ.get('CNN_FILTER_SIZE', 3))) # only used if use_CNN_experts=True
+use_CNN_experts=bool(int(os.environ.get('USE_CNN_EXPERTS', False)))
+CNN_filter_size=eval(str(os.environ.get('CNN_FILTER_SIZE', 6))) # only used if use_CNN_experts=True
 assert type(CNN_filter_size) in [int, list, tuple]
 use_trig = bool(int(os.environ.get('TRIG_ENCODINGS', True))) # Ravi's trig encodings
 use_VI = bool(int(os.environ.get('VI', True))) # whether to enable VI
