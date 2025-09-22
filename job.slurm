@@ -2,14 +2,14 @@
 #SBATCH --output=logs/%x_%j.out              # Output file (%x: job-name, %j: job-id)
 #SBATCH --error=logs/%x_%j.err               # Error file (%x: job-name, %j: job-id)
 #SBATCH --nodes=1                            # Trying allocating a whole node to play nice with pytorch-lightning
-#SBATCH --ntasks-per-node=1                  # Tasks per node (usually 1 for PyTorch)
+#SBATCH --ntasks-per-node=2                  # Tasks per node (usually 1 for PyTorch)
 #SBATCH --mem-per-gpu=115GB                  # CPU? RAM per GPU < 1/4 of the total node RAM = 120GB
-#SBATCH --gpus-per-node=1                    # GPUs per task is 1
+#SBATCH --gpus-per-node=2                    # GPUs per task is 1
 #SBATCH --cpus-per-task=72                   # CORES per task for data loaders (72 avail per GPU)
 #SBATCH --time=1-00:00:00                    # Maximum runtime (HH:MM:SS)
 #SBATCH --partition=ghx4                     # Partition name
 #SBATCH --account=beoi-dtai-gh
-#SBATCH --job-name=WNO-small
+#SBATCH --job-name=Everything
 
 # Not going to work anymore b/c we would need to save the entire checkpoint which causes OOM...
 # ##SBATCH --signal=SIGUSR1@90
@@ -79,9 +79,12 @@ export CNN_FILTER_SIZE=6 # 4 for stride~=1.5, 6 for full STRIDE=1
 #export N_LAYERS=10 N_EXPERTS=1
 
 # WNO3d experts?
-export USE_WNO3D_EXPERTS=1 # To use WNO3d experts: set USE_WNO3D_EXPERTS=1 and USE_CNN_EXPERTS=0
-export WNO3D_LEVEL=2 # wavelet decomposition level (default 2, higher = more detailed wavelet analysis)
-export STRIDE='[1.609,1.625,1.203]' #'[1.515,1.625,1.481]'
+export USE_WNO3D_EXPERTS=0 # To use WNO3d experts: set USE_WNO3D_EXPERTS=1 and USE_CNN_EXPERTS=0
+export WNO3D_LEVEL=1 # wavelet decomposition level (default 2, higher = more detailed wavelet analysis)
+#export N_EXPERTS=1 N_LAYERS=4 OUT_NORM_GROUPS=0 
+#export STRIDE='[1.609,1.625,1.203]'
+#export MAX_EPOCHS=245
+#export BATCH_SIZE=2
 
 ## load experiment settings
 #source experiment_configs/control.sh
@@ -91,10 +94,10 @@ export STRIDE='[1.609,1.625,1.203]' #'[1.515,1.625,1.481]'
 #source experiment_configs/everything.sh # NO-OP b/c everything is already the default
 
 #export STRIDE=1.47 # 1.47 for 68 GB mem target & near 88% utilization
-export BATCH_SIZE=$((BATCH_SIZE*4)) # simulate 4 nodes
-export N_EXPERTS=1
+#export BATCH_SIZE=$((BATCH_SIZE*4)) # simulate 4 nodes
+#export N_EXPERTS=1
 #export SEED=$RANDOM # random behavior (but consistent splitting)
-#export MAX_EPOCHS=5
+#export MAX_EPOCHS=10
 
 ## IMPORTANT: you NEED to use `python -m pytorch_lightning.utilities.consolidate_checkpoint epoch=X-step=Y.ckpt` in order to get a useable model file for resuming or prediction
 ## Once you do that you can pass the checkpoint path like below to resume a run to get even better performance than what was achievable in the first run
