@@ -166,8 +166,8 @@ if __name__=='__main__':
     #logger.experiment.config.update({'grad_clip': gradient_clip_val, 'prior_sigma': prior_sigma})
 
     # Weight-only sharded checkpoints are needed to avoid problem caused by large model size
-    model_checkpoint_callback=L.callbacks.ModelCheckpoint(f"lightning_logs/{job_name}/{version}", save_weights_only=True,
-                                                          monitor='val_loss/dataloader_idx_1', save_last=False) # monitor long-horizon loss
+    model_checkpoint_callback=L.callbacks.ModelCheckpoint(f"lightning_logs/{job_name}/{version}", save_weights_only=True, save_last=False,
+                                                          monitor='val_loss/dataloader_idx_1', auto_insert_metric_name=True) # monitor long-horizon loss
     #model_checkpoint_callback=L.callbacks.ModelCheckpoint(
     #    f"lightning_logs/{job_name}/{version}",
     #    save_weights_only=True, # weights only does indeed affect peak memory but not by much
