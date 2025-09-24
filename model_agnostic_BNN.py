@@ -149,10 +149,12 @@ def model_agnostic_dnn_to_bnn(dnn: nn.Module, train_dataset_size: int|Dataset|Da
             else: print('param: ', name, 'doesnt require gradient!', flush=True)
     dnn.apply(visit_parametrize)
 
+    original_type = type(dnn)
     # redefine class to use cached forward operation for speed & consistency
     def forward(self, *args, **kwargs):
         with parametrize.cached():
-            return super(type(self), self).forward(*args, **kwargs)
+            return original_type.forward(self, *args, **kwargs)
+
     kl_weight=1.0
     if type(train_dataset_size) is not int:
         # TODO: use model(X) instead of y to make it agnostic to classification and regression?
@@ -161,8 +163,8 @@ def model_agnostic_dnn_to_bnn(dnn: nn.Module, train_dataset_size: int|Dataset|Da
     if train_dataset_size: kl_weight = 1.0/train_dataset_size
     else: warnings.warn("you didn't pass in the train_dataset_size so get_kl_loss() values will be unweighted! (make sure to weight them yourself)")
     _get_kl_loss = lambda self: get_kl_loss(self)*kl_weight
-    methods =  {'forward': forward, 'get_kl_loss': _get_kl_loss}
-    dnn.__class__  = type(f'Bayesian{dnn.__class__.__name__}', (type(dnn),), methods)
+    methods =  {'forward': forward, 'get_kl_loss': _get_kl_loss} # we assign forward later to avoid edge-case
+    dnn.__class__ = type(f'Bayesian{dnn.__class__.__name__}', (type(dnn),), methods)
     return dnn
 
 # GOTCHA: This is still technically incorrect *with MSE* because NLL loss is supposed to sum across features too...
@@ -270,3 +272,36 @@ def get_BNN_pred_moments(bnn_model, x_inputs, n_samples=100, no_grad=True, verbo
     mean_pred = total_pred/n_samples
     sd_pred = cum_var.var**0.5
     return mean_pred, sd_pred
+
+# Corrected version: uses mixture PDF before data reduction.
+def log_posterior_predictive_check(model, val_data_loader, n_samples=25, sigma_constant:float=None, feature_axis=1):
+    model_device = next(model.parameters()).device
+    assert 'cuda' in str(model_device)
+
+    try: # try to use tqdm progress bar?
+        from tqdm import tqdm
+        val_data_loader = tqdm(val_data_loader)
+    except ImportError: pass
+
+    if sigma_constant is None: # splits apart mu & sigma on feature axis so `mu, sigma = predict(X)`
+        predict = lambda X: model(X.to(model_device)).tensor_split(2, dim=feature_axis)
+    else:
+        assert type(sigma_constant) is float
+        predict = lambda X: model(X.to(model_device)), sigma_constant
+
+    with torch.inference_mode():
+        # Compute log(p(D))=log(∏_i p(D_i))=∑_i log(p(D_i))
+        # NOTICE: this is log-likelihood & the sum of log-score!
+        PPC_LL = torch.tensor(0.0, device=model_device)
+        for X, y in val_data_loader:
+            # compute mixture PDF over θ samples log(p(D_i))=log(1/N*∑_j p(D_i|θ_j))
+            LL_batch = -torch.inf*torch.ones_like(y, device=model_device)
+            for i in range(n_samples):
+                mu, sigma = predict(X)
+                normal = torch.distributions.normal.Normal(mu, sigma)
+                LL_batch = torch.logaddexp(LL_batch, normal.log_prob(y.to(model_device)))
+            LL_batch = LL_batch-np.log(n_samples)
+            PPC_LL += LL_batch.sum()
+    PPC_LL = PPC_LL.item()
+    print(f'{PPC_LL=:.3e}', flush=True)
+    return PPC_LL
