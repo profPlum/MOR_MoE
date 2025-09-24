@@ -45,15 +45,8 @@ srun --ntasks-per-node=1 nvidia-smi
 VI_LR=1.563e-5
 MLE_LR=3.125e-5
 
-## Kahuna measurements:
-# (MLE) 582 epochs takes 24 hours (with 8 nodes, measured 10/22/24)
-# (VI) 515 epochs takes 24 hours (with 12 nodes, measured 10/22/24)
-# (VI) 644 epochs takes 24 hours (with 20 nodes, measured 10/23/24)
-# (VI) 445 epochs takes 24 hours (with 10 nodes, measured 10/26/24)
-# (VI+TRIG) 333 epochs takes 24 hours (with 10 nodes, measured 10/26/24)
-# (VI+TRIG) 678 epochs takes 24 hours (with 20 nodes, measured 10/31/24)
-
 # (VI+TRIG) 1550 epochs takes 20 hours (with 4 GH200s, measured 4/2/25)
+# Everything 1600 epochs takes 33 hours (with 4 GH200s, measured 9/23/25)
 export MAX_EPOCHS=1600 # MUST BE ACCURATELY ADJUSTED based on estimated epochs (this ensures that OneCycle is properly calibrated)
 export LR=$VI_LR # this is 4x higher than theory suggests (it is only possible b/c grad clip)
 export GRAD_CLIP=50 # it is best to keep this value, it will automatically be adjusted based on number of recursive timesteps & batch_size
@@ -72,19 +65,19 @@ export N_LAYERS=4 # number of expert layers
 export N_FILTERS=32 # number of hidden filters (aka channel size)
 export N_EXPERTS=3 # number of experts
 export STRIDE=1 # e.g. 1.5 or a crazy list [1.5,1.3,1.8] for smaller experiments
-#export K_MODES=6 # 4 for stride~=1.5, 6 for full STRIDE=1, use this for comparison of FNO to CNN
+#export K_MODES=4 # 4 for stride~=1.5, 6 for full STRIDE=1, use this for comparison of FNO to CNN
 
 # CNN experts?
 export USE_CNN_EXPERTS=0
-export CNN_FILTER_SIZE=6 # 4 for stride~=1.5, 6 for full STRIDE=1
-#export N_LAYERS=10 N_EXPERTS=1
+export CNN_FILTER_SIZE=4 # 4 for stride~=1.5, 6 for full STRIDE=1
+#export N_LAYERS=11 N_EXPERTS=1
 
 # WNO3d experts?
 export USE_WNO3D_EXPERTS=0 # To use WNO3d experts: set USE_WNO3D_EXPERTS=1 and USE_CNN_EXPERTS=0
 export WNO3D_LEVEL=1 # wavelet decomposition level (default 2, higher = more detailed wavelet analysis)
 #export N_EXPERTS=1 N_LAYERS=4 OUT_NORM_GROUPS=0 
 #export STRIDE='[1.609,1.625,1.203]'
-#export MAX_EPOCHS=245
+#export MAX_EPOCHS=150
 #export BATCH_SIZE=2
 
 ## load experiment settings
