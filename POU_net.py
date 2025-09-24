@@ -202,7 +202,7 @@ class POU_net(L.LightningModule):
                  make_gating_net: type=EqualizedFieldGatingNet, trig_encodings=True, **kwd_args):
         assert not (one_cycle and RLoP), 'These learning rate schedules are mututally exclusive!'
         super().__init__()
-        self.save_hyperparameters(ignore=['n_inputs', 'n_outputs', 'ndims', 'simulator', 'make_expert', 'make_gating_net'])
+        self.save_hyperparameters() #ignore=['n_inputs', 'n_outputs', 'ndims', 'simulator', 'make_expert', 'make_gating_net'])
 
         assert n_experts>0
         if n_experts==1: make_gating_net=DummyGatingNet
