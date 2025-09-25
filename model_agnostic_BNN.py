@@ -301,5 +301,5 @@ def log_posterior_predictive_check(model, val_data_loader, n_samples=25, sigma_c
             LL_batch = LL_batch-np.log(n_samples)
             PPC_LL += LL_batch.sum()
     PPC_LL = PPC_LL.item()/N_total
-    print(f'{PPC_LL=:.4e}', flush=True)
+    print(f'{PPC_LL=}', flush=True)
     return PPC_LL
