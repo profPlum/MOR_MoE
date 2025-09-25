@@ -206,20 +206,18 @@ def clear_cache():
     while gc.collect(): pass
     torch.cuda.empty_cache()
 
-def get_BNN_pred_distribution(bnn_model, x_input, n_samples=100, no_grad=True):#, cleanup_freq=15):
+def get_BNN_pred_distribution(bnn_model, x_input, n_samples=100):
     '''
     If you just want moments use get_BNN_pred_moments() instead as it is *much* more memory efficient (e.g. for large sample sizes). But this is still useful if you want an actual distribution.
     '''
-    if no_grad:
-        with torch.inference_mode():
-            return get_BNN_pred_distribution(bnn_model, x_input, n_samples, no_grad=False)
-    preds = []
-    for i in range(n_samples):
-        preds.append(bnn_model(x_input).cpu())
-        #if i%cleanup_freq==0: clear_cache()
-    preds = torch.stack(preds, axis=0)
-    clear_cache()
-    return preds
+    with torch.inference_mode():
+        preds = []
+        for i in range(n_samples):
+            preds.append(bnn_model(x_input).cpu())
+            #if i%cleanup_freq==0: clear_cache()
+        preds = torch.stack(preds, axis=0)
+        clear_cache()
+        return preds
 
 # Verified to work in every possible way! 11/20/23
 class CummVar:
@@ -253,25 +251,22 @@ class CummVar:
 
 # More efficient now! It doesn't rely on pred distribution!!
 # Verified to work 3/15/24
-def get_BNN_pred_moments(bnn_model, x_inputs, n_samples=100, no_grad=True, verbose=True):
-    if no_grad:
-        bnn_model.eval()
-        with torch.inference_mode():
-            return get_BNN_pred_moments(bnn_model, x_inputs, n_samples=n_samples, no_grad=False, verbose=verbose)
-
-    print_interval = max(n_samples//10, 1)
-    total_pred = 0
-    cum_var = CummVar()
-    assert n_samples>1
-    for i in range(n_samples):
-        if i%print_interval==0:
-            if verbose: print(f'{i}th moment sample')
-        pred = bnn_model(x_inputs.float())
-        total_pred += pred
-        cum_var(pred.unsqueeze(0)) # update, first dim is reduced so we add it
-    mean_pred = total_pred/n_samples
-    sd_pred = cum_var.var**0.5
-    return mean_pred, sd_pred
+def get_BNN_pred_moments(bnn_model, x_inputs, n_samples=100, verbose=True):
+    bnn_model.eval()
+    with torch.inference_mode():
+        print_interval = max(n_samples//10, 1)
+        total_pred = 0
+        cum_var = CummVar()
+        assert n_samples>1
+        for i in range(n_samples):
+            if i%print_interval==0:
+                if verbose: print(f'{i}th moment sample')
+            pred = bnn_model(x_inputs.float())
+            total_pred += pred
+            cum_var(pred.unsqueeze(0)) # update, first dim is reduced so we add it
+        mean_pred = total_pred/n_samples
+        sd_pred = cum_var.var**0.5
+        return mean_pred, sd_pred
 
 # Corrected version: uses mixture PDF before data reduction.
 def log_posterior_predictive_check(model, val_data_loader, n_samples=25, sigma_constant:float=None, feature_axis=1):
