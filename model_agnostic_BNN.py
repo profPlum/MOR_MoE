@@ -251,7 +251,7 @@ class CummVar:
 
 # More efficient now! It doesn't rely on pred distribution!!
 # Verified to work 3/15/24
-def get_BNN_pred_moments(bnn_model, x_inputs, n_samples=100, verbose=True):
+def get_BNN_pred_moments(bnn_model, x_inputs, n_samples=100, verbose=True, **kwd_args):
     bnn_model.eval()
     with torch.inference_mode():
         print_interval = max(n_samples//10, 1)
@@ -261,7 +261,7 @@ def get_BNN_pred_moments(bnn_model, x_inputs, n_samples=100, verbose=True):
         for i in range(n_samples):
             if i%print_interval==0:
                 if verbose: print(f'{i}th moment sample')
-            pred = bnn_model(x_inputs.float())
+            pred = bnn_model(x_inputs.float(), **kwd_args)
             total_pred += pred
             cum_var(pred.unsqueeze(0)) # update, first dim is reduced so we add it
         mean_pred = total_pred/n_samples
