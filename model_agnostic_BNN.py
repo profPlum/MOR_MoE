@@ -285,10 +285,13 @@ def log_posterior_predictive_check(model, val_data_loader, n_samples=25, sigma_c
         predict = lambda X: model(X.to(model_device)), sigma_constant
 
     with torch.inference_mode():
-        # Compute log(p(D))=log(∏_i p(D_i))=∑_i log(p(D_i))
+        # Compute log(p(D|D_old))=log(∏_i p(D_i|D_old))=∑_i log(p(D_i|D_old))
         # NOTICE: this is log-likelihood & the sum of log-score!
         PPC_LL = torch.tensor(0.0, device=model_device)
+        N_total = 0 # take average log-likelihood, more interpretable
         for X, y in val_data_loader:
+            N_total += y.numel()
+
             # compute mixture PDF over θ samples log(p(D_i))=log(1/N*∑_j p(D_i|θ_j))
             LL_batch = -torch.inf*torch.ones_like(y, device=model_device)
             for i in range(n_samples):
@@ -297,6 +300,6 @@ def log_posterior_predictive_check(model, val_data_loader, n_samples=25, sigma_c
                 LL_batch = torch.logaddexp(LL_batch, normal.log_prob(y.to(model_device)))
             LL_batch = LL_batch-np.log(n_samples)
             PPC_LL += LL_batch.sum()
-    PPC_LL = PPC_LL.item()
-    print(f'{PPC_LL=:.3e}', flush=True)
+    PPC_LL = PPC_LL.item()/N_total
+    print(f'{PPC_LL=:.4e}', flush=True)
     return PPC_LL
