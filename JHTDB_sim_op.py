@@ -174,14 +174,14 @@ class POU_NetSimulator(POU_net):
         self.simulator = simulator
         self.n_steps = n_steps # n timesteps for PDE evolution
 
-    def forward(self, X, n_steps: int=None, **kwd_args):
+    def forward(self, X, n_steps: int=None, intermediate_outputs=True, **kwd_args):
         #NOTE: X.shape==[batch, channel, x, y, z]
 
         # by caching the gating weights we optimize memory & time
         # also it is safe because there are no optimization steps inside a forward!
         with self.gating_net.cached_gating_weights():
             if n_steps is None: n_steps=self.n_steps
-            return self.simulator.evolve(X, n=n_steps, intermediate_outputs=True, **kwd_args)
+            return self.simulator.evolve(X, n=n_steps, intermediate_outputs=intermediate_outputs, **kwd_args)
             # evolve has now been vmapped internally!
 
     def validation_step(self, batch, batch_idx, dataloader_idx=0):
