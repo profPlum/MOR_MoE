@@ -206,14 +206,14 @@ def clear_cache():
     while gc.collect(): pass
     torch.cuda.empty_cache()
 
-def get_BNN_pred_distribution(bnn_model, x_input, n_samples=100):
+def get_BNN_pred_distribution(bnn_model, x_input, n_samples=100, **kwd_args):
     '''
     If you just want moments use get_BNN_pred_moments() instead as it is *much* more memory efficient (e.g. for large sample sizes). But this is still useful if you want an actual distribution.
     '''
     with torch.inference_mode():
         preds = []
         for i in range(n_samples):
-            preds.append(bnn_model(x_input).cpu())
+            preds.append(bnn_model(x_input, **kwd_args).cpu())
             #if i%cleanup_freq==0: clear_cache()
         preds = torch.stack(preds, axis=0)
         clear_cache()
@@ -269,7 +269,7 @@ def get_BNN_pred_moments(bnn_model, x_inputs, n_samples=100, verbose=True, **kwd
         return mean_pred, sd_pred
 
 # Corrected version: uses mixture PDF before data reduction.
-def log_posterior_predictive_check(model, val_data_loader, n_samples=25, sigma_constant:float=None, feature_axis=1):
+def log_posterior_predictive_check(model, val_data_loader, n_samples=25, sigma_constant:float=None, feature_axis=1, use_mean=True):
     model_device = next(model.parameters()).device
     assert 'cuda' in str(model_device)
 
@@ -300,6 +300,7 @@ def log_posterior_predictive_check(model, val_data_loader, n_samples=25, sigma_c
                 LL_batch = torch.logaddexp(LL_batch, normal.log_prob(y.to(model_device)))
             LL_batch = LL_batch-np.log(n_samples)
             PPC_LL += LL_batch.sum()
-    PPC_LL = PPC_LL.item()/N_total
+    PPC_LL = PPC_LL.item()
+    if use_mean: PPC_LL /= N_total
     print(f'{PPC_LL=}', flush=True)
     return PPC_LL
