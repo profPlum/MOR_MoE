@@ -67,6 +67,13 @@ export N_EXPERTS=3 # number of experts
 export STRIDE=1 # e.g. 1.5 or a crazy list [1.5,1.3,1.8] for smaller experiments
 #export K_MODES=4 # 4 for stride~=1.5, 6 for full STRIDE=1, use this for comparison of FNO to CNN
 
+## load experiment settings
+#source experiment_configs/control.sh
+#source experiment_configs/recursive_steps.sh
+#source experiment_configs/mixture_of_experts.sh
+#source experiment_configs/mixture_of_experts_normalized.sh
+source experiment_configs/everything.sh # NO-OP b/c everything is already the default
+
 # CNN experts?
 export USE_CNN_EXPERTS=0
 export CNN_FILTER_SIZE=4 # 4 for stride~=1.5, 6 for full STRIDE=1
@@ -80,15 +87,7 @@ export WNO3D_LEVEL=1 # wavelet decomposition level (default 2, higher = more det
 #export MAX_EPOCHS=150
 #export BATCH_SIZE=2
 
-## load experiment settings
-#source experiment_configs/control.sh
-#source experiment_configs/recursive_steps.sh
-#source experiment_configs/mixture_of_experts.sh
-#source experiment_configs/mixture_of_experts_normalized.sh
-source experiment_configs/everything.sh # NO-OP b/c everything is already the default
-
-export STRIDE=1.47 # 1.47 for 68 GB mem target & near 88% utilization
-export BATCH_SIZE=$((BATCH_SIZE*4)) # simulate 4 nodes
+export BATCH_SIZE=$((BATCH_SIZE*4)) STRIDE=1.47 # simulate 4 nodes, S=1.47 for 68 GB mem target & near 88% utilization
 #export N_EXPERTS=1
 #export SEED=$RANDOM # random behavior (but consistent splitting)
 #export MAX_EPOCHS=10
