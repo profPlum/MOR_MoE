@@ -151,8 +151,8 @@ if __name__=='__main__':
         SimModelClass.Sim = SimModelClass_.Sim
 
     if use_CNN_experts:
-        CNN_expert = lambda *args, out_norm_groups=1, **kwd_args: CNN(*args, out_norm_groups=out_norm_groups, skip_connections=True, **kwd_args)
-        optional_kwd_args |= {'make_expert': CNN_expert, 'k_size': CNN_filter_size} #, 'skip_connections': True}
+        # output_norm_groups=1 by default but specified by the user
+        optional_kwd_args |= {'make_expert': CNN, 'k_size': CNN_filter_size, 'skip_connections': True}
     elif use_WNO3d_experts:
         # POU_net calls: make_expert(n_inputs, n_outputs, ndims=ndims, **kwd_args)
         # WNO3d needs: (in_channels, out_channels, size, **other_args)
