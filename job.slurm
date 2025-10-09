@@ -5,7 +5,7 @@
 #SBATCH --ntasks-per-node=1                  # Tasks per node (usually 1 for PyTorch)
 #SBATCH --mem-per-gpu=115GB                  # CPU? RAM per GPU < 1/4 of the total node RAM = 120GB
 #SBATCH --gpus-per-node=1                    # GPUs per task is 1
-#SBATCH --cpus-per-task=72                   # CORES per task for data loaders (72 avail per GPU)
+#SBATCH --cpus-per-task=72                   # CORES per task for data loaders (72 avail per GPU) (very few really used)
 #SBATCH --time=1-00:00:00                    # Maximum runtime (HH:MM:SS)
 #SBATCH --partition=ghx4                     # Partition name
 #SBATCH --account=beoi-dtai-gh
@@ -58,14 +58,15 @@ export THREE_PHASE=0 # faster decay in one cycle, usually not needed
 export VI=1 # use VI or not (in bash binary booleans have the best support for boolean logic)
 export TRIG_ENCODINGS=1 # gives better (nearly periodic) partitions
 export USE_NORMALIZED_MOE=1 # importance normalization gives better expert utilization
-export OUT_NORM_GROUPS=1 # whether to use output normalization
+export OUT_NORM_GROUPS=1 # whether to use output normalization (you should!)
 export TIME_CHUNKING=10 # 10 is default now b/c we can fit it in GH200s
 export BATCH_SIZE=2 # GH200 can handle batch_size=2! (it has > x2 the memory of A100)
 export N_LAYERS=4 # number of expert layers
-export N_FILTERS=32 # number of hidden filters (aka channel size)
+export N_FILTERS=32 # number of hidden channels
 export N_EXPERTS=3 # number of experts
 export STRIDE=1 # e.g. 1.5 or a crazy list [1.5,1.3,1.8] for smaller experiments
-#export K_MODES=4 # 4 for stride~=1.5, 6 for full STRIDE=1, use this for comparison of FNO to CNN
+export FAST_DATALOADERS=0 # warning: they can cause OOMs for production jobs!
+#export K_MODES=4 # 4 for stride~=1.5, 6 for full STRIDE=1, use this for comparison of FNO to CNN, keep off by default!
 
 ## load experiment settings
 #source experiment_configs/control.sh
@@ -83,12 +84,11 @@ export CNN_FILTER_SIZE=4 # 4 for stride~=1.5, 6 for full STRIDE=1
 export USE_WNO3D_EXPERTS=0 # To use WNO3d experts: set USE_WNO3D_EXPERTS=1 and USE_CNN_EXPERTS=0
 export WNO3D_LEVEL=1 # wavelet decomposition level (default 2, higher = more detailed wavelet analysis)
 #export N_EXPERTS=1 N_LAYERS=4 OUT_NORM_GROUPS=0 
-#export STRIDE='[1.609,1.625,1.203]'
+#export STRIDE='[1.609,1.625,1.203]' FAST_DATALOADERS=1
 #export MAX_EPOCHS=150
 #export BATCH_SIZE=2
 
-export BATCH_SIZE=$((BATCH_SIZE*4)) STRIDE=1.47 # simulate 4 nodes, S=1.47 for 68 GB mem target & near 88% utilization
-#export N_EXPERTS=1
+export BATCH_SIZE=$((BATCH_SIZE*4)) STRIDE=1.47 FAST_DATALOADERS=1 # simulate 4 nodes, S=1.47 for 68 GB mem target & near 88% utilization
 #export SEED=$RANDOM # random behavior (but consistent splitting)
 #export MAX_EPOCHS=10
 

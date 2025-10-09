@@ -23,7 +23,7 @@ ckpt_path=os.environ.get('CKPT_PATH', None)
 use_normalized_MoE=bool(int(os.environ.get('USE_NORMALIZED_MOE', True)))
 use_CNN_experts=bool(int(os.environ.get('USE_CNN_EXPERTS', False)))
 use_WNO3d_experts=bool(int(os.environ.get('USE_WNO3D_EXPERTS', False))) # whether to use WNO3d as experts
-WNO3d_level=int(os.environ.get('WNO3D_LEVEL', 2)) # wavelet decomposition level for WNO3d (default 2)
+WNO3d_level=int(os.environ.get('WNO3D_LEVEL', 1)) # wavelet decomposition level for WNO3d (default 2)
 CNN_filter_size=eval(str(os.environ.get('CNN_FILTER_SIZE', 6))) # only used if use_CNN_experts=True
 assert type(CNN_filter_size) in [int, list, tuple]
 
@@ -31,6 +31,7 @@ assert type(CNN_filter_size) in [int, list, tuple]
 expert_types = [use_CNN_experts, use_WNO3d_experts]
 assert sum(expert_types) <= 1, f"Only one expert type can be selected. Currently selected: CNN={use_CNN_experts}, WNO3d={use_WNO3d_experts}"
 
+use_fast_dataloaders = bool(int(os.environ.get('FAST_DATALOADERS', False))) # marginally faster dataloaders which use more VRAM
 use_trig = bool(int(os.environ.get('TRIG_ENCODINGS', True))) # Ravi's trig encodings
 out_norm_groups = int(os.environ.get('OUT_NORM_GROUPS', 1)) # 0 or 1 or maybe 2 (whether or not to use output layer norm) keep it at one generally
 use_VI = bool(int(os.environ.get('VI', True))) # whether to enable VI
@@ -91,7 +92,7 @@ L.seed_everything(int(os.environ.get('SEED', 0)))
 ## we can literally fit the entire dataset into memory... its only 16GB total
 #preload_dataset = lambda dataset: torch.utils.data.TensorDataset(*next(iter(torch.utils.data.DataLoader(dataset, batch_size=len(dataset)))))
 
-# preserves random state
+# preserves random state (verified to work: 9/24/25)
 def preload_dataset(dataset):
     Xs, ys = [], []
     for i in range(len(dataset)):
@@ -113,9 +114,11 @@ if __name__=='__main__':
     _, val_long_horizon = torch.utils.data.random_split(dataset_long_horizon, [0.5, 0.5]) # 50% ensures there are two validation steps
     val_long_horizon = preload_dataset(val_long_horizon) # pre-load only the subset we use
     train_dataset, val_dataset = torch.utils.data.random_split(dataset, [0.8, 0.2])
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, pin_memory=True, shuffle=True, drop_last=True)
-    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=int(long_horizon_batch_size*long_horizon_multiplier), pin_memory=True)
-    val_long_loader = torch.utils.data.DataLoader(val_long_horizon, batch_size=long_horizon_batch_size, pin_memory=True)
+
+    fast_dataloader_kwd_args = {'num_workers': 1, 'persistent_workers': True} if use_fast_dataloaders else {} # this is faster (if memory allows)
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, pin_memory=True, shuffle=True, drop_last=True, **fast_dataloader_kwd_args)
+    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=int(long_horizon_batch_size*long_horizon_multiplier), pin_memory=True, **fast_dataloader_kwd_args)
+    val_long_loader = torch.utils.data.DataLoader(val_long_horizon, batch_size=long_horizon_batch_size, pin_memory=True, **fast_dataloader_kwd_args)
     print(f'{len(dataset)=}\n{len(train_loader)=}\n{len(val_dataset)=}')
 
     IC_0, Sol_0 = dataset[0]
@@ -182,15 +185,10 @@ if __name__=='__main__':
     #logger.watch(model) # For W&B to log gradients and model topology
     #logger.experiment.config.update({'grad_clip': gradient_clip_val, 'prior_sigma': prior_sigma})
 
-    # Weight-only sharded checkpoints are needed to avoid problem caused by large model size
+    # Weight-only sharded checkpoints are needed to avoid OOM problem caused by large model size
     model_checkpoint_callback=L.callbacks.ModelCheckpoint(f"lightning_logs/{job_name}/{version}", save_weights_only=True, save_last=False,
                                                           monitor='val_loss/dataloader_idx_1', auto_insert_metric_name=True) # monitor long-horizon loss
-    #model_checkpoint_callback=L.callbacks.ModelCheckpoint(
-    #    f"lightning_logs/{job_name}/{version}",
-    #    save_weights_only=True, # weights only does indeed affect peak memory but not by much
-    #    every_n_epochs=100,
-    #    #save_last=True
-    #)
+    #model_checkpoint_callback=L.callbacks.ModelCheckpoint(f"lightning_logs/{job_name}/{version}", every_n_epochs=100) # simpler resumable checkpointing
 
     # train model
     strategy = L.strategies.FSDPStrategy(state_dict_type='sharded') if num_nodes*num_gpus_per_node > 1 else 'auto' # sharded reduces peak memory usage but still allows resuming in full!
@@ -202,5 +200,5 @@ if __name__=='__main__':
     val_dataloaders = [val_loader, val_long_loader] # long validation loader causes various problems with profiler & GPU utilization...
     trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_dataloaders)#, ckpt_path=ckpt_path)
 
-    # save last checkpoint
+    # save last checkpoint (doing so manually avoids constant resaving after every epoch)
     trainer.save_checkpoint(f"lightning_logs/{job_name}/{version}/last.ckpt", weights_only=True)
