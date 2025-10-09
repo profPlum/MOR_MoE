@@ -104,7 +104,7 @@ class _BayesianParameterization(nn.Module):
         # Here we make the seed for *bayesian sampling* unique across processes for better batch parallelism!
         # NOTE: It's ugly b/c: don't want it to make the global seed unique per-process
         # GOTCHA: It will never be reproducible b/c process pids aren't deterministic/controllable!
-        pid_seed = random.randint(0, int(2**63)-int(1e9)) + os.getpid() + hash(os.uname().nodename)
+        pid_seed = (random.randint(0, 2**63-1) + os.getpid() + hash(os.uname().nodename)) % (2**64)
         def torch_randn_like(input, seed=None): # supports seeding ...unlike torch.randn_like()
             gen = None if seed is None else torch.Generator(device=input.device).manual_seed(seed)
             return torch.randn(input.size(), generator=gen, dtype=input.dtype,
@@ -206,18 +206,16 @@ def clear_cache():
     while gc.collect(): pass
     torch.cuda.empty_cache()
 
-def get_BNN_pred_distribution(bnn_model, x_input, n_samples=100, **kwd_args):
+# Adapted to stack aleatoric moments
+def get_BNN_pred_distribution(bnn_model, x_input, n_samples=100, feature_axis=1):
     '''
-    If you just want moments use get_BNN_pred_moments() instead as it is *much* more memory efficient (e.g. for large sample sizes). But this is still useful if you want an actual distribution.
+    If you just want moments use get_BNN_pred_moments() instead as it is *much* more memory efficient (e.g. for large sample sizes).
+    But this is still useful if you want an actual distribution.
     '''
     with torch.inference_mode():
-        preds = []
-        for i in range(n_samples):
-            preds.append(bnn_model(x_input, **kwd_args).cpu())
-            #if i%cleanup_freq==0: clear_cache()
-        preds = torch.stack(preds, axis=0)
-        clear_cache()
-        return preds
+        pred_distribution = torch.stack([bnn_model(x_input) for _ in range(n_samples)], dim=0)
+        preds_mu, preds_sigma = pred_distribution.tensor_split(2, dim=feature_axis+1) # +1 b/c stacking added another dim
+        return preds_mu, preds_sigma
 
 # Verified to work in every possible way! 11/20/23
 class CummVar:
@@ -249,24 +247,34 @@ class CummVar:
             return self(np.atleast_1d(X))
             # If X *is just a python scalar* then convert to numpy 1d array (of length 1)
 
-# More efficient now! It doesn't rely on pred distribution!!
-# Verified to work 3/15/24
-def get_BNN_pred_moments(bnn_model, x_inputs, n_samples=100, verbose=True, **kwd_args):
-    bnn_model.eval()
+# updated uses laws of total variance and expectation
+def get_BNN_pred_moments(bnn_model, x_inputs, n_samples=100, feature_axis=1, verbose=True):
+    total_expectation = 0 # E[Y] = E[E[Y|Z]]
+    total_variance = 0 # Var[Y] = E[Var[Y|Z]]+Var[E[Y|Z]]
+    epistemic_variance = CummVar() # necessary for 2nd term in total variance eq.
+    assert n_samples>1
+
+    print_interval=max(n_samples//10, 1)
+
     with torch.inference_mode():
-        print_interval = max(n_samples//10, 1)
-        total_pred = 0
-        cum_var = CummVar()
-        assert n_samples>1
         for i in range(n_samples):
-            if i%print_interval==0:
-                if verbose: print(f'{i}th moment sample')
-            pred = bnn_model(x_inputs.float(), **kwd_args)
-            total_pred += pred
-            cum_var(pred.unsqueeze(0)) # update, first dim is reduced so we add it
-        mean_pred = total_pred/n_samples
-        sd_pred = cum_var.var**0.5
-        return mean_pred, sd_pred
+            if verbose and i%print_interval==0:
+                print(f'{i}th moment sample')
+            mu, sigma = bnn_model(x_inputs.float()).tensor_split(2, dim=feature_axis)
+            epistemic_variance.update(mu.unsqueeze(0)) # update it, add 1st dim b/c it is reduced
+
+            total_expectation = total_expectation + mu
+            total_variance = total_variance + sigma**2
+
+        # take average
+        total_expectation = total_expectation/n_samples
+        total_variance = total_variance/n_samples
+
+        # add in the explained variance term (2nd term) = Var(mus) = Var[E[Y|Z]]
+        total_variance = total_variance + epistemic_variance.var
+        # NOTE: we apply Bessel's correction to 2nd term only b/c sample mean is used to estimate sample variance
+
+        return total_expectation, total_variance**0.5
 
 # Corrected version: uses mixture PDF before data reduction.
 def log_posterior_predictive_check(model, val_data_loader, n_samples=25, sigma_constant:float=None, feature_axis=1, use_mean=True):
