@@ -136,7 +136,7 @@ def get_dataset_size(train_dataset: Dataset | DataLoader):
 
 # NOTE: this is essentially the new dnn_to_bnn() but also more versatile
 # NOTE: if you pass in train_dataset and it is non-sparse (e.g. floating point regression) then it will automatically weight the get_kl_loss method!
-def model_agnostic_dnn_to_bnn(dnn: nn.Module, train_dataset_size: int|Dataset|DataLoader=None, prior_cfg: dict = {}):
+def model_agnostic_dnn_to_bnn(dnn: nn.Module, train_dataset_size: int|Dataset|DataLoader, prior_cfg: dict = {}):
     if 'Bayesian' in type(dnn).__name__: return
 
     # apply _BayesianParameterization
@@ -157,44 +157,12 @@ def model_agnostic_dnn_to_bnn(dnn: nn.Module, train_dataset_size: int|Dataset|Da
 
     kl_weight=1.0
     if type(train_dataset_size) is not int:
-        # TODO: use model(X) instead of y to make it agnostic to classification and regression?
-        # Catch is it requires a fully constructed model which will cause problems if this function is called in a constructor...
         train_dataset_size=get_dataset_size(train_dataset_size)
     if train_dataset_size: kl_weight = 1.0/train_dataset_size
     else: warnings.warn("you didn't pass in the train_dataset_size so get_kl_loss() values will be unweighted! (make sure to weight them yourself)")
     _get_kl_loss = lambda self: get_kl_loss(self)*kl_weight
     methods =  {'forward': forward, 'get_kl_loss': _get_kl_loss} # we assign forward later to avoid edge-case
     dnn.__class__ = type(f'Bayesian{dnn.__class__.__name__}', (type(dnn),), methods)
-    return dnn
-
-# GOTCHA: This is still technically incorrect *with MSE* because NLL loss is supposed to sum across features too...
-# For correct usage (with MSE): dataset_size = prod(Y.shape) # s.t. Y is the GLOBAL output tensor (i.e. not divided into tensors!)
-# TODO: Test! It could work to replace more complicated existing interface...
-def model_agnostic_dnn_to_bnn_auto_KL(dnn: nn.Module, train_dataset_size=None,
-                                      prior_weight=1.0, prior_cfg: dict = {}):
-    if 'Bayesian' in type(dnn).__name__: return
-    if train_dataset_size is None: # default assumption becomes that model parameters & dataset size are balanced
-        train_dataset_size = len(torch.nn.utils.parameters_to_vector(dnn.parameters()))
-        # ...this is equivalent to KL taking the mean across parameters
-
-    # apply _BayesianParameterization
-    def visit_parametrize(module: nn.Module):
-        #print(module)
-        for name, param in list(module.named_parameters(recurse=False)):
-            assert '.' not in name
-            if param.requires_grad:
-                parametrize.register_parametrization(module, name, _BayesianParameterization(param, **prior_cfg))
-            else: print('param: ', name, 'doesnt require gradient!', flush=True)
-    dnn.apply(visit_parametrize)
-
-    # redefine class to use cached forward operation for speed & consistency
-    def forward(self, *args, **kwargs):
-        with parametrize.cached():
-            output = super(type(self), self).forward(*args, **kwargs)
-            if self.training: (prior_weight*self.get_kl_loss()/train_dataset_size).backward()
-        return output
-    methods =  {'forward': forward, 'get_kl_loss': get_kl_loss}
-    dnn.__class__  = type(f'Bayesian{dnn.__class__.__name__}', (type(dnn),), methods)
     return dnn
 
 # TODO: embed the moment accumulation functions into the forward method of the class
@@ -206,15 +174,19 @@ def clear_cache():
     while gc.collect(): pass
     torch.cuda.empty_cache()
 
+try: from tqdm import tqdm
+except ImportError: tqdm = lambda x: x
+
 # Adapted to stack aleatoric moments
-def get_BNN_pred_distribution(bnn_model, x_input, n_samples=100, feature_axis=1):
+def get_BNN_pred_distribution(bnn_model, x_input, n_samples=100, **kwd_args):
     '''
     If you just want moments use get_BNN_pred_moments() instead as it is *much* more memory efficient (e.g. for large sample sizes).
     But this is still useful if you want an actual distribution.
     '''
     with torch.inference_mode():
-        pred_distribution = torch.stack([bnn_model(x_input) for _ in range(n_samples)], dim=0)
-        preds_mu, preds_sigma = pred_distribution.tensor_split(2, dim=feature_axis+1) # +1 b/c stacking added another dim
+        pred_distribution = [bnn_model(x_input, **kwd_args) for _ in tqdm(range(n_samples))] # list of (mu,sigma) tuples
+        preds_mu = torch.stack((pred[0] for pred in pred_distribution), dim=0) # generators cost nothing
+        preds_sigma = torch.stack((pred[1] for pred in pred_distribution), dim=0) # generators cost nothing
         return preds_mu, preds_sigma
 
 # Verified to work in every possible way! 11/20/23
@@ -248,19 +220,15 @@ class CummVar:
             # If X *is just a python scalar* then convert to numpy 1d array (of length 1)
 
 # updated uses laws of total variance and expectation
-def get_BNN_pred_moments(bnn_model, x_inputs, n_samples=100, feature_axis=1, verbose=True):
+def get_BNN_pred_moments(bnn_model, x_inputs, n_samples=100, **kwd_args):
     total_expectation = 0 # E[Y] = E[E[Y|Z]]
     total_variance = 0 # Var[Y] = E[Var[Y|Z]]+Var[E[Y|Z]]
     epistemic_variance = CummVar() # necessary for 2nd term in total variance eq.
     assert n_samples>1
 
-    print_interval=max(n_samples//10, 1)
-
     with torch.inference_mode():
-        for i in range(n_samples):
-            if verbose and i%print_interval==0:
-                print(f'{i}th moment sample')
-            mu, sigma = bnn_model(x_inputs.float()).tensor_split(2, dim=feature_axis)
+        for i in tqdm(range(n_samples)):
+            mu, sigma = bnn_model(x_inputs.float(), **kwd_args)
             epistemic_variance.update(mu.unsqueeze(0)) # update it, add 1st dim b/c it is reduced
 
             total_expectation = total_expectation + mu
@@ -277,20 +245,12 @@ def get_BNN_pred_moments(bnn_model, x_inputs, n_samples=100, feature_axis=1, ver
         return total_expectation, total_variance**0.5
 
 # Corrected version: uses mixture PDF before data reduction.
-def log_posterior_predictive_check(model, val_data_loader, n_samples=25, sigma_constant:float=None, feature_axis=1, use_mean=True):
+def log_posterior_predictive_check(model, val_data_loader, n_samples=25, use_mean=True, **kwd_args):
     model_device = next(model.parameters()).device
     assert 'cuda' in str(model_device)
 
-    try: # try to use tqdm progress bar?
-        from tqdm import tqdm
-        val_data_loader = tqdm(val_data_loader)
-    except ImportError: pass
-
-    if sigma_constant is None: # splits apart mu & sigma on feature axis so `mu, sigma = predict(X)`
-        predict = lambda X: model(X.to(model_device)).tensor_split(2, dim=feature_axis)
-    else:
-        assert type(sigma_constant) is float
-        predict = lambda X: model(X.to(model_device)), sigma_constant
+    val_data_loader = tqdm(val_data_loader)
+    predict = lambda X: model(X.to(model_device), **kwd_args)
 
     with torch.inference_mode():
         # Compute log(p(D|D_old))=log(∏_i p(D_i|D_old))=∑_i log(p(D_i|D_old))
