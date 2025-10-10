@@ -52,18 +52,18 @@ class _Sim(L.LightningModule):
         self.Ly = Ly
         self.Lz = Lz
         self.nu = nu
-        self.k = torch.tensor(np.stack(np.meshgrid(np.fft.fftfreq(nx)*nx*2.*np.pi/Lx,
+        self.k = torch.as_tensor(np.stack(np.meshgrid(np.fft.fftfreq(nx)*nx*2.*np.pi/Lx,
                                        np.fft.fftfreq(ny)*ny*2.*np.pi/Ly,
                                        np.fft.rfftfreq(nz)*nz*2.*np.pi/Lz,indexing='ij'),axis=-1)).cfloat()
 
-        self.x = torch.tensor(np.stack(np.meshgrid(np.arange(nx)/nx*Lx,
+        self.x = torch.as_tensor(np.stack(np.meshgrid(np.arange(nx)/nx*Lx,
                                        np.arange(ny)/ny*Ly,
                                        np.arange(nz)/nz*Lz,indexing='ij'),axis=-1))
 
         self.xi = (self.x[...,0]>=np.pi/4)*(self.x[...,0]<=Lx-np.pi/4)
 
         self.knorm2 = torch.sum(self.k**2,-1).real.float()
-        self.Ainv =  torch.tensor(1./(1.+nu*np.einsum('...j,...j->...',self.k,self.k)))
+        self.Ainv =  torch.as_tensor(1./(1.+nu*np.einsum('...j,...j->...',self.k,self.k)))
         self.filt = torch.as_tensor((np.sqrt(self.knorm2)<=2./3*(min(self.nx,self.ny,self.nz)/2+1)))
         self.filt2 = torch.as_tensor((np.sqrt(self.knorm2)<=1./3*(min(self.nx,self.ny,self.nz)/2+1)))
         self.Ainv = self.Ainv * self.filt
@@ -81,6 +81,16 @@ class _Sim(L.LightningModule):
             if isinstance(value, torch.Tensor):
                 del vars(self)[name]
                 self.register_buffer(name, value.detach())
+
+    def change_resolution(self,nx,ny,nz):
+        ''' construct a new simulator at a different resolution (with other arguments fixed) or self if resolution is unchanged '''
+        if nx==self.nx and ny==self.ny and nx==self.nx:
+            return self
+
+        new_sim = type(self)(nx=nx,ny=ny,nz=nz,Lx=self.Lx,Ly=self.Ly,Lz=self.Lz,
+                             nu=self.nu,dt=self.dt)
+        new_sim.set_operator(self.op)
+        return new_sim.to(self.device)
 
     def genIC(self):
         h = torch.tensor(np.random.normal(0,1,(self.nx,self.ny,self.nz,3))).float().to(self.device)
@@ -176,6 +186,12 @@ class POU_NetSimulator(POU_net):
 
     def forward(self, X, n_steps: int=None, intermediate_outputs=True, **kwd_args):
         #NOTE: X.shape==[batch, channel, x, y, z]
+
+        # Maybe change simulator resolution (if needed)
+        new_simulator = self.simulator.change_resolution(*X.shape[-3:]) # pass x,y,z
+        if new_simulator is not self.simulator: # FSDP likely doesn't support changing the registered modules in the middle of training
+            if self.training: raise NotImplementedError("It is not supported to change NO's Simulator's resolution during training.")
+            else: self.simulator=new_simulator
 
         # by caching the gating weights we optimize memory & time
         # also it is safe because there are no optimization steps inside a forward!
