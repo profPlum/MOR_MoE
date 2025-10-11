@@ -6,7 +6,7 @@
 #SBATCH --mem-per-gpu=115GB                  # CPU? RAM per GPU < 1/4 of the total node RAM = 120GB
 #SBATCH --gpus-per-node=1                    # GPUs per task is 1
 #SBATCH --cpus-per-task=72                   # CORES per task for data loaders (72 avail per GPU) (very few really used)
-#SBATCH --time=1-00:00:00                    # Maximum runtime (HH:MM:SS)
+#SBATCH --time=1-00:00:00                    # Maximum runtime (HH:MM:SS) (48 hours for WNO-600-epochs)
 #SBATCH --partition=ghx4                     # Partition name
 #SBATCH --account=beoi-dtai-gh
 #SBATCH --job-name=Everything-small
@@ -68,13 +68,6 @@ export STRIDE=1 # e.g. 1.5 or a crazy list [1.5,1.3,1.8] for smaller experiments
 export FAST_DATALOADERS=0 # warning: they can cause OOMs for production jobs!
 #export K_MODES=4 # 4 for stride~=1.5, 6 for full STRIDE=1, use this for comparison of FNO to CNN, keep off by default!
 
-## load experiment settings
-#source experiment_configs/control.sh
-#source experiment_configs/recursive_steps.sh
-#source experiment_configs/mixture_of_experts.sh
-#source experiment_configs/mixture_of_experts_normalized.sh
-source experiment_configs/everything.sh # NO-OP b/c everything is already the default
-
 # CNN experts?
 export USE_CNN_EXPERTS=0
 export CNN_FILTER_SIZE=4 # 4 for stride~=1.5, 6 for full STRIDE=1
@@ -84,11 +77,22 @@ export CNN_FILTER_SIZE=4 # 4 for stride~=1.5, 6 for full STRIDE=1
 export USE_WNO3D_EXPERTS=0 # To use WNO3d experts: set USE_WNO3D_EXPERTS=1 and USE_CNN_EXPERTS=0
 export WNO3D_LEVEL=1 # wavelet decomposition level (default 2, higher = more detailed wavelet analysis)
 #export N_EXPERTS=1 N_LAYERS=4 OUT_NORM_GROUPS=0 
-#export STRIDE='[1.609,1.625,1.203]' FAST_DATALOADERS=1
+#export STRIDE='[1.609,1.625,1.203]' FAST_DATALOADERS=1 # 64x16x64
 #export MAX_EPOCHS=150
 #export BATCH_SIZE=2
+#export N_FILTERS=36
 
-export BATCH_SIZE=$((BATCH_SIZE*4)) STRIDE=1.47 FAST_DATALOADERS=1 # simulate 4 nodes, S=1.47 for 68 GB mem target & near 88% utilization
+## load experiment settings
+#source experiment_configs/control.sh
+#source experiment_configs/recursive_steps.sh
+#source experiment_configs/mixture_of_experts.sh
+#source experiment_configs/mixture_of_experts_normalized.sh
+#source experiment_configs/everything.sh # NO-OP b/c everything is already the default
+#source experiment_configs/everything_for_WNO_comparison.sh # 800 epochs
+#source experiment_configs/WNO.sh # runs for *800* epochs on 64x16x64
+
+# optional modifiers; first one is 'small' jobs that fit on one GPU (incompatible with WNO striding)
+[[ "$STRIDE" != '[1.609,1.625,1.203]' ]] && { export BATCH_SIZE=$((BATCH_SIZE*4)) STRIDE=1.47 FAST_DATALOADERS=1; } # simulate 4 nodes, S=1.47 for 68 GB mem target & near 88% utilization
 #export SEED=$RANDOM # random behavior (but consistent splitting)
 #export MAX_EPOCHS=10
 
