@@ -2,11 +2,11 @@
 #SBATCH --output=logs/%x_%j.out              # Output file (%x: job-name, %j: job-id)
 #SBATCH --error=logs/%x_%j.err               # Error file (%x: job-name, %j: job-id)
 #SBATCH --nodes=1                            # Trying allocating a whole node to play nice with pytorch-lightning
-#SBATCH --ntasks-per-node=1                  # Tasks per node (usually 1 for PyTorch)
+#SBATCH --ntasks-per-node=2                  # Tasks per node (usually 1 for PyTorch)
 #SBATCH --mem-per-gpu=115GB                  # CPU? RAM per GPU < 1/4 of the total node RAM = 120GB
-#SBATCH --gpus-per-node=1                    # GPUs per task is 1
+#SBATCH --gpus-per-node=2                    # GPUs per task is 1
 #SBATCH --cpus-per-task=72                   # CORES per task for data loaders (72 avail per GPU) (very few really used)
-#SBATCH --time=1-00:00:00                    # Maximum runtime (HH:MM:SS) (48 hours for WNO-600-epochs)
+#SBATCH --time=1-12:00:00                    # Maximum runtime (HH:MM:SS) (48 hours for WNO-600-epochs)
 #SBATCH --partition=ghx4                     # Partition name
 #SBATCH --account=beoi-dtai-gh
 #SBATCH --job-name=Everything-small
@@ -59,6 +59,7 @@ export VI=1 # use VI or not (in bash binary booleans have the best support for b
 export TRIG_ENCODINGS=1 # gives better (nearly periodic) partitions
 export USE_NORMALIZED_MOE=1 # importance normalization gives better expert utilization
 export OUT_NORM_GROUPS=1 # whether to use output normalization (you should!)
+export HIDDEN_NORM_GROUPS=1 # whether to use hidden normalization (you should!)
 export TIME_CHUNKING=10 # 10 is default now b/c we can fit it in GH200s
 export BATCH_SIZE=2 # GH200 can handle batch_size=2! (it has > x2 the memory of A100)
 export N_LAYERS=4 # number of expert layers
@@ -76,7 +77,7 @@ export CNN_FILTER_SIZE=4 # 4 for stride~=1.5, 6 for full STRIDE=1
 # WNO3d experts?
 export USE_WNO3D_EXPERTS=0 # To use WNO3d experts: set USE_WNO3D_EXPERTS=1 and USE_CNN_EXPERTS=0
 export WNO3D_LEVEL=1 # wavelet decomposition level (default 2, higher = more detailed wavelet analysis)
-#export N_EXPERTS=1 N_LAYERS=4 OUT_NORM_GROUPS=0 
+#export N_EXPERTS=1 N_LAYERS=4 OUT_NORM_GROUPS=0 HIDDEN_NORM_GROUPS=0
 #export STRIDE='[1.609,1.625,1.203]' FAST_DATALOADERS=1 # 64x16x64
 #export MAX_EPOCHS=150
 #export BATCH_SIZE=2

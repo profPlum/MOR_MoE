@@ -34,7 +34,9 @@ assert sum(expert_types) <= 1, f"Only one expert type can be selected. Currently
 use_fast_dataloaders = bool(int(os.environ.get('FAST_DATALOADERS', False))) # marginally faster dataloaders which use more VRAM
 use_trig = bool(int(os.environ.get('TRIG_ENCODINGS', True))) # Ravi's trig encodings
 out_norm_groups = int(os.environ.get('OUT_NORM_GROUPS', 1)) # 0 or 1 or maybe 2 (whether or not to use output layer norm) keep it at one generally
+hidden_norm_groups = int(os.environ.get('HIDDEN_NORM_GROUPS', 1))
 use_VI = bool(int(os.environ.get('VI', True))) # whether to enable VI
+
 prior_sigma=float(os.environ.get('PRIOR_SIGMA', 0.2)) # this prior sigma almost matches he sigma of initialization
 T_max: int=1 # T_0 for CosAnnealing+WarmRestarts
 one_cycle=bool(int(os.environ.get('ONE_CYCLE', True))) # scheduler
@@ -167,7 +169,8 @@ if __name__=='__main__':
     make_gating_net = EqualizedFieldGatingNet if use_normalized_MoE else FieldGatingNet
     model = SimModelClass(n_inputs=ndims, n_outputs=ndims, ndims=ndims, n_experts=n_experts, n_layers=n_layers, hidden_channels=n_filters, make_optim=make_optim,
                           lr=lr, T_max=T_max, one_cycle=one_cycle, three_phase=three_phase, RLoP=RLoP, RLoP_factor=RLoP_factor, RLoP_patience=RLoP_patience,
-                          n_steps=time_chunking-1, trig_encodings=use_trig, out_norm_groups=out_norm_groups, make_gating_net=make_gating_net, simulator=simulator, **optional_kwd_args)
+                          n_steps=time_chunking-1, trig_encodings=use_trig, hidden_norm_groups=hidden_norm_groups, out_norm_groups=out_norm_groups,
+                          make_gating_net=make_gating_net, simulator=simulator, **optional_kwd_args)
 
     print(f'num model parameters: {utils.count_parameters(model):.5e}')
     print('model:')
