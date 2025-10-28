@@ -2,11 +2,11 @@
 #SBATCH --output=logs/%x_%j.out              # Output file (%x: job-name, %j: job-id)
 #SBATCH --error=logs/%x_%j.err               # Error file (%x: job-name, %j: job-id)
 #SBATCH --nodes=1                            # Trying allocating a whole node to play nice with pytorch-lightning
-#SBATCH --ntasks-per-node=2                  # Tasks per node (usually 1 for PyTorch)
+#SBATCH --ntasks-per-node=1                  # Tasks per node (usually 1 for PyTorch)
 #SBATCH --mem-per-gpu=115GB                  # CPU? RAM per GPU < 1/4 of the total node RAM = 120GB
-#SBATCH --gpus-per-node=2                    # GPUs per task is 1
+#SBATCH --gpus-per-node=1                    # GPUs per task is 1
 #SBATCH --cpus-per-task=72                   # CORES per task for data loaders (72 avail per GPU) (very few really used)
-#SBATCH --time=1-12:00:00                    # Maximum runtime (HH:MM:SS) (48 hours for WNO-600-epochs)
+#SBATCH --time=1-00:00:00                    # Maximum runtime (HH:MM:SS) (48 hours for WNO-600-epochs)
 #SBATCH --partition=ghx4                     # Partition name
 #SBATCH --account=beoi-dtai-gh
 #SBATCH --job-name=Everything-small
@@ -88,9 +88,12 @@ export WNO3D_LEVEL=1 # wavelet decomposition level (default 2, higher = more det
 #source experiment_configs/recursive_steps.sh
 #source experiment_configs/mixture_of_experts.sh
 #source experiment_configs/mixture_of_experts_normalized.sh
-#source experiment_configs/everything.sh # NO-OP b/c everything is already the default
+source experiment_configs/everything.sh # NO-OP b/c everything is already the default
 #source experiment_configs/everything_for_WNO_comparison.sh # 800 epochs
 #source experiment_configs/WNO.sh # runs for *800* epochs on 64x16x64
+#source experiment_configs/WNO+LN.sh # runs for *800* epochs on 64x16x64
+#export OUT_NORM_GROUPS=1
+#export HIDDEN_NORM_GROUPS=1
 
 # optional modifiers; first one is 'small' jobs that fit on one GPU (incompatible with WNO striding)
 [[ "$STRIDE" != '[1.609,1.625,1.203]' ]] && { export BATCH_SIZE=$((BATCH_SIZE*4)) STRIDE=1.47 FAST_DATALOADERS=1; } # simulate 4 nodes, S=1.47 for 68 GB mem target & near 88% utilization
