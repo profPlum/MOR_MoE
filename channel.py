@@ -153,7 +153,6 @@ if __name__=='__main__':
     if ckpt_path: # secretly use the load from checkpoint api if needed
         SimModelClass_ = SimModelClass
         SimModelClass = lambda **kwd_args: SimModelClass_.load_from_checkpoint(ckpt_path, **kwd_args)
-        SimModelClass.Sim = SimModelClass_.Sim
 
     if use_CNN_experts:
         # output_norm_groups=1 by default but specified by the user
@@ -165,12 +164,12 @@ if __name__=='__main__':
     else: optional_kwd_args['k_modes']=k_modes # assuming MOR_Operator expert
 
     # NOTE: we need to update field size based on the stride
-    simulator = SimModelClass.Sim(*field_size) # Sim(ulator) class (e.g. Sim or Sim_UQ), first 3 args are X,Y,Z dimensions
+    simulator_kwd_args = {'nx': field_size[0], 'ny': field_size[1], 'nz': field_size[2]}
     make_gating_net = EqualizedFieldGatingNet if use_normalized_MoE else FieldGatingNet
     model = SimModelClass(n_inputs=ndims, n_outputs=ndims, ndims=ndims, n_experts=n_experts, n_layers=n_layers, hidden_channels=n_filters, make_optim=make_optim,
                           lr=lr, T_max=T_max, one_cycle=one_cycle, three_phase=three_phase, RLoP=RLoP, RLoP_factor=RLoP_factor, RLoP_patience=RLoP_patience,
                           n_steps=time_chunking-1, trig_encodings=use_trig, hidden_norm_groups=hidden_norm_groups, out_norm_groups=out_norm_groups,
-                          make_gating_net=make_gating_net, simulator=simulator, **optional_kwd_args)
+                          make_gating_net=make_gating_net, simulator_kwd_args=simulator_kwd_args, **optional_kwd_args)
 
     print(f'num model parameters: {utils.count_parameters(model):.5e}')
     print('model:')

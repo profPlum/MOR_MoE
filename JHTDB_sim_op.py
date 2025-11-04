@@ -178,12 +178,11 @@ class _UQ_Sim(_Sim):
 class POU_NetSimulator(POU_net):
     ''' Combines the POU_net with the raw Sim[ulator] class (internally). '''
     Sim=_Sim # Sim class for this class (e.g. Sim or Sim_UQ)
-    def __init__(self, *args, n_steps: int, simulator: Sim=Sim(), **kwd_args):
+    def __init__(self, *args, n_steps: int, simulator_kwd_args: {}, **kwd_args):
         super().__init__(*args, **kwd_args)
+        self.simulator = self.Sim(**simulator_kwd_args)
         assert issubclass(self.Sim, _Sim) # should be a descendant of Sim (sanity check)
-        if type(simulator) is not self.Sim: raise TypeError(f"You must provide a Sim(ulator) of the correct class={self.SimClass}")
-        simulator.set_operator(super()) # this will internally call super().forward(X)
-        self.simulator = simulator
+        self.simulator.set_operator(super()) # this will internally call super().forward(X)
         self.n_steps = n_steps # n timesteps for PDE evolution
 
     def forward(self, X, n_steps: int=None, intermediate_outputs=True, **kwd_args):
@@ -223,8 +222,6 @@ class POU_NetSimulator(POU_net):
 # Verified that forward parametrize-caching is redundant here 10/8/24
 class PPOU_NetSimulator(POU_NetSimulator, PPOU_net):
     Sim=_UQ_Sim # Sim class for this class (e.g. Sim or Sim_UQ)
-    def __init__(self, *args, simulator: Sim=Sim(), **kwd_args):
-        super().__init__(*args, simulator=simulator, **kwd_args)
 
 # Verified to work: 8/23/24
 class JHTDB_Channel(torch.utils.data.Dataset):
