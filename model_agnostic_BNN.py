@@ -178,15 +178,22 @@ try: from tqdm import tqdm
 except ImportError: tqdm = lambda x: x
 
 # Adapted to stack aleatoric moments
-def get_BNN_pred_distribution(bnn_model, x_input, n_samples=100, **kwd_args):
+def get_BNN_pred_distribution(bnn_model, x_input, n_samples=100, verbose=False, **kwd_args):
     '''
     If you just want moments use get_BNN_pred_moments() instead as it is *much* more memory efficient (e.g. for large sample sizes).
     But this is still useful if you want an actual distribution.
     '''
     with torch.inference_mode():
-        pred_distribution = [bnn_model(x_input, **kwd_args) for _ in tqdm(range(n_samples))] # list of (mu,sigma) tuples
-        preds_mu = torch.stack((pred[0] for pred in pred_distribution), dim=0) # generators cost nothing
-        preds_sigma = torch.stack((pred[1] for pred in pred_distribution), dim=0) # generators cost nothing
+        preds_mu = []
+        preds_sigma = []
+        range_ = range(n_samples)
+        if verbose: range_ = tqdm(range_)
+        for _ in range_:
+            mu_i, sigma_i = bnn_model(x_input, **kwd_args)
+            preds_mu.append(mu_i)
+            preds_sigma.append(sigma_i)
+        preds_mu = torch.stack(preds_mu, dim=0)
+        preds_sigma = torch.stack(preds_sigma, dim=0)
         return preds_mu, preds_sigma
 
 # Verified to work in every possible way! 11/20/23
@@ -202,6 +209,16 @@ class CummVar:
         self.SX = 0
         self.N = 0
 
+    def update(self, X):
+        try:
+            self.SSX += (X**2).sum(axis=0)
+            self.SX += X.sum(axis=0)
+            self.N += X.shape[0]
+            # get dynamically computed running variance
+        except (AttributeError, TypeError) as e:
+            return self.update(np.atleast_1d(X))
+            # If X *is just a python scalar* then convert to numpy 1d array (of length 1)
+
     @property
     def var(self):
         var=(self.N*self.SSX-self.SX**2)/((self.N-self.correction)*self.N)
@@ -209,25 +226,20 @@ class CummVar:
         return var
 
     def __call__(self, X: np.ndarray):
-        try:
-            self.SSX += (X**2).sum(axis=0)
-            self.SX += X.sum(axis=0)
-            self.N += X.shape[0]
-            return self.var
-            # get dynamically computed running variance
-        except (AttributeError, TypeError) as e:
-            return self(np.atleast_1d(X))
-            # If X *is just a python scalar* then convert to numpy 1d array (of length 1)
+        self.update(X)
+        return self.var
 
 # updated uses laws of total variance and expectation
-def get_BNN_pred_moments(bnn_model, x_inputs, n_samples=100, **kwd_args):
+def get_BNN_pred_moments(bnn_model, x_inputs, n_samples=100, verbose=False, **kwd_args):
     total_expectation = 0 # E[Y] = E[E[Y|Z]]
     total_variance = 0 # Var[Y] = E[Var[Y|Z]]+Var[E[Y|Z]]
     epistemic_variance = CummVar() # necessary for 2nd term in total variance eq.
     assert n_samples>1
 
     with torch.inference_mode():
-        for i in tqdm(range(n_samples)):
+        range_ = range(n_samples)
+        if verbose: range_ = tqdm(range_)
+        for i in range_:
             mu, sigma = bnn_model(x_inputs.float(), **kwd_args)
             epistemic_variance.update(mu.unsqueeze(0)) # update it, add 1st dim b/c it is reduced
 
@@ -243,6 +255,97 @@ def get_BNN_pred_moments(bnn_model, x_inputs, n_samples=100, **kwd_args):
         # NOTE: we apply Bessel's correction to 2nd term only b/c sample mean is used to estimate sample variance
 
         return total_expectation, total_variance**0.5
+
+def get_BNN_pred_mixture(model, inputs, n_samples, joint=False, **kwd_args):
+    ''' Like get_BNN_pred_distribution() except it converts that raw output to a torch.distributions mixture which makes later math easy.
+        P.S. joint=True makes pred_mixture.log_prob() return the joint pdf (i.e. sums the log pdfs appropriately),
+        but you can also manually convert to a joint distribution later using pred_mix_joint = torch.distributions.Independent(pred_mixture, N) '''
+    pred_distribution_raw = get_BNN_pred_distribution(model, inputs, n_samples=n_samples, **kwd_args) # [sample, batch, channel, x, y, z, time]
+    pred_distribution = [dist.moveaxis(0,-1) for dist in pred_distribution_raw] # [batch, channel, x, y, z, time, sample] (to match categorical convention)
+    categorical = torch.distributions.Categorical(torch.tensor(1,device=model.device).expand(pred_distribution[0].shape[-1])) # uniform weights
+    categorical = categorical.expand(pred_distribution[0].shape[:-1]) # expand the *distribution itself* to match shape without memory bloat
+    pred_normals = torch.distributions.normal.Normal(*pred_distribution)
+    pred_mixture = torch.distributions.MixtureSameFamily(categorical, pred_normals)
+    if joint: pred_mixture = torch.distributions.Independent(pred_mixture, len(pred_mixture.batch_shape)-1) # -1 for batch dimension
+    return pred_mixture
+
+import gc
+
+# NOTE: this might also work for classification if you replace get_BNN_pred_mixture() with a classifier version
+# Verified to work: 10/24/25
+class CoverageCalculator:
+    ''' This class subsumed all the functionality of find_HDI_truth_quantiles and greatly expanded on it. '''
+    def __init__(self, model: torch.nn.Module, dataloader: torch.utils.data.DataLoader, n_samples_per_batch:int=25, n_epochs=1, joint=False, **kwd_args):
+        ''' Warning joint should usually be false (even though "less correct") because the sampling problem in high dimensions is just too sparse.
+            Also the **kwd_args is for the forward calls on the model. '''
+        self.n_samples_per_batch = n_samples_per_batch # for record keeping
+
+        import warnings
+        if n_epochs>1 and not joint:
+            warnings.warn('Don\'t use epochs>1 unless joint=True, are very likely unnecessary otherwise.')
+
+        # immediately compute truth quantiles for later reuse
+        print('pre-computing truth quantiles:', flush=True)
+        self.truth_quantiles = []
+        with torch.inference_mode():
+            for i in range(n_epochs): # v progress bar for the only computationally demanding part
+                for X, y in tqdm(dataloader): # X.shape=y.shape[:-1], y.shape=[batch, channel, x, y, z, time]
+                    X, y = X.to(model.device), y.to(model.device) # cast to GPU
+
+                    # get sample aleatoric distributions from sampling epistemic distribution
+                    pred_distribution = get_BNN_pred_mixture(model, X, n_samples=n_samples_per_batch, joint=joint, **kwd_args)
+                    pred_samples = pred_distribution.sample([n_samples_per_batch]) # [samples, batch, channels, x, y, z, time]
+                    assert pred_samples.shape==(n_samples_per_batch, *y.shape)
+                    pred_log_pdfs = pred_distribution.log_prob(pred_samples) # [samples, batch] if joint else [samples, batch, channels, x, y, z, time]
+                    truth_log_pdfs = pred_distribution.log_prob(y) # [batch] if joint else [batch, channels, x, y, z, time]
+
+                    pdf_comparison = pred_log_pdfs<truth_log_pdfs
+                    self.truth_quantiles.append((torch.sum(pdf_comparison, dim=0)/pdf_comparison.shape[0]).cpu()) # reduce across sample dimension
+                    clear_cache()
+            self.truth_quantiles = np.sort(torch.cat(self.truth_quantiles).ravel().numpy()) # presort for fast coverage calculation
+        print(f'number of truth quantiles: {len(self.truth_quantiles)}')
+
+    # verified to work: 10/24/25
+    def get_coverage(self, alpha: float):
+        ''' apparently np.searchsorted can trivialize the computation of coverage making direct evaluation very viable! '''
+        alpha_insertion_index = np.searchsorted(self.truth_quantiles, 1-alpha, side='right')
+        coverage_counts = len(self.truth_quantiles) - alpha_insertion_index # = (self.truth_quantiles>1-alpha).sum() # count: coverage or not?
+        return coverage_counts/len(self.truth_quantiles)
+
+    # verified to work: 10/24/25
+    def get_ECE(self):
+        # This unfamiliar definition is equivalent to the better known one but more efficient...
+        # GOTCHA/NOTE: coverage = np.linspace(0,1), alphas = 1-np.flip(self.truth_quantiles)
+        # Also 1/N∑_i|(i/N)-(1-T_{N-i})| = 1/N∑_i|i/N+T_{N-i}-1| = 1/N∑_i|i/N-T_i| b/c the sum of the flip giving 1 happens when they are equal b4
+        reference = np.linspace(0,1,num=len(self.truth_quantiles))
+        ECE = np.abs(self.truth_quantiles-reference).mean()
+        print(f'exact ECE (rounded): {ECE:.6}')
+        return ECE
+
+    def plot_truth_quantile_hist(self):
+        import matplotlib.pyplot as plt
+        display_quantiles = list(np.quantile(self.truth_quantiles, q=np.linspace(0.0,1.0, num=5)))
+        print('1/5th-quantiles of truth quantile distribution: ', display_quantiles)
+        plt.hist(self.truth_quantiles)
+        plt.title('Truth Quantiles (Should follow q~U(0,1))')
+        plt.show()
+
+    # verified to work: 10/24/25
+    def calibration_curve(self):
+        import matplotlib.pyplot as plt
+        alphas = np.linspace(0,1,num=1000)
+        coverages = self.get_coverage(alphas)
+        calibration_curve = plt.plot(alphas, coverages, color='blue')
+        reference = plt.plot(alphas, alphas, color='red')
+        plt.legend({'calibration curve': calibration_curve, 'reference line': reference})
+        plt.xlabel(r'confidence level=$\alpha$')
+        plt.ylabel(r'coverage($\alpha$)')
+        plt.title('Calibration Curve')
+        plt.show()
+
+        ECE = np.abs(alphas-coverages).mean()
+        print(f'approximate ECE: {ECE:.6}')
+        return ECE
 
 # Corrected version: uses mixture PDF before data reduction.
 def log_posterior_predictive_check(model, val_data_loader, n_samples=25, use_mean=True, **kwd_args):
