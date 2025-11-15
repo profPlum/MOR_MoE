@@ -101,10 +101,10 @@ class _BayesianParameterization(nn.Module):
         if is_complex:
             mu_params = torch.view_as_real(mu_params)
 
-        # Here we make the seed for *bayesian sampling* unique across processes for better batch parallelism!
-        # NOTE: It's ugly b/c: don't want it to make the global seed unique per-process
-        # GOTCHA: It will never be reproducible b/c process pids aren't deterministic/controllable!
-        pid_seed = (random.randint(0, 2**63-1) + os.getpid() + hash(os.uname().nodename)) % (2**64)
+        ## Here we make the seed for *bayesian sampling* unique across processes for better batch parallelism!
+        ## NOTE: It's ugly b/c: don't want it to make the global seed unique per-process
+        #pid_seed = (random.randint(0, 2**63-1) + os.getpid() + hash(os.uname().nodename)) % (2**64)
+        pid_seed = (1+torch.distributed.get_rank()+torch.randint(2**63-1,size=(1,)).item()) if torch.distributed.is_initialized() else None
         def torch_randn_like(input, seed=None): # supports seeding ...unlike torch.randn_like()
             gen = None if seed is None else torch.Generator(device=input.device).manual_seed(seed)
             return torch.randn(input.size(), generator=gen, dtype=input.dtype,
