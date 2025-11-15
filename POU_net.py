@@ -196,6 +196,9 @@ class ZeroExpert(L.LightningModule):
 
 class POU_net(L.LightningModule):
     ''' POU_net minus the useless L2 regularization '''
+    max_abs_pred=2 #  when this is two the fraction on the inside disappears making it simpler to explain (also training data in [-0.1,1.2])
+    bound_outputs = lambda x: torch.tanh(x*(2/max_abs_pred))*max_abs_pred
+
     def __init__(self, n_inputs, n_outputs, n_experts=4, ndims=2, lr=0.001, momentum=0.9, T_max=10,
                  one_cycle=False, three_phase=False, RLoP=False, RLoP_factor=0.9, RLoP_patience:int=25,
                  make_optim: type=torch.optim.Adam, make_expert: type=MOR_Operator.MOR_Operator,
@@ -248,7 +251,7 @@ class POU_net(L.LightningModule):
         prediction = 0
         for i, k_i in enumerate(topk):
             prediction = prediction + gating_weights[:,i:i+1]*self.experts[k_i](X)
-        return prediction
+        return self.bound_outputs(prediction)
 
     def training_step(self, batch, batch_idx=None, val=False):
         X, y = batch
@@ -295,19 +298,18 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
 
         # this context works recursively
         with self.gating_net.cached_gating_weights():
+            bound_outputs = self.bound_outputs
+            self.bound_outputs=lambda x: x # temporarily remove output bounds so we can the raw logits
             mu_pred, rho_pred = super().forward(X).tensor_split(2, dim=1)
+            self.bound_outputs = bound_outputs
 
             # handle zero expert (confirmed this doesn't require that zero expert exists, it will gracefully handle it)
             gating_weights, topk = self.gating_net(X) # this is cached and requires no compute
             zero_expert_gating_weights = 1-gating_weights.sum(axis=1, keepdim=True).clip(max=1.0) # recover zero expert weights
             rho_pred = rho_pred + zero_expert_gating_weights*self._zero_expert_rho # add zero expert contrib
 
-        if self.training:
-            assert mu_pred.isfinite().all()
-            assert rho_pred.isfinite().all()
-
-        mu_max = 2 # when this is two the fraction on the inside disappears making it simpler to explain (also training data in [-0.1,1.2])
-        return torch.tanh(mu_pred*(2/mu_max))*mu_max, F.softplus(rho_pred)+1e-4
+        # self.bound_outputs bounds the mu preds within [-2,2]
+        return self.bound_outputs(mu_pred), F.softplus(rho_pred)+1e-4
 
     def training_step(self, batch, batch_idx=None, val=False):
         X, y = batch
