@@ -1,0 +1,113 @@
+import torch
+import h5py
+import numpy as np
+from glob import glob
+import pytorch_lightning as L
+
+# Verified to work: 8/23/24
+class JHTDB_Channel(torch.utils.data.Dataset):
+    '''
+    Dataset for the JHTDB autoregressive problem... It is not possible to make
+    this predict everything at once because that would make the dataset size=1.
+    '''
+    def __init__(self, path:str, time_chunking=5, stride:int|list|tuple=1, time_stride:int=1):
+        self.time_chunking=time_chunking
+        self.time_stride=time_stride
+        self.path=path
+        if type(stride) in [int,float]: stride=[stride]*3
+        else: assert len(stride)==3 # we will not pool time because it breaks PDE timestep & stability and pytorch cannot do it easily
+        scale_factor = tuple(1/np.asarray(stride).astype(float))
+        self.pool = lambda x: torch.nn.functional.interpolate(x, scale_factor=scale_factor, mode='area')
+        # comparable to torch.nn.AvgPool3d(stride) but supports fractional stride
+
+    def __len__(self):
+        # GOTCHA: time stride means we technically don't need the last few timesteps so the dataset could technically be smaller and still be "enough"
+        # -1 because if stride=1 we want it to reduce to the original form
+        return (len(glob(f'{self.path}/*.h5'))+self.time_stride-1)//(self.time_chunking*self.time_stride)
+
+    def __getitem__(self, index):
+        files = []
+        velocity_fields = []
+        for i in range(index*self.time_chunking*self.time_stride, (index+1)*self.time_chunking*self.time_stride, self.time_stride):
+            i+=1 # 1-based indexing
+            try: files.append(h5py.File(f'{self.path}/channel_t={i}.h5', 'r')) # keep open for stacking
+            except OSError as e:
+                if 'unable to open' in str(e).lower():
+                    raise OSError(f'Unable to open file: "{self.path}/channel_t={i}.h5"')
+                else: raise
+            velocity_fields.append(files[-1][f'Velocity_{i:04}']) # :04 zero pads to 4 digits
+        velocity_fields = torch.as_tensor(np.stack(velocity_fields).T) # reverse dimensions order [T,Z,Y,X,C] --> [C,X,Y,Z,T]
+        velocity_fields = self.pool(velocity_fields.moveaxis(-1,0)).moveaxis(0,-1) # time dimension is (temporarily) treated as batch dimension
+        velocity_fields = velocity_fields.float() # make sure to use single precision! (after pooling) because double is too expensive!!
+
+        # IC_0.shape=[C,X,Y,Z] e.g. torch.Size([3, 103, 26, 77])
+        # Sol_0.shape=[C,X,Y,Z,T] e.g. torch.Size([3, 103, 26, 77, 9])
+        return velocity_fields[...,0], velocity_fields[...,1:] # X=IC, Y=sol
+
+# preserves random state (verified to work: 9/24/25)
+def preload_dataset(dataset):
+    if isinstance(dataset, torch.utils.data.TensorDataset):
+        return dataset
+
+    Xs, ys = [], []
+    for i in range(len(dataset)):
+        X, y = dataset[i]
+        Xs.append(X)
+        ys.append(y)
+    Xs, ys = torch.stack(Xs), torch.stack(ys)
+    print(f'dataset min={min(Xs.min(),ys.min())}, max={max(Xs.max(),ys.max())}')
+    return torch.utils.data.TensorDataset(Xs, ys)
+
+class JHTDBDataModule(L.LightningDataModule):
+    def __init__(self, dataset_path: str, batch_size: int, time_chunking: int, stride: int|list|tuple=1, time_stride: int=1,
+                 seed: int=0, long_horizon: int=100, long_data_usage: float=0.5, fast_dataloaders: bool=False):
+        super().__init__()
+        self.save_hyperparameters()
+        self.seed = seed
+        self.dataset_path = dataset_path
+        self.batch_size = batch_size
+        self.time_chunking = time_chunking
+        self.stride = stride
+        self.time_stride = time_stride
+        self.long_horizon = long_horizon
+        self.long_data_usage = long_data_usage
+        assert 0 <= long_data_usage <= 1, 'long_data_usage must be between 0 and 1'
+
+        # Optional faster dataloaders (uses more memory)
+        self.fast_dataloader_kwd_args = {'num_workers': 1, 'persistent_workers': True} if fast_dataloaders else {}
+        self.setup('peek') # trivial setup to expose basic dataset info
+
+    def setup(self, stage: str='fit'):
+        ''' if stage=='peek': do not preload the dataset,
+        also setup('peek') is automatically called in the constructor
+        since it doesn't cost anything '''
+        gen = torch.Generator().manual_seed(self.seed)
+
+        # Build datasets mirroring the main() logic
+        self.dataset = JHTDB_Channel(self.dataset_path, time_chunking=self.time_chunking, stride=self.stride, time_stride=self.time_stride)
+        if stage!='peek': self.dataset = preload_dataset(self.dataset)
+        dataset_long_horizon = JHTDB_Channel(self.dataset_path, time_chunking=self.long_horizon, stride=self.stride, time_stride=self.time_stride)
+        _, self.val_long_horizon_dataset = torch.utils.data.random_split(dataset_long_horizon, [1-self.long_data_usage, self.long_data_usage], generator=gen)
+        if stage!='peek': self.val_long_horizon_dataset = preload_dataset(self.val_long_horizon_dataset)
+        self.train_dataset, self.val_dataset = torch.utils.data.random_split(self.dataset, [0.8, 0.2], generator=gen)
+
+    def train_dataloader(self):
+        return torch.utils.data.DataLoader(self.train_dataset, batch_size=self.batch_size, pin_memory=True, shuffle=True, drop_last=True, **self.fast_dataloader_kwd_args)
+
+    def val_dataloader(self):
+        # Derived quantities for long-horizon validation
+        long_horizon_multiplier = self.long_horizon / self.time_chunking
+        long_horizon_batch_size = max(1, int(self.batch_size / long_horizon_multiplier))
+
+        val_loader = torch.utils.data.DataLoader(self.val_dataset, batch_size=int(long_horizon_batch_size*long_horizon_multiplier), pin_memory=True, **self.fast_dataloader_kwd_args)
+        val_long_loader = torch.utils.data.DataLoader(self.val_long_horizon_dataset, batch_size=long_horizon_batch_size, pin_memory=True, **self.fast_dataloader_kwd_args)
+        return [val_loader, val_long_loader]
+
+    @property
+    def field_size(self):
+        IC_0, Sol_0 = self.train_dataset[0]
+        print(f'{IC_0.shape=}\n{Sol_0.shape=}')
+
+        field_size = list(IC_0.shape[1:])
+        print(f'{field_size=}')
+        return field_size

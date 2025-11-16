@@ -82,7 +82,7 @@ class _Sim(L.LightningModule):
         for name, value in vars(self).copy().items():
             if isinstance(value, torch.Tensor):
                 del vars(self)[name]
-                self.register_buffer(name, value.detach())
+                self.register_buffer(name, value.detach(), persistent=False)
 
     def change_resolution(self,nx,ny,nz):
         ''' construct a new simulator at a different resolution (with other arguments fixed) or self if resolution is unchanged '''
@@ -222,42 +222,6 @@ class POU_NetSimulator(POU_net):
 # Verified that forward parametrize-caching is redundant here 10/8/24
 class PPOU_NetSimulator(POU_NetSimulator, PPOU_net):
     Sim=_UQ_Sim # Sim class for this class (e.g. Sim or Sim_UQ)
-
-# Verified to work: 8/23/24
-class JHTDB_Channel(torch.utils.data.Dataset):
-    '''
-    Dataset for the JHTDB autoregressive problem... It is not possible to make
-    this predict everything at once because that would make the dataset size=1.
-    '''
-    def __init__(self, path:str, time_chunking=5, stride:int|list|tuple=1):
-        self.time_chunking=time_chunking
-        self.path=path
-        if type(stride) in [int,float]: stride=[stride]*3
-        else: assert len(stride)==3 # we will not pool time because it breaks PDE timestep & stability and pytorch cannot do it easily
-        scale_factor = tuple(1/np.asarray(stride).astype(float))
-        self.pool = lambda x: torch.nn.functional.interpolate(x, scale_factor=scale_factor, mode='area')
-        # comparable to torch.nn.AvgPool3d(stride) but supports fractional stride
-
-    def __len__(self):
-        return len(glob(f'{self.path}/*.h5'))//(self.time_chunking)
-    def __getitem__(self, index):
-        files = []
-        velocity_fields = []
-        for i in range(index*self.time_chunking, (index+1)*self.time_chunking):
-            i+=1
-            try: files.append(h5py.File(f'{self.path}/channel_t={i}.h5', 'r')) # keep open for stacking
-            except OSError as e:
-                if 'unable to open' in str(e).lower():
-                    raise OSError(f'Unable to open file: "{self.path}/channel_t={i}.h5"')
-                else: raise
-            velocity_fields.append(files[-1][f'Velocity_{i:04}']) # :04 zero pads to 4 digits
-        velocity_fields = torch.as_tensor(np.stack(velocity_fields).T) # reverse dimensions order [T,Z,Y,X,C] --> [C,X,Y,Z,T]
-        velocity_fields = self.pool(velocity_fields.moveaxis(-1,0)).moveaxis(0,-1) # time dimension is (temporarily) treated as batch dimension
-        velocity_fields = velocity_fields.float() # make sure to use single precision! (after pooling) because double is too expensive!!
-
-        # IC_0.shape=[C,X,Y,Z] e.g. torch.Size([3, 103, 26, 77])
-        # Sol_0.shape=[C,X,Y,Z,T] e.g. torch.Size([3, 103, 26, 77, 9])
-        return velocity_fields[...,0], velocity_fields[...,1:] # X=IC, Y=sol
 
 if __name__=='__main__':
     # sets up simulation...

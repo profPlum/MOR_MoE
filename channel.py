@@ -12,6 +12,7 @@ n_experts: int=int(os.environ.get('N_EXPERTS', 3)) # number of experts in MoE
 n_layers: int=int(os.environ.get('N_LAYERS', 4)) # number of layers in the POU net
 n_filters: int=int(os.environ.get('N_FILTERS', 32)) # hidden layer width (aka # of filters)
 time_chunking: int=int(os.environ.get('TIME_CHUNKING', 9)) # how many self-aware recursive steps to take
+time_stride: int=int(os.environ.get('TIME_STRIDE', 1)) # temporal stride between selected frames
 batch_size: int=int(os.environ.get('BATCH_SIZE', 2)) # batch size, with VI experts we can only fit 1 batch w/ 20 A100
 scale_lr=True # multiply by DDP (total) batch_size
 lr: float=float(os.environ.get('LR', 1.563e-5)) # (VI) learning rate (will be scaled by recurisve steps)
@@ -69,14 +70,15 @@ torch.backends.cudnn.allow_tf32 = True
 from MOR_Operator import MOR_Operator
 from lightning_utils import *
 from POU_net import POU_net, PPOU_net, FieldGatingNet, EqualizedFieldGatingNet
-from JHTDB_sim_op import PPOU_NetSimulator, POU_NetSimulator, JHTDB_Channel
+from JHTDB_sim_op import PPOU_NetSimulator, POU_NetSimulator
+from JHTDB_data_loading import JHTDBDataModule
 import model_agnostic_BNN
 import utils
 
 # Import WNO3d if using WNO3d experts
 if use_WNO3d_experts:
     import sys
-    sys.path.append('/u/ddeighan/MOR_MoE/WNO/Version_2.0.0')
+    sys.path.append(f'{os.getcwd()}/WNO/Version_2.0.0')
     from wno3d_NS import WNO3d
 
 class MemMonitorCallback(L.Callback):
@@ -91,43 +93,18 @@ class MemMonitorCallback(L.Callback):
 # for ablation study
 L.seed_everything(int(os.environ.get('SEED', 0)))
 
-## we can literally fit the entire dataset into memory... its only 16GB total
-#preload_dataset = lambda dataset: torch.utils.data.TensorDataset(*next(iter(torch.utils.data.DataLoader(dataset, batch_size=len(dataset)))))
-
-# preserves random state (verified to work: 9/24/25)
-def preload_dataset(dataset):
-    Xs, ys = [], []
-    for i in range(len(dataset)):
-        X, y = dataset[i]
-        Xs.append(X)
-        ys.append(y)
-    Xs, ys = torch.stack(Xs), torch.stack(ys)
-    print(f'dataset min={min(Xs.min(),ys.min())}, max={max(Xs.max(),ys.max())}')
-    return torch.utils.data.TensorDataset(Xs, ys)
-
 if __name__=='__main__':
-    # setup dataset
-    long_horizon = 100 # fix long horizon at 100 steps now (for consistent comparison metric across configs), this can e.g. detect NaNs
-    long_horizon_multiplier = long_horizon/time_chunking # longer evaluation time window is X times the shorter training time window (can e.g. detect NaNs)
-    long_horizon_batch_size = max(1,int(batch_size/long_horizon_multiplier)) # scale down batch size proprotionally to timechunking scale up
+    # setup data module
+    dm = JHTDBDataModule(dataset_path='data/turbulence_output',
+                         batch_size=batch_size,
+                         time_chunking=time_chunking,
+                         stride=stride,
+                         time_stride=time_stride,
+                         seed=int(os.environ.get('SEED', 0)),
+                         fast_dataloaders=use_fast_dataloaders)
 
-    dataset = preload_dataset(JHTDB_Channel('data/turbulence_output', time_chunking=time_chunking, stride=stride)) # called dataloader_idx_0 in tensorboard
-    dataset_long_horizon = JHTDB_Channel('data/turbulence_output', time_chunking=long_horizon, stride=stride) # called dataloader_idx_1 in tensorboard
-    _, val_long_horizon = torch.utils.data.random_split(dataset_long_horizon, [0.5, 0.5]) # 50% ensures there are two validation steps
-    val_long_horizon = preload_dataset(val_long_horizon) # pre-load only the subset we use
-    train_dataset, val_dataset = torch.utils.data.random_split(dataset, [0.8, 0.2])
-
-    fast_dataloader_kwd_args = {'num_workers': 1, 'persistent_workers': True} if use_fast_dataloaders else {} # this is faster (if memory allows)
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, pin_memory=True, shuffle=True, drop_last=True, **fast_dataloader_kwd_args)
-    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=int(long_horizon_batch_size*long_horizon_multiplier), pin_memory=True, **fast_dataloader_kwd_args)
-    val_long_loader = torch.utils.data.DataLoader(val_long_horizon, batch_size=long_horizon_batch_size, pin_memory=True, **fast_dataloader_kwd_args)
-    print(f'{len(dataset)=}\n{len(train_loader)=}\n{len(val_dataset)=}')
-
-    IC_0, Sol_0 = dataset[0]
-    print(f'{IC_0.shape=}\n{Sol_0.shape=}')
-
-    field_size = list(IC_0.shape[1:])
-    print(f'{field_size=}')
+    # derive field size from data module
+    field_size = dm.field_size
     if k_modes is None: # default=max (potentially adjusted for stride)
         k_modes=field_size # e.g. [103,26,77]
         assert len(k_modes)==3
@@ -140,7 +117,7 @@ if __name__=='__main__':
     SimModelClass, optional_kwd_args = POU_NetSimulator, {}
     if use_VI: # VI is optional
         SimModelClass = PPOU_NetSimulator
-        optional_kwd_args = {'prior_cfg': {'prior_sigma': prior_sigma}, 'train_dataset_size': model_agnostic_BNN.get_dataset_size(train_dataset)}
+        optional_kwd_args = {'prior_cfg': {'prior_sigma': prior_sigma}, 'train_dataset_size': model_agnostic_BNN.get_dataset_size(dm.train_dataset)}
 
     # scale lr & grad clip by: the number of *output* timesteps in one full batch (this follows scaling equations)
     scale_of_batch_data = num_nodes*num_gpus_per_node*batch_size*(time_chunking-1) # (includes time)
@@ -164,7 +141,7 @@ if __name__=='__main__':
     else: optional_kwd_args['k_modes']=k_modes # assuming MOR_Operator expert
 
     # NOTE: we need to update field size based on the stride
-    simulator_kwd_args = {'nx': field_size[0], 'ny': field_size[1], 'nz': field_size[2]}
+    simulator_kwd_args = {'nx': field_size[0], 'ny': field_size[1], 'nz': field_size[2], 'dt': 0.0065*time_stride}
     make_gating_net = EqualizedFieldGatingNet if use_normalized_MoE else FieldGatingNet
     model = SimModelClass(n_inputs=ndims, n_outputs=ndims, ndims=ndims, n_experts=n_experts, n_layers=n_layers, hidden_channels=n_filters, make_optim=make_optim,
                           lr=lr, T_max=T_max, one_cycle=one_cycle, three_phase=three_phase, RLoP=RLoP, RLoP_factor=RLoP_factor, RLoP_patience=RLoP_patience,
@@ -189,7 +166,7 @@ if __name__=='__main__':
 
     # Weight-only sharded checkpoints are needed to avoid OOM problem caused by large model size
     model_checkpoint_callback=L.callbacks.ModelCheckpoint(f"lightning_logs/{job_name}/{version}", save_weights_only=True, save_last=False,
-                                                          monitor='val_loss/dataloader_idx_1', auto_insert_metric_name=True) # monitor long-horizon loss
+                                                          monitor='val_loss/dataloader_idx_0', auto_insert_metric_name=True) # monitor long-horizon loss
     #model_checkpoint_callback=L.callbacks.ModelCheckpoint(f"lightning_logs/{job_name}/{version}", every_n_epochs=100) # simpler resumable checkpointing
 
     # train model
@@ -199,8 +176,8 @@ if __name__=='__main__':
                         profiler='simple', logger=logger, plugins=[SLURMEnvironment()], log_every_n_steps=20,
                         callbacks=[model_checkpoint_callback, MemMonitorCallback()])
 
-    val_dataloaders = [val_loader, val_long_loader] # long validation loader causes various problems with profiler & GPU utilization...
-    trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_dataloaders)#, ckpt_path=ckpt_path)
+    # long validation loader causes various problems with profiler & GPU utilization...
+    trainer.fit(model, datamodule=dm)#, ckpt_path=ckpt_path)
 
     # save last checkpoint (doing so manually avoids constant resaving after every epoch)
     trainer.save_checkpoint(f"lightning_logs/{job_name}/{version}/last.ckpt", weights_only=True)
