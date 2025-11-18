@@ -95,6 +95,10 @@ class JHTDBDataModule(L.LightningDataModule):
         self.val_dataset = torch.utils.data.Subset(self.dataset, torch.arange(int(len(self.dataset)*0.8), len(self.dataset)))
         #self.train_dataset, self.val_dataset = torch.utils.data.random_split(self.dataset, [0.8, 0.2], generator=gen)
 
+        if stage=='peek':
+            print(f'{len(self.dataset)=}\n{len(self.train_dataset)=}\n{len(self.val_dataset)=}')
+            print(f'{len(self.val_long_horizon_dataset)=}')
+
     def train_dataloader(self):
         return torch.utils.data.DataLoader(self.train_dataset, batch_size=self.batch_size, pin_memory=True, shuffle=True, drop_last=True, **self.fast_dataloader_kwd_args)
 

@@ -197,7 +197,7 @@ class ZeroExpert(L.LightningModule):
 class POU_net(L.LightningModule):
     ''' POU_net minus the useless L2 regularization '''
     max_abs_pred=2 #  when this is two the fraction on the inside disappears making it simpler to explain (also training data in [-0.1,1.2])
-    bound_outputs = lambda x: torch.tanh(x*(2/max_abs_pred))*max_abs_pred
+    bound_outputs = lambda self, x: torch.tanh(x*(2/self.max_abs_pred))*self.max_abs_pred
 
     def __init__(self, n_inputs, n_outputs, n_experts=4, ndims=2, lr=0.001, momentum=0.9, T_max=10,
                  one_cycle=False, three_phase=False, RLoP=False, RLoP_factor=0.9, RLoP_patience:int=25,
