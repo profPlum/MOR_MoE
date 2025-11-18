@@ -299,7 +299,7 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
         # this context works recursively
         with self.gating_net.cached_gating_weights():
             bound_outputs = self.bound_outputs
-            self.bound_outputs=lambda x: x # temporarily remove output bounds so we can the raw logits
+            self.bound_outputs=lambda x: x # temporarily remove output bounds so we can get the raw logits
             mu_pred, rho_pred = super().forward(X).tensor_split(2, dim=1)
             self.bound_outputs = bound_outputs
 
@@ -316,8 +316,8 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
         y_pred_all = self(X)
         y_pred_mu, y_pred_sigma = y_pred_all
 
-        #num_batches = len(self.trainer.train_dataloader.dataset)//self.trainer.train_dataloader.batch_size # sneakily extract from PL
-        kl_loss = self.get_kl_loss()#/(num_batches*y.numel()) # (weighted)
+        #num_data = len(self.trainer.train_dataloader.dataset) # sneakily extract from PL
+        kl_loss = self.get_kl_loss()#/(num_data*y[0].numel()) # (weighted)
         loss = model_agnostic_BNN.nll_regression(y_pred_mu, y, y_pred_sigma=y_pred_sigma, reduction=torch.mean) + kl_loss # posterior loss
 
         self.log(f'{val*"val_"}loss', loss.item(), sync_dist=val, prog_bar=not val)

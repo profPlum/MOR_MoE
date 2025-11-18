@@ -89,7 +89,11 @@ class JHTDBDataModule(L.LightningDataModule):
         dataset_long_horizon = JHTDB_Channel(self.dataset_path, time_chunking=self.long_horizon, stride=self.stride, time_stride=self.time_stride)
         _, self.val_long_horizon_dataset = torch.utils.data.random_split(dataset_long_horizon, [1-self.long_data_usage, self.long_data_usage], generator=gen)
         if stage!='peek': self.val_long_horizon_dataset = preload_dataset(self.val_long_horizon_dataset)
-        self.train_dataset, self.val_dataset = torch.utils.data.random_split(self.dataset, [0.8, 0.2], generator=gen)
+
+        # this kind of splitting is better for timeseries so that we can measure true extrapolation performance
+        self.train_dataset = torch.utils.data.Subset(self.dataset, torch.arange(int(len(self.dataset)*0.8)))
+        self.val_dataset = torch.utils.data.Subset(self.dataset, torch.arange(int(len(self.dataset)*0.8), len(self.dataset)))
+        #self.train_dataset, self.val_dataset = torch.utils.data.random_split(self.dataset, [0.8, 0.2], generator=gen)
 
     def train_dataloader(self):
         return torch.utils.data.DataLoader(self.train_dataset, batch_size=self.batch_size, pin_memory=True, shuffle=True, drop_last=True, **self.fast_dataloader_kwd_args)
