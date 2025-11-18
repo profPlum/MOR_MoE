@@ -106,8 +106,8 @@ source experiment_configs/everything.sh # NO-OP b/c everything is already the de
 #export CKPT_PATH='/home/dsdeigh/MOR_MoE/lightning_logs/PARTIAL_VI_RLoP_Extension/477516/checkpoints/epoch=206-step=7452.ckpt.consolidated'
 
 # Run your PyTorch Lightning script
-srun --kill-on-bad-exit python -O channel.py
-#srun --kill-on-bad-exit python -m pdb channel.py
+srun --kill-on-bad-exit python -O train.py
+#srun --kill-on-bad-exit python -m pdb train.py
 
 # Optional: Debugging info
 echo "Job finished at $(date)"
