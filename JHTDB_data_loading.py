@@ -13,6 +13,7 @@ class JHTDB_Channel(torch.utils.data.Dataset):
     def __init__(self, path:str, time_chunking=5, stride:int|list|tuple=1, time_stride:int=1):
         self.time_chunking=time_chunking
         self.time_stride=time_stride
+        assert type(time_stride) is int
         self.path=path
         if type(stride) in [int,float]: stride=[stride]*3
         else: assert len(stride)==3 # we will not pool time because it breaks PDE timestep & stability and pytorch cannot do it easily
@@ -63,19 +64,13 @@ class JHTDBDataModule(L.LightningDataModule):
                  seed: int=0, long_horizon: int=100, long_data_usage: float=0.5, fast_dataloaders: bool=False):
         super().__init__()
         self.save_hyperparameters()
-        self.seed = seed
-        self.dataset_path = dataset_path
-        self.batch_size = batch_size
-        self.time_chunking = time_chunking
-        self.stride = stride
-        self.time_stride = time_stride
-        self.long_horizon = long_horizon
-        self.long_data_usage = long_data_usage
+        vars(self).update(locals()); del self.self # save configuration args settings
         assert 0 <= long_data_usage <= 1, 'long_data_usage must be between 0 and 1'
-
-        # Optional faster dataloaders (uses more memory)
-        self.fast_dataloader_kwd_args = {'num_workers': 1, 'persistent_workers': True} if fast_dataloaders else {}
         self.setup('peek') # trivial setup to expose basic dataset info
+
+    @property
+    def _fast_dataloader_kwd_args(self): # Optional faster dataloaders (uses more memory)
+        return {'num_workers': 1, 'persistent_workers': True} if self.fast_dataloaders else {}
 
     def setup(self, stage: str='fit'):
         ''' if stage=='peek': do not preload the dataset,
@@ -100,16 +95,17 @@ class JHTDBDataModule(L.LightningDataModule):
             print(f'{len(self.val_long_horizon_dataset)=}')
 
     def train_dataloader(self):
-        return torch.utils.data.DataLoader(self.train_dataset, batch_size=self.batch_size, pin_memory=True, shuffle=True, drop_last=True, **self.fast_dataloader_kwd_args)
+        return torch.utils.data.DataLoader(self.train_dataset, batch_size=self.batch_size, pin_memory=True, shuffle=True, drop_last=True, **self._fast_dataloader_kwd_args)
 
-    def val_dataloader(self):
+    def val_dataloader(self, batch_size=None):
         # Derived quantities for long-horizon validation
         long_horizon_multiplier = self.long_horizon / self.time_chunking
         long_horizon_batch_size = max(1, int(self.batch_size / long_horizon_multiplier))
 
-        val_loader = torch.utils.data.DataLoader(self.val_dataset, batch_size=int(long_horizon_batch_size*long_horizon_multiplier), pin_memory=True, **self.fast_dataloader_kwd_args)
-        val_long_loader = torch.utils.data.DataLoader(self.val_long_horizon_dataset, batch_size=long_horizon_batch_size, pin_memory=True, **self.fast_dataloader_kwd_args)
-        return [val_loader, val_long_loader]
+        if batch_size is None: batch_size=int(long_horizon_batch_size*long_horizon_multiplier)
+        val_loader = torch.utils.data.DataLoader(self.val_dataset, batch_size=batch_size, pin_memory=True, **self._fast_dataloader_kwd_args)
+        val_long_loader = torch.utils.data.DataLoader(self.val_long_horizon_dataset, batch_size=long_horizon_batch_size, pin_memory=True, **self._fast_dataloader_kwd_args)
+        return {'val': val_loader, 'long_horizon': val_long_loader}
 
     @property
     def field_size(self):
