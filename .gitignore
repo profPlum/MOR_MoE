@@ -1,0 +1,8 @@
+.*
+*.npy
+*.hdf5
+*.h5
+*.pt
+grid_figures
+__pycache__
+lightning_logs
