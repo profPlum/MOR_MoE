@@ -13,13 +13,15 @@ class GridFigure: # Verified to work 5/18/24
     def __init__(self, title:str='', img_scale: float=default_img_scale,
                  cmap:str=None, y_title_vertical=True):
         self._img_scale = img_scale
-        #if row_size: assert len(row_size)==2
-        self._cmap = cmap
         self._rows = []
         self._last_x_titles = None
         self._n_unique_x_titles = 0
         self._title = title
         self._y_title_vertical = y_title_vertical
+
+        # these are the color bar state variables which can be copied to another figure instance!
+        self._cmap = plt.get_cmap(cmap).with_extremes(under='black', over='white')
+        self._img_values_range_override = None
 
     @property
     def nrows(self):
@@ -68,8 +70,14 @@ class GridFigure: # Verified to work 5/18/24
                 break
         self.add_img_seq_row(img_seq, x_titles=title_seq, y_title=y_title)
 
+    def copy_color_bar(self, other_figure):
+       self._cmap = other_figure._cmap.copy()
+       self._img_values_range_override = other_figure._img_values_range
+
     @property
     def _img_values_range(self):
+        if self._img_values_range_override is not None:
+            return self._img_values_range_override
         # initial extreme values
         min_ = float('Inf')
         max_ = -min_
@@ -80,6 +88,10 @@ class GridFigure: # Verified to work 5/18/24
                 max_ = max(max_, img.max())
         #print(f'img value range: [{min_}, {max_}]') # shown in colorbar
         return min_, max_
+
+    @_img_values_range.setter
+    def _img_values_range(self, range_):
+        self._img_values_range_override = range_
 
     @property
     def _row_size(self):
@@ -129,7 +141,7 @@ class GridFigure: # Verified to work 5/18/24
                      cbar_size=cbar_size,
                      aspect=False)
 
-        normalizer = matplotlib.colors.Normalize(*self._img_values_range)
+        normalizer = matplotlib.colors.Normalize(*self._img_values_range, clip=False)
         im=matplotlib.cm.ScalarMappable(norm=normalizer, cmap=self._cmap)
 
         plt_id = 0
@@ -137,7 +149,6 @@ class GridFigure: # Verified to work 5/18/24
             for j in range(self.ncols):
                 ax = grid[plt_id]
                 plt_id += 1
-
                 ax.imshow(row['imgs'][j], cmap=self._cmap, norm=normalizer, aspect='auto')
                 ax.set_xticks([], [])
                 ax.set_yticks([], [])
