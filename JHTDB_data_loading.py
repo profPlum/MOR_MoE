@@ -12,10 +12,10 @@ class JHTDB_Channel(torch.utils.data.Dataset):
     this predict everything at once because that would make the dataset size=1.
     '''
     def __init__(self, path:str, time_chunking=5, stride:int|list|tuple=1, time_stride:int=1):
+        self.path=path
         self.time_chunking=time_chunking
         self.time_stride=time_stride
         assert type(time_stride) is int
-        self.path=path
         if type(stride) in [int,float]: stride=[stride]*3
         else: assert len(stride)==3 # we will not pool time because it breaks PDE timestep & stability and pytorch cannot do it easily
         scale_factor = tuple(1/np.asarray(stride).astype(float))
@@ -23,7 +23,9 @@ class JHTDB_Channel(torch.utils.data.Dataset):
         # comparable to torch.nn.AvgPool3d(stride) but supports fractional stride
 
     def __len__(self):
-        return len(glob(f'{self.path}/*.h5'))//self.time_chunking
+        num_files = len(glob(f'{self.path}/*.h5'))
+        base_blocks = num_files // (self.time_chunking * self.time_stride)  # full blocks only
+        return base_blocks * self.time_stride  # one sample per offset per block
 
     # Time stride verified to work: 11/18/25
     def __getitem__(self, index):
