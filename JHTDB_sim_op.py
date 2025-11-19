@@ -1,6 +1,4 @@
-import os, sys, warnings
-from glob import glob
-import h5py
+import warnings
 
 import torch
 import functools
@@ -56,24 +54,24 @@ class _Sim(L.LightningModule):
                                        np.fft.fftfreq(ny)*ny*2.*np.pi/Ly,
                                        np.fft.rfftfreq(nz)*nz*2.*np.pi/Lz,indexing='ij'),axis=-1)).cfloat()
 
-        # not used
-        self.x = torch.as_tensor(np.stack(np.meshgrid(np.arange(nx)/nx*Lx,
-                                       np.arange(ny)/ny*Ly,
-                                       np.arange(nz)/nz*Lz,indexing='ij'),axis=-1))
+        ## not used
+        #self.x = torch.as_tensor(np.stack(np.meshgrid(np.arange(nx)/nx*Lx,
+        #                                   np.arange(ny)/ny*Ly,
+        #                                   np.arange(nz)/nz*Lz,indexing='ij'),axis=-1))
 
-        # not used
-        self.xi = (self.x[...,0]>=np.pi/4)*(self.x[...,0]<=Lx-np.pi/4)
+        ## not used
+        #self.xi = (self.x[...,0]>=np.pi/4)*(self.x[...,0]<=Lx-np.pi/4)
 
         self.knorm2 = torch.sum(self.k**2,-1).real.float()
         self.Ainv =  torch.as_tensor(1./(1.+nu*np.einsum('...j,...j->...',self.k,self.k)))
-        self.filt = torch.as_tensor((np.sqrt(self.knorm2)<=2./3*(min(self.nx,self.ny,self.nz)/2+1))) # not used
+        filt = torch.as_tensor((np.sqrt(self.knorm2)<=2./3*(min(self.nx,self.ny,self.nz)/2+1))) # only used locally
         self.filt2 = torch.as_tensor((np.sqrt(self.knorm2)<=1./3*(min(self.nx,self.ny,self.nz)/2+1)))
-        self.Ainv = self.Ainv * self.filt
+        self.Ainv = self.Ainv * filt
         self.dt = dt
         self.shapef = [nx,ny,nz]
         self.shapeh = [nx,ny,nz//2+1]
-        self.forcing = 0.*self.k # not used
-        self.forcing[4,4,4,0] = 10. # not used
+        #self.forcing = 0.*self.k # not used
+        #self.forcing[4,4,4,0] = 10. # not used
 
         self.eta = 1e-3
         self.nu_num = 1e-3
