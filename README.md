@@ -3,12 +3,12 @@ MOR-NeuralOP Mixture of Experts
 
 Setup:
 * (on Kahuna) Set Cuda Override `export CONDA_OVERRIDE_CUDA="11.8"`
-* **use mamba/conda to import the env file: uqops+proxy.yaml**
+* **use mamba/conda to import the env file: uqops.yaml**
 * use the master branch
 
 To run, you need either use:
 * **(primarily) job.slurm** (for bigger kahuna jobs)
-* Or channel.py (for big jobs, e.g. on CEE)
+* Or train.py (for big jobs, e.g. on CEE)
 * Or The `exercises.ipynb` notebook, exercise 3 (to play with it, e.g. debug new features)
 
 Model Training Notes:
@@ -26,20 +26,16 @@ Model Training Notes:
 * Finally after you've handled these things do `sbatch job.slurm`
 
 Model Evaluation Notes:
-* *Tensorboard* is important for evaluation, but these are the metrics which are most important:
+* *Weights and Biases* is important for evaluation, but these are the metrics which are most important:
   * All val metrics with data_loader_idx=1 postfix (the long-horizon dataset) are more important than data_loader_idx=0 (the short horizon dataset)
   * val_loss is very important too because it incorporates UQ and prediction quality (again data_loader_idx=1 is more important)
   * grad_inf_norm can be important to assess the stability of the model
   * the pytorch profiler tab can be useful for checking training performance
   * val_R^2 especially for the data_loader_idx=1 is very important (arguably the most)
-* In order to update tensorboard lightning_logs from another machine (don't run tensorboard on kahuna), use & modify this bashrc alias to your needs:
-`alias tb_update='mkdir -p /scratch/$USER/lightning_logs_kahuna; rsync -az --inplace --exclude="checkpoints" --progress $USER@kahuna.sandia.gov:~/MOR_MoE/lightning_logs/* /scratch/$USER/lightning_logs_kahuna/'`
-* Aside from tensorboard, most important model evaluation code is inside **JHTDB_operator.ipynb**, this notebook can:
+* Aside from Weights and Biases, most important model evaluation code is inside **JHTDB_operator.ipynb**, this notebook can:
   * perform learned simulations & comparison with DNS baseline
   * create 3d expert partition figures
-  * perform OOD detection using given OOD datasets and a chosen VI model
   * create energy spectrum figures for comparing learned simulation to DNS
-* Also the experimental code to validate the Bayesian predictive intervals and perform posterior-predictive checks is inside `pred_SBC_check.ipynb`
 
 *Important* Files:
 * JHTDB_sim_op.py: Integration of PDE solver & POU_net + dataset code (also includes some VI code)
@@ -47,7 +43,6 @@ Model Evaluation Notes:
 * MOR_Operator.py: MOR_layer + MOR_Operator modules
 * model_agnostic_BNN.py: code for model agnostic VI
 * grid_figures.py: code for the pretty 4d grid figures I make (e.g. the simulation)
-* channel.py: the (python) entrypoint (uses env variables for CLI)
+* train.py: the (python) entrypoint (uses env variables for CLI)
 * job.slurm: the (slurm) entrypoint
 * JHTDB_operator.ipynb: the primary model evaluation notebook
-* Maybe pred_SBC_check.ipynb if I end up using it in the paper (which would imply it works): this notebook can take posterior-predictive checks and validate Bayesian predictive intervals
