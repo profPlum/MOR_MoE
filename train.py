@@ -100,7 +100,6 @@ if __name__=='__main__':
                          time_chunking=time_chunking,
                          stride=stride,
                          time_stride=time_stride,
-                         seed=int(os.environ.get('SEED', 0)),
                          fast_dataloaders=use_fast_dataloaders)
 
     # derive field size from data module

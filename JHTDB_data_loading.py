@@ -3,6 +3,7 @@ import h5py
 import numpy as np
 from glob import glob
 import pytorch_lightning as L
+import math
 
 # Verified to work: 8/23/24
 class JHTDB_Channel(torch.utils.data.Dataset):
@@ -22,15 +23,19 @@ class JHTDB_Channel(torch.utils.data.Dataset):
         # comparable to torch.nn.AvgPool3d(stride) but supports fractional stride
 
     def __len__(self):
-        # GOTCHA: time stride means we technically don't need the last few timesteps so the dataset could technically be smaller and still be "enough"
-        # -1 because if stride=1 we want it to reduce to the original form
-        return (len(glob(f'{self.path}/*.h5'))+self.time_stride-1)//(self.time_chunking*self.time_stride)
+        return len(glob(f'{self.path}/*.h5'))//self.time_chunking
 
+    # Time stride verified to work: 11/18/25
     def __getitem__(self, index):
+        if index < 0 or index >= len(self):
+            raise IndexError(f'Index {index} is out of range for dataset of length {len(self)}')
+
         files = []
         velocity_fields = []
+        offset = index % self.time_stride
+        index = index // self.time_stride
         for i in range(index*self.time_chunking*self.time_stride, (index+1)*self.time_chunking*self.time_stride, self.time_stride):
-            i+=1 # 1-based indexing
+            i+=1 + offset # 1-based indexing + offset to utilize all data with time stride
             try: files.append(h5py.File(f'{self.path}/channel_t={i}.h5', 'r')) # keep open for stacking
             except OSError as e:
                 if 'unable to open' in str(e).lower():
@@ -60,12 +65,12 @@ def preload_dataset(dataset):
     return torch.utils.data.TensorDataset(Xs, ys)
 
 class JHTDBDataModule(L.LightningDataModule):
-    def __init__(self, dataset_path: str, batch_size: int, time_chunking: int, stride: int|list|tuple=1, time_stride: int=1,
-                 seed: int=0, long_horizon: int=100, long_data_usage: float=0.5, fast_dataloaders: bool=False):
+    def __init__(self, dataset_path: str, batch_size: int, time_chunking: int, time_stride: int=1,
+                 stride: int|list|tuple=1, long_horizon: int=100, train_proportion: float=0.8, fast_dataloaders: bool=False):
+        assert 0 < train_proportion < 1, 'train_proportion must be between 0 and 1'
         super().__init__()
         self.save_hyperparameters()
         vars(self).update(locals()); del self.self # save configuration args settings
-        assert 0 <= long_data_usage <= 1, 'long_data_usage must be between 0 and 1'
         self.setup('peek') # trivial setup to expose basic dataset info
 
     @property
@@ -76,19 +81,18 @@ class JHTDBDataModule(L.LightningDataModule):
         ''' if stage=='peek': do not preload the dataset,
         also setup('peek') is automatically called in the constructor
         since it doesn't cost anything '''
-        gen = torch.Generator().manual_seed(self.seed)
 
         # Build datasets mirroring the main() logic
         self.dataset = JHTDB_Channel(self.dataset_path, time_chunking=self.time_chunking, stride=self.stride, time_stride=self.time_stride)
         if stage!='peek': self.dataset = preload_dataset(self.dataset)
         dataset_long_horizon = JHTDB_Channel(self.dataset_path, time_chunking=self.long_horizon, stride=self.stride, time_stride=self.time_stride)
-        _, self.val_long_horizon_dataset = torch.utils.data.random_split(dataset_long_horizon, [1-self.long_data_usage, self.long_data_usage], generator=gen)
+
+        self.val_long_horizon_dataset = torch.utils.data.Subset(dataset_long_horizon, torch.arange(math.ceil(len(dataset_long_horizon)*self.train_proportion), len(dataset_long_horizon)))
         if stage!='peek': self.val_long_horizon_dataset = preload_dataset(self.val_long_horizon_dataset)
 
         # this kind of splitting is better for timeseries so that we can measure true extrapolation performance
-        self.train_dataset = torch.utils.data.Subset(self.dataset, torch.arange(int(len(self.dataset)*0.8)))
-        self.val_dataset = torch.utils.data.Subset(self.dataset, torch.arange(int(len(self.dataset)*0.8), len(self.dataset)))
-        #self.train_dataset, self.val_dataset = torch.utils.data.random_split(self.dataset, [0.8, 0.2], generator=gen)
+        self.train_dataset = torch.utils.data.Subset(self.dataset, torch.arange(int(len(self.dataset)*self.train_proportion)))
+        self.val_dataset = torch.utils.data.Subset(self.dataset, torch.arange(int(len(self.dataset)*self.train_proportion), len(self.dataset)))
 
         if stage=='peek':
             print(f'{len(self.dataset)=}\n{len(self.train_dataset)=}\n{len(self.val_dataset)=}')
