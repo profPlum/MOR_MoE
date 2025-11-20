@@ -3,7 +3,6 @@ import h5py
 import numpy as np
 from glob import glob
 import pytorch_lightning as L
-import math
 
 # Verified to work: 8/23/24
 class JHTDB_Channel(torch.utils.data.Dataset):

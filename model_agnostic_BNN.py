@@ -130,12 +130,10 @@ def get_dataset_size(train_dataset: Dataset | DataLoader):
     else: assert isinstance(train_dataset, Dataset)
 
     X, y = train_dataset[0]
-    # TODO: use model(X) instead of y to make it agnostic to classification and regression
-    assert torch.is_floating_point(y), 'classification datasets are implicitly sparse which makes this fail...'
     return len(train_dataset)*y.numel()
 
 # NOTE: this is essentially the new dnn_to_bnn() but also more versatile
-# NOTE: if you pass in train_dataset and it is non-sparse (e.g. floating point regression) then it will automatically weight the get_kl_loss method!
+# NOTE: if you pass in train_dataset then it will automatically weight the get_kl_loss method!
 def model_agnostic_dnn_to_bnn(dnn: nn.Module, train_dataset_size: int|Dataset|DataLoader, prior_cfg: dict = {}):
     if 'Bayesian' in type(dnn).__name__: return
 
