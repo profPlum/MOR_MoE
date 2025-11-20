@@ -19,11 +19,35 @@ class JHTDB_Channel(torch.utils.data.Dataset):
         if type(stride) in [int,float]: stride=[stride]*3
         else: assert len(stride)==3 # we will not pool time because it breaks PDE timestep & stability and pytorch cannot do it easily
         scale_factor = tuple(1/np.asarray(stride).astype(float))
-        self.pool = lambda x: torch.nn.functional.interpolate(x, scale_factor=scale_factor, mode='area')
+        self._pool = lambda x: torch.nn.functional.interpolate(x, scale_factor=scale_factor, mode='area')
         # comparable to torch.nn.AvgPool3d(stride) but supports fractional stride
 
-    def __len__(self):
+        self._split_start_proportion = 0
+        self._split_end_proportion = 1.0 # exclusive 1.0=length of dataset
+
+    def split(self, proportion: float):
+        assert 0 <= proportion <= 1, 'proportion must be between 0 and 1'
+        from copy import copy
+        start_dataset = copy(self)
+        start_dataset._split_start_proportion = 0
+        start_dataset._split_end_proportion = proportion
+
+        end_dataset = copy(self)
+        end_dataset._split_start_proportion = proportion
+        end_dataset._split_end_proportion = 1.0
+
+        return start_dataset, end_dataset
+
+    @property
+    def _split_file_index_range(self) -> tuple[int, int]:
         num_files = len(glob(f'{self.path}/*.h5'))
+        start_index = int(num_files * self._split_start_proportion)
+        end_index = int(num_files * self._split_end_proportion)
+        return start_index, end_index
+
+    def __len__(self):
+        start_index, end_index = self._split_file_index_range
+        num_files = end_index - start_index
         base_blocks = num_files // (self.time_chunking * self.time_stride)  # full blocks only
         return base_blocks * self.time_stride  # one sample per offset per block
 
@@ -34,10 +58,11 @@ class JHTDB_Channel(torch.utils.data.Dataset):
 
         files = []
         velocity_fields = []
+        start_index, _ = self._split_file_index_range
         offset = index % self.time_stride
         index = index // self.time_stride
         for i in range(index*self.time_chunking*self.time_stride, (index+1)*self.time_chunking*self.time_stride, self.time_stride):
-            i+=1 + offset # 1-based indexing + offset to utilize all data with time stride
+            i+=1 + offset + start_index # 1-based indexing + offset to utilize all data with time stride + start index to skip split files
             try: files.append(h5py.File(f'{self.path}/channel_t={i}.h5', 'r')) # keep open for stacking
             except OSError as e:
                 if 'unable to open' in str(e).lower():
@@ -45,7 +70,7 @@ class JHTDB_Channel(torch.utils.data.Dataset):
                 else: raise
             velocity_fields.append(files[-1][f'Velocity_{i:04}']) # :04 zero pads to 4 digits
         velocity_fields = torch.as_tensor(np.stack(velocity_fields).T) # reverse dimensions order [T,Z,Y,X,C] --> [C,X,Y,Z,T]
-        velocity_fields = self.pool(velocity_fields.moveaxis(-1,0)).moveaxis(0,-1) # time dimension is (temporarily) treated as batch dimension
+        velocity_fields = self._pool(velocity_fields.moveaxis(-1,0)).moveaxis(0,-1) # time dimension is (temporarily) treated as batch dimension
         velocity_fields = velocity_fields.float() # make sure to use single precision! (after pooling) because double is too expensive!!
 
         # IC_0.shape=[C,X,Y,Z] e.g. torch.Size([3, 103, 26, 77])
@@ -86,16 +111,17 @@ class JHTDBDataModule(L.LightningDataModule):
 
         # Build datasets mirroring the main() logic
         self.dataset = JHTDB_Channel(self.dataset_path, time_chunking=self.time_chunking, stride=self.stride, time_stride=self.time_stride)
-        if stage!='peek': self.dataset = preload_dataset(self.dataset)
         dataset_long_horizon = JHTDB_Channel(self.dataset_path, time_chunking=self.long_horizon, stride=self.stride, time_stride=self.time_stride)
 
-        self.val_long_horizon_dataset = torch.utils.data.Subset(dataset_long_horizon, torch.arange(math.ceil(len(dataset_long_horizon)*self.train_proportion), len(dataset_long_horizon)))
+        # this splitting is necessary because we need to split on the file level, not the coarse time chunk level
+        self.val_long_horizon_dataset = dataset_long_horizon.split(self.train_proportion)[1]
         if stage!='peek': self.val_long_horizon_dataset = preload_dataset(self.val_long_horizon_dataset)
 
         # this kind of splitting is better for timeseries so that we can measure true extrapolation performance
-        self.train_dataset = torch.utils.data.Subset(self.dataset, torch.arange(int(len(self.dataset)*self.train_proportion)))
-        self.val_dataset = torch.utils.data.Subset(self.dataset, torch.arange(int(len(self.dataset)*self.train_proportion), len(self.dataset)))
-
+        self.train_dataset, self.val_dataset = self.dataset.split(self.train_proportion)
+        if stage!='peek':
+            self.train_dataset = preload_dataset(self.train_dataset)
+            self.val_dataset = preload_dataset(self.val_dataset)
         if stage=='peek':
             print(f'{len(self.dataset)=}\n{len(self.train_dataset)=}\n{len(self.val_dataset)=}')
             print(f'{len(self.val_long_horizon_dataset)=}')
