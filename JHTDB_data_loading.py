@@ -27,13 +27,17 @@ class JHTDB_Channel(torch.utils.data.Dataset):
     def split(self, proportion: float):
         assert 0 <= proportion <= 1, 'proportion must be between 0 and 1'
         from copy import copy
+        base_start = self._split_start_proportion
+        base_end = self._split_end_proportion
+        split_point = base_start + proportion * (base_end - base_start)
+
         start_dataset = copy(self)
-        start_dataset._split_start_proportion = 0
-        start_dataset._split_end_proportion = proportion
+        start_dataset._split_start_proportion = base_start
+        start_dataset._split_end_proportion = split_point
 
         end_dataset = copy(self)
-        end_dataset._split_start_proportion = proportion
-        end_dataset._split_end_proportion = 1.0
+        end_dataset._split_start_proportion = split_point
+        end_dataset._split_end_proportion = base_end
 
         return start_dataset, end_dataset
 
@@ -148,3 +152,21 @@ class JHTDBDataModule(L.LightningDataModule):
         field_size = list(IC_0.shape[1:])
         print(f'{field_size=}')
         return field_size
+
+    def load_full_dataset_field(self, time_stride:int=None):
+        ''' Used for comparing full learned simulations to DNS '''
+        import os
+        if time_stride is None: time_stride = self.time_stride
+        cache_path = f'{self.dataset_path}/full_field_cache_{self.stride=}_{time_stride=}.pt'
+        if os.path.exists(cache_path): # almost x3 faster!
+            print('loading from cache!')
+            return torch.load(cache_path)
+
+        dataset = JHTDB_Channel(self.dataset_path, time_chunking=1, stride=self.stride)
+        dataset = torch.utils.data.Subset(dataset, range(0,len(dataset),time_stride))
+        data_loader = torch.utils.data.DataLoader(dataset, batch_size=1, num_workers=8)
+
+        full_field = torch.stack([x.squeeze() for x, _ in data_loader], axis=-1)
+        print(f'{full_field.shape=}, {full_field.device=}')
+        torch.save(full_field, cache_path)
+        return full_field
