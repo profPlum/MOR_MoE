@@ -50,24 +50,25 @@ MLE_LR=3.125e-5
 export MAX_EPOCHS=1600 # MUST BE ACCURATELY ADJUSTED based on estimated epochs (this ensures that OneCycle is properly calibrated)
 export LR=$VI_LR # this is 4x higher than theory suggests (it is only possible b/c grad clip)
 export GRAD_CLIP=50 # it is best to keep this value, it will automatically be adjusted based on number of recursive timesteps & batch_size
-export PRIOR_SIGMA=0.2 # approximately reflects the values of sigma at initialization
 export OPTIM='Adam' # RAdam is better for resuming, otherwise use Adam
-export RLoP=0 # Reduce Learning-rate on Plateu, can be useful for resuming (but otherwise keep it off!)
+export RLoP=0 # Reduce Learning-rate on Plateu, can be useful for resuming (but otherwise keep it off!). Also bash booleans are binary
 export ONE_CYCLE=$((! RLoP)) # OneCycle warmup & decay lr schedule. Really important for scaling to multiple GPUs!
 export THREE_PHASE=0 # faster decay in one cycle, usually not needed
-export VI=1 # use VI or not (in bash binary booleans have the best support for boolean logic)
 export TRIG_ENCODINGS=1 # gives better (nearly periodic) partitions
 export USE_NORMALIZED_MOE=1 # importance normalization gives better expert utilization
 export OUT_NORM_GROUPS=1 # whether to use output normalization (you should!)
 export HIDDEN_NORM_GROUPS=1 # whether to use hidden normalization (you should!)
+export VI=1 # use VI or not (in bash binary booleans have the best support for boolean logic)
+export VI_PRIOR_SIGMA=0.2 # approximately reflects the values of sigma at initialization
+export VI_COUNTS_TIMESTRIDE_GAP_DATA=1 # whether to count the gap data between timestrides in the dataset size for VI
+export TIME_STRIDE=1 # must be integer-valued
+export STRIDE=1 # e.g. 1.5 or a crazy list [1.5,1.3,1.8] for smaller experiments
 export TIME_CHUNKING=10 # 10 is default now b/c we can fit it in GH200s
 export BATCH_SIZE=2 # GH200 can handle batch_size=2! (it has > x2 the memory of A100)
+export FAST_DATALOADERS=0 # warning: they can cause OOMs for production jobs!
 export N_LAYERS=4 # number of expert layers
 export N_FILTERS=32 # number of hidden channels
 export N_EXPERTS=3 # number of experts
-export STRIDE=1 # e.g. 1.5 or a crazy list [1.5,1.3,1.8] for smaller experiments
-export TIME_STRIDE=1 # must be integer-valued
-export FAST_DATALOADERS=0 # warning: they can cause OOMs for production jobs!
 #export K_MODES=4 # 4 for stride~=1.5, 6 for full STRIDE=1, use this for comparison of FNO to CNN, keep off by default!
 
 # CNN experts?
@@ -80,7 +81,6 @@ export USE_WNO3D_EXPERTS=0 # To use WNO3d experts: set USE_WNO3D_EXPERTS=1 and U
 export WNO3D_LEVEL=1 # wavelet decomposition level (default 2, higher = more detailed wavelet analysis)
 #export N_EXPERTS=1 N_LAYERS=4 OUT_NORM_GROUPS=0 HIDDEN_NORM_GROUPS=0
 #export STRIDE='[1.609,1.625,1.203]' FAST_DATALOADERS=1 # 64x16x64
-#export MAX_EPOCHS=150
 #export BATCH_SIZE=2
 #export N_FILTERS=36
 
@@ -93,11 +93,11 @@ source experiment_configs/everything.sh # NO-OP b/c everything is already the de
 #source experiment_configs/everything_for_WNO_comparison.sh # 800 epochs
 #source experiment_configs/WNO.sh # runs for *800* epochs on 64x16x64
 #source experiment_configs/WNO+LN.sh # runs for *800* epochs on 64x16x64
-#export OUT_NORM_GROUPS=1
-#export HIDDEN_NORM_GROUPS=1
 
 # optional modifiers; first one is 'small' jobs that fit on one GPU (incompatible with WNO striding)
 [[ "$STRIDE" != '[1.609,1.625,1.203]' ]] && { export BATCH_SIZE=$((BATCH_SIZE*4)) STRIDE=1.47 FAST_DATALOADERS=1; } # simulate 4 nodes, S=1.47 for 68 GB mem target & near 88% utilization
+#export HIDDEN_NORM_GROUPS=1
+#export OUT_NORM_GROUPS=1
 #export SEED=$RANDOM # random behavior (but consistent splitting)
 #export MAX_EPOCHS=10
 

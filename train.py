@@ -36,9 +36,12 @@ use_fast_dataloaders = bool(int(os.environ.get('FAST_DATALOADERS', False))) # ma
 use_trig = bool(int(os.environ.get('TRIG_ENCODINGS', True))) # Ravi's trig encodings
 out_norm_groups = int(os.environ.get('OUT_NORM_GROUPS', 1)) # 0 or 1 or maybe 2 (whether or not to use output layer norm) keep it at one generally
 hidden_norm_groups = int(os.environ.get('HIDDEN_NORM_GROUPS', 1))
-use_VI = bool(int(os.environ.get('VI', True))) # whether to enable VI
 
-prior_sigma=float(os.environ.get('PRIOR_SIGMA', 0.2)) # this prior sigma almost matches he sigma of initialization
+# Bayesian settings
+use_VI = bool(int(os.environ.get('VI', True))) # whether to enable VI
+VI_counts_timestride_gap_data = bool(int(os.environ.get('VI_COUNTS_TIMESTRIDE_GAP_DATA', True))) # whether to count the gap data between timestrides in the dataset size for VI
+VI_prior_sigma=float(os.environ.get('VI_PRIOR_SIGMA', 0.2)) # this prior sigma almost matches he sigma of initialization
+
 T_max: int=1 # T_0 for CosAnnealing+WarmRestarts
 one_cycle=bool(int(os.environ.get('ONE_CYCLE', True))) # scheduler
 three_phase=bool(int(os.environ.get('THREE_PHASE', False))) # adds decay after inital bump
@@ -69,7 +72,7 @@ torch.backends.cudnn.allow_tf32 = True
 # Import Custom Modules
 from MOR_Operator import MOR_Operator
 from lightning_utils import *
-from POU_net import POU_net, PPOU_net, FieldGatingNet, EqualizedFieldGatingNet
+from POU_net import FieldGatingNet, EqualizedFieldGatingNet
 from JHTDB_sim_op import PPOU_NetSimulator, POU_NetSimulator
 from JHTDB_data_loading import JHTDBDataModule
 import model_agnostic_BNN
@@ -116,7 +119,9 @@ if __name__=='__main__':
     SimModelClass, optional_kwd_args = POU_NetSimulator, {}
     if use_VI: # VI is optional
         SimModelClass = PPOU_NetSimulator
-        optional_kwd_args = {'prior_cfg': {'prior_sigma': prior_sigma}, 'train_dataset_size': model_agnostic_BNN.get_dataset_size(dm.train_dataset)}
+        dataset_size_divisor = 1 if VI_counts_timestride_gap_data else time_stride
+        dataset_size = model_agnostic_BNN.get_dataset_size(dm.train_dataset)//dataset_size_divisor
+        optional_kwd_args = {'prior_cfg': {'prior_sigma': VI_prior_sigma}, 'train_dataset_size': dataset_size}
 
     # scale lr & grad clip by: the number of *output* timesteps in one full batch (this follows scaling equations)
     scale_of_batch_data = num_nodes*num_gpus_per_node*batch_size*(time_chunking-1) # (includes time)
@@ -161,7 +166,7 @@ if __name__=='__main__':
     wandb.login(key='251c77a548925cf7f08eecaf2b159ea8d49457c3')
     logger = WandbLogger(project="MOR_MoE", name=job_name, version=version)#, log_model="all")
     #logger.watch(model) # For W&B to log gradients and model topology
-    #logger.experiment.config.update({'grad_clip': gradient_clip_val, 'prior_sigma': prior_sigma})
+    #logger.experiment.config.update({'grad_clip': gradient_clip_val, 'VI_prior_sigma': VI_prior_sigma})
 
     # Weight-only sharded checkpoints are needed to avoid OOM problem caused by large model size
     model_checkpoint_callback=L.callbacks.ModelCheckpoint(f"lightning_logs/{job_name}/{version}", save_weights_only=True, save_last=False,
