@@ -38,7 +38,7 @@ class _Sim(L.LightningModule):
     (the code needs channel dim last but pytorch needs it right after batch dim),
     in a way that is *compatible with vmap* for batching!!
     '''
-    def __init__(self,nx=103,ny=26,nz=77,Lx=8*np.pi,Ly=2.0,Lz=3*np.pi,nu=5e-5,dt=0.0065):
+    def __init__(self,nx=103,ny=26,nz=77,Lx=8*np.pi,Ly=2.0,Lz=3*np.pi,nu=5e-5,dt=0.0065, use_PDE_solver=True):
         ''' Defaults are set to the values needed for JHTDB channel flow.
             Also note that nu:=viscosity, Lx,Ly,Lz:=domain dimensions (physical),
             and nx,ny,nz:=grid dimensions (virtual) '''
@@ -50,6 +50,8 @@ class _Sim(L.LightningModule):
         self.Ly = Ly
         self.Lz = Lz
         self.nu = nu
+        self.use_PDE_solver = use_PDE_solver # whether to use the PDE solver
+
         self.k = torch.as_tensor(np.stack(np.meshgrid(np.fft.fftfreq(nx)*nx*2.*np.pi/Lx,
                                        np.fft.fftfreq(ny)*ny*2.*np.pi/Ly,
                                        np.fft.rfftfreq(nz)*nz*2.*np.pi/Lz,indexing='ij'),axis=-1)).cfloat()
@@ -82,16 +84,6 @@ class _Sim(L.LightningModule):
                 del vars(self)[name]
                 self.register_buffer(name, value.detach(), persistent=False)
 
-    def change_resolution(self,nx,ny,nz):
-        ''' construct a new simulator at a different resolution (with other arguments fixed) or self if resolution is unchanged '''
-        if nx==self.nx and ny==self.ny and nx==self.nx:
-            return self
-
-        new_sim = type(self)(nx=nx,ny=ny,nz=nz,Lx=self.Lx,Ly=self.Ly,Lz=self.Lz,
-                             nu=self.nu,dt=self.dt)
-        new_sim.set_operator(self.op)
-        return new_sim.to(self.device)
-
     def genIC(self):
         h = torch.tensor(np.random.normal(0,1,(self.nx,self.ny,self.nz,3))).float().to(self.device)
         hh = _rfft(h) * self.filt2[...,None]
@@ -101,7 +93,7 @@ class _Sim(L.LightningModule):
         return u0.permute(-1,0,1,2) # (i.e. torch.moveaxis(u0,-1,0))
 
     # NOTE: u.shape==[channel, x, y, z]
-    def NSupd(self,u): # Navier-stokes update
+    def _NSupd(self,u): # Navier-stokes update
         u = u.permute(1,2,-1,0) #torch.moveaxis(u, 0, -1)
         uh = _rfft(u)
         assert list(uh.shape)[:-1]==self.shapeh
@@ -114,17 +106,13 @@ class _Sim(L.LightningModule):
             )
         return u.permute(-1,0,1,2) # i.e. torch.moveaxis(u, -1, 0)
 
+    def NSupd(self,u):
+        if not self.use_PDE_solver: return u
+        return self._NSupd(u)
+
     # set the neural operator for correction
     def set_operator(self, op):
         self.op = op
-
-    # This should perhaps use super().forward()
-    # use operator learning here to correct for missing physics
-    def learnedCorrection(self,u):
-        forward = self.op.forward(u)
-        assert torch.isreal(u).all() and torch.isreal(forward).all()
-        return forward
-        # __call__() is necessary for hooks... <- but this should already happen outside!
 
     # This needs to output intermediate time-steps to get full loss!
     def evolve(self,u0,n,intermediate_outputs=False, intermediate_output_stride=1):
@@ -134,7 +122,7 @@ class _Sim(L.LightningModule):
         if len(u.shape)==4: # all permute ops above assume 4 dims (before vmap)
             u = u[None] # add batch dim
         for i in range(n):
-            u = self.learnedCorrection(NSupd(u))
+            u = self.op.forward(NSupd(u)) # NOTE: this is the only place where the operator is used
             if u.isnan().any():
                 warnings.warn(f'Simulation has diverged into NaNs! At step: {i}')
             #assert not u.isnan().any()
@@ -185,12 +173,6 @@ class POU_NetSimulator(POU_net):
 
     def forward(self, X, n_steps: int=None, intermediate_outputs=True, **kwd_args):
         #NOTE: X.shape==[batch, channel, x, y, z]
-
-        # Maybe change simulator resolution (if needed)
-        new_simulator = self.simulator.change_resolution(*X.shape[-3:]) # pass x,y,z
-        if new_simulator is not self.simulator: # FSDP likely doesn't support changing the registered modules in the middle of training
-            if self.training: raise NotImplementedError("It is not supported to change NO's Simulator's resolution during training.")
-            else: self.simulator=new_simulator
 
         # by caching the gating weights we optimize memory & time
         # also it is safe because there are no optimization steps inside a forward!
