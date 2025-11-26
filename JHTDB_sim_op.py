@@ -84,13 +84,18 @@ class _Sim(L.LightningModule):
                 del vars(self)[name]
                 self.register_buffer(name, value.detach(), persistent=False)
 
-    def genIC(self):
+    def genIC(self, from_LES=False):
         h = torch.tensor(np.random.normal(0,1,(self.nx,self.ny,self.nz,3))).float().to(self.device)
         hh = _rfft(h) * self.filt2[...,None]
         proj = self.k*(torch.sum(self.k*hh,axis=-1)/self.knorm2)[...,None]
         proj[0]=0
         u0 = _irfft(hh - proj, s=self.shapef)
-        return u0.permute(-1,0,1,2) # (i.e. torch.moveaxis(u0,-1,0))
+        u0 = u0.permute(-1,0,1,2) # (i.e. torch.moveaxis(u0,-1,0))
+        if from_LES:
+            assert self.op is not IdentityOp, 'Cannot use LES IC with IdentityOp'
+            with torch.inference_mode():
+                u0 = self.evolve(u0,n=20) # make it more realistic (assuming forcing function)
+        return u0
 
     # NOTE: u.shape==[channel, x, y, z]
     def _NSupd(self,u): # Navier-stokes update
@@ -135,6 +140,11 @@ class _Sim(L.LightningModule):
 
 # For use with PPOU_net
 class _UQ_Sim(_Sim):
+    def genIC(self, from_LES=False):
+        u0 = super(_UQ_Sim,self).genIC(from_LES=from_LES)
+        if from_LES: u0 = u0[0] # remove unnecessary uq tensor
+        return u0
+
     # This needs to output intermediate time-steps to get full loss!
     def evolve(self,u0,n,intermediate_outputs=False, intermediate_output_stride=1):
         u = u0
