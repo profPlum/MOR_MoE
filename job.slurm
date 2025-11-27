@@ -48,9 +48,10 @@ MLE_LR=3.125e-5
 # (VI+TRIG) 1550 epochs takes 20 hours (with 4 GH200s, measured 4/2/25)
 # Everything 1600 epochs takes 33 hours (with 4 GH200s, measured 9/23/25)
 export MAX_EPOCHS=1600 # MUST BE ACCURATELY ADJUSTED based on estimated epochs (this ensures that OneCycle is properly calibrated)
-export LR=$VI_LR # this is 4x higher than theory suggests (it is only possible b/c grad clip)
-export GRAD_CLIP=50 # it is best to keep this value, it will automatically be adjusted based on number of recursive timesteps & batch_size
-export OPTIM='Adam' # RAdam is better for resuming, otherwise use Adam
+export LR=$MLE_LR # this is 4x higher than theory suggests (it is only possible b/c grad clip)
+export GRAD_CLIP=500000 # it is best to keep this value, it will automatically be adjusted based on number of recursive timesteps & batch_size
+export WEIGHT_DECAY=0.01 # default for AdamW
+export OPTIM='AdamW' # RAdam is better for resuming, otherwise use Adam
 export RLoP=0 # Reduce Learning-rate on Plateu, can be useful for resuming (but otherwise keep it off!). Also bash booleans are binary
 export ONE_CYCLE=$((! RLoP)) # OneCycle warmup & decay lr schedule. Really important for scaling to multiple GPUs!
 export THREE_PHASE=0 # faster decay in one cycle, usually not needed

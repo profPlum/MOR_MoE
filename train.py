@@ -16,6 +16,7 @@ time_stride: int=int(os.environ.get('TIME_STRIDE', 1)) # temporal stride between
 batch_size: int=int(os.environ.get('BATCH_SIZE', 2)) # batch size, with VI experts we can only fit 1 batch w/ 20 A100
 scale_lr=True # multiply by DDP (total) batch_size
 lr: float=float(os.environ.get('LR', 1.563e-5)) # (VI) learning rate (will be scaled by recurisve steps)
+weight_decay: float=float(os.environ.get('WEIGHT_DECAY', 0.0)) # weight decay
 max_epochs=int(os.environ.get('MAX_EPOCHS', 500))
 gradient_clip_val=float(os.environ.get('GRAD_CLIP', 50)) # grad clip adjusted based on new scaling rule
 make_optim=eval(f"torch.optim.{os.environ.get('OPTIM', 'Adam')}")
@@ -148,10 +149,10 @@ if __name__=='__main__':
     # NOTE: we need to update field size based on the stride
     simulator_kwd_args = {'nx': field_size[0], 'ny': field_size[1], 'nz': field_size[2], 'dt': 0.0065*time_stride, 'use_PDE_solver': use_PDE_solver}
     make_gating_net = EqualizedFieldGatingNet if use_normalized_MoE else FieldGatingNet
-    model = SimModelClass(n_inputs=ndims, n_outputs=ndims, ndims=ndims, n_experts=n_experts, n_layers=n_layers, hidden_channels=n_filters, make_optim=make_optim,
+    model = SimModelClass(n_inputs=ndims, n_outputs=ndims, ndims=ndims, n_experts=n_experts, n_layers=n_layers, hidden_channels=n_filters, weight_decay=weight_decay,
                           lr=lr, T_max=T_max, one_cycle=one_cycle, three_phase=three_phase, RLoP=RLoP, RLoP_factor=RLoP_factor, RLoP_patience=RLoP_patience,
                           n_steps=time_chunking-1, trig_encodings=use_trig, hidden_norm_groups=hidden_norm_groups, out_norm_groups=out_norm_groups,
-                          make_gating_net=make_gating_net, simulator_kwd_args=simulator_kwd_args, **optional_kwd_args)
+                          make_optim=make_optim, make_gating_net=make_gating_net, simulator_kwd_args=simulator_kwd_args, **optional_kwd_args)
 
     print(f'num model parameters: {utils.count_parameters(model):.5e}')
     print('model:')
