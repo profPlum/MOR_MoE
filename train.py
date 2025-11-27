@@ -22,6 +22,7 @@ gradient_clip_val=float(os.environ.get('GRAD_CLIP', 50)) # grad clip adjusted ba
 make_optim=eval(f"torch.optim.{os.environ.get('OPTIM', 'Adam')}")
 ckpt_path=os.environ.get('CKPT_PATH', None)
 
+use_proportional_k_size=bool(int(os.environ.get('MAKE_K_SIZE_PROPORTIONAL', False))) # if K_MODES or CNN_FILTER_SIZE is given as a integer will create a list where each dimension is proportional to the field size
 use_PDE_solver=bool(int(os.environ.get('USE_PDE_SOLVER', True))) # whether to use the PDE solver
 use_normalized_MoE=bool(int(os.environ.get('USE_NORMALIZED_MOE', True)))
 use_CNN_experts=bool(int(os.environ.get('USE_CNN_EXPERTS', False)))
@@ -98,6 +99,19 @@ class MemMonitorCallback(L.Callback):
 # for ablation study
 L.seed_everything(int(os.environ.get('SEED', 0)))
 
+def proportional_allocation(scalar_allocation, proportional_to_size, int_cast=True, cap_at_prop_size=False):
+    """
+    Dynamically allocates a quantity across dimensions proportionally to the size of those dimensions.
+    Such that prod(new_size)==scalar_allocation**len(proportional_to_size)
+
+    This is equivalent to resizing a hyper-cube with side_length=scalar_allocation,
+    to be proportional to proportional_to_size while retaining the same volume.
+    """
+    c=((scalar_allocation**len(proportional_to_size))/np.prod(proportional_to_size))**(1/len(proportional_to_size))
+    new_size = np.asarray(proportional_to_size)*c
+    if cap_at_prop_size: new_size = np.minimum(new_size, proportional_to_size)
+    return list((new_size+0.5).astype(int) if int_cast else new_size)
+
 if __name__=='__main__':
     # setup data module
     dm = JHTDBDataModule(dataset_path='data/turbulence_output',
@@ -112,6 +126,9 @@ if __name__=='__main__':
     if k_modes is None: # default=max (potentially adjusted for stride)
         k_modes=field_size # e.g. [103,26,77]
         assert len(k_modes)==3
+    if use_proportional_k_size:
+        if type(k_modes) is int: k_modes=proportional_allocation(k_modes, field_size, cap_at_prop_size=True)
+        if type(CNN_filter_size) is int: CNN_filter_size=proportional_allocation(CNN_filter_size, field_size, cap_at_prop_size=True)
 
     ndims=3
     num_nodes = int(os.environ.get('SLURM_STEP_NUM_NODES', 1)) # can be auto-detected by slurm
