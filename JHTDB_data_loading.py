@@ -49,6 +49,9 @@ class JHTDB_Channel(torch.utils.data.Dataset):
         return start_index, end_index
 
     def __len__(self):
+        # NOTE: for overlapping chunks, you'd use num_files - ((self.time_chunking - 1) * self.time_stride)
+        # GOTCHA: it might be better to apply the data augmentation randomly rather than changing the length (for VI consistency);
+        # that being said, it wouldn't really work with dataset preloading, and I'm not sure how it would interact with existing offseting.
         start_index, end_index = self._split_file_index_range
         num_files = end_index - start_index
         base_blocks = num_files // (self.time_chunking * self.time_stride)  # full blocks only
@@ -61,11 +64,13 @@ class JHTDB_Channel(torch.utils.data.Dataset):
 
         files = []
         velocity_fields = []
-        start_index, _ = self._split_file_index_range
+        start_index, end_index = self._split_file_index_range
         offset = index % self.time_stride
         index = index // self.time_stride
+        # NOTE: for overlapping chunks, you'd use range(index, index+self.time_chunking*self.time_stride, self.time_stride)
         for i in range(index*self.time_chunking*self.time_stride, (index+1)*self.time_chunking*self.time_stride, self.time_stride):
             i+=1 + offset + start_index # 1-based indexing + offset to utilize all data with time stride + start index to skip split files
+            assert i <= end_index, f'File index: {i} is above maximum {end_index}'
             try: files.append(h5py.File(f'{self.path}/channel_t={i}.h5', 'r')) # keep open for stacking
             except OSError as e:
                 if 'unable to open' in str(e).lower():
