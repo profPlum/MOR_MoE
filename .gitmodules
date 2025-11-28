@@ -1,3 +1,6 @@
 [submodule "WNO"]
 	path = WNO
 	url = git@github.com:profPlum/WNO.git
+[submodule "IUFNO-CHL"]
+	path = IUFNO-CHL
+	url = https://github.com/Turbulence-AI/IUFNO-CHL.git
