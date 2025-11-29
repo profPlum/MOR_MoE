@@ -200,7 +200,7 @@ class POU_net(L.LightningModule):
     bound_outputs = lambda self, x: torch.tanh(x*(2/self.max_abs_pred))*self.max_abs_pred
 
     def __init__(self, n_inputs, n_outputs, n_experts=4, ndims=2, lr=0.001, momentum=0.9, weight_decay=0.0,
-                 T_max=10, one_cycle=False, three_phase=False, RLoP=False, RLoP_factor=0.9, RLoP_patience:int=25,
+                 T_max=1, one_cycle=False, three_phase=False, RLoP=False, RLoP_factor=0.9, RLoP_patience:int=15,
                  make_optim: type=torch.optim.AdamW, make_expert: type=MOR_Operator.MOR_Operator,
                  make_gating_net: type=EqualizedFieldGatingNet, trig_encodings=True, **kwd_args):
         assert not (one_cycle and RLoP), 'These learning rate schedules are mututally exclusive!'
