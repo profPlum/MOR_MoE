@@ -120,7 +120,7 @@ class _Sim(L.LightningModule):
         self.op = op
 
     # This needs to output intermediate time-steps to get full loss!
-    def evolve(self,u0,n,intermediate_outputs=False, intermediate_output_stride=1):
+    def evolve(self,u0,n,intermediate_outputs=False, intermediate_output_stride=1, to_cpu=False):
         u = u0
         outputs = []
         NSupd = torch.vmap(self.NSupd) # only this needs vmapping, NeuralOp is already batched
@@ -131,7 +131,8 @@ class _Sim(L.LightningModule):
             if u.isnan().any():
                 warnings.warn(f'Simulation has diverged into NaNs! At step: {i}')
             #assert not u.isnan().any()
-            if intermediate_outputs and i%intermediate_output_stride==0: outputs.append(u)
+            if intermediate_outputs and i%intermediate_output_stride==0:
+                outputs.append(u.to('cpu', non_blocking=True) if to_cpu else u)
 
         # time dim is the last dim (if it exists)
         outputs = torch.stack(outputs,axis=-1) if intermediate_outputs else u
