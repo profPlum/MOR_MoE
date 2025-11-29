@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-import os
+import os, sys
 import torch
 
 k_modes=eval(str(os.environ.get('K_MODES', None))) # None=maximum (e.g. [103,26,77]) can be a list, GOTCHA: don't change!
@@ -27,13 +27,14 @@ use_PDE_solver=bool(int(os.environ.get('USE_PDE_SOLVER', True))) # whether to us
 use_normalized_MoE=bool(int(os.environ.get('USE_NORMALIZED_MOE', True)))
 use_CNN_experts=bool(int(os.environ.get('USE_CNN_EXPERTS', False)))
 use_WNO3d_experts=bool(int(os.environ.get('USE_WNO3D_EXPERTS', False))) # whether to use WNO3d as experts
+use_IUFNO_experts=bool(int(os.environ.get('USE_IUFNO_EXPERTS', False))) # IUFNO experts
 WNO3d_level=int(os.environ.get('WNO3D_LEVEL', 1)) # wavelet decomposition level for WNO3d (default 2)
 CNN_filter_size=eval(str(os.environ.get('CNN_FILTER_SIZE', 6))) # only used if use_CNN_experts=True
 assert type(CNN_filter_size) in [int, list, tuple]
 
 # Validate that only one expert type is selected
-expert_types = [use_CNN_experts, use_WNO3d_experts]
-assert sum(expert_types) <= 1, f"Only one expert type can be selected. Currently selected: CNN={use_CNN_experts}, WNO3d={use_WNO3d_experts}"
+expert_types = [use_CNN_experts, use_WNO3d_experts, use_IUFNO_experts]
+assert sum(expert_types) <= 1, f"Only one expert type can be selected. Currently selected: CNN={use_CNN_experts}, WNO3d={use_WNO3d_experts}, IUFNO={use_IUFNO_experts}"
 
 use_fast_dataloaders = bool(int(os.environ.get('FAST_DATALOADERS', False))) # marginally faster dataloaders which use more VRAM
 use_trig = bool(int(os.environ.get('TRIG_ENCODINGS', True))) # Ravi's trig encodings
@@ -45,7 +46,7 @@ use_VI = bool(int(os.environ.get('VI', True))) # whether to enable VI
 VI_counts_timestride_gap_data = bool(int(os.environ.get('VI_COUNTS_TIMESTRIDE_GAP_DATA', True))) # whether to count the gap data between timestrides in the dataset size for VI
 VI_prior_sigma=float(os.environ.get('VI_PRIOR_SIGMA', 0.2)) # this prior sigma almost matches he sigma of initialization
 
-T_max: int=1 # T_0 for CosAnnealing+WarmRestarts
+# NOTE: cosine+warmrestarts is the default scheduler (with T_max=1)
 one_cycle=bool(int(os.environ.get('ONE_CYCLE', True))) # scheduler
 three_phase=bool(int(os.environ.get('THREE_PHASE', False))) # adds decay after inital bump
 RLoP=bool(int(os.environ.get('RLoP', False))) # scheduler
@@ -81,12 +82,6 @@ from JHTDB_data_loading import JHTDBDataModule
 import model_agnostic_BNN
 import utils
 
-# Import WNO3d if using WNO3d experts
-if use_WNO3d_experts:
-    import sys
-    sys.path.append(f'{os.getcwd()}/WNO/Version_2.0.0')
-    from wno3d_NS import WNO3d
-
 class MemMonitorCallback(L.Callback):
     def __init__(self, clear_interval=40):
         self._epoch_counter=0
@@ -110,7 +105,9 @@ def proportional_allocation(scalar_allocation, proportional_to_size, int_cast=Tr
     c=((scalar_allocation**len(proportional_to_size))/np.prod(proportional_to_size))**(1/len(proportional_to_size))
     new_size = np.asarray(proportional_to_size)*c
     if cap_at_prop_size: new_size = np.minimum(new_size, proportional_to_size)
-    return list((new_size+0.5).astype(int) if int_cast else new_size)
+    if int_cast: new_size = (new_size+0.5).astype(int)
+    print(f'{new_size=}')
+    return tuple(new_size)
 
 if __name__=='__main__':
     # setup data module
@@ -126,9 +123,8 @@ if __name__=='__main__':
     if k_modes is None: # default=max (potentially adjusted for stride)
         k_modes=field_size # e.g. [103,26,77]
         assert len(k_modes)==3
-    if use_proportional_k_size:
-        if type(k_modes) is int: k_modes=proportional_allocation(k_modes, field_size, cap_at_prop_size=True)
-        if type(CNN_filter_size) is int: CNN_filter_size=proportional_allocation(CNN_filter_size, field_size, cap_at_prop_size=True)
+    if use_proportional_k_size and type(k_modes) is int:
+        k_modes=proportional_allocation(k_modes, field_size, cap_at_prop_size=True)
 
     ndims=3
     num_nodes = int(os.environ.get('SLURM_STEP_NUM_NODES', 1)) # can be auto-detected by slurm
@@ -137,6 +133,8 @@ if __name__=='__main__':
 
     SimModelClass, optional_kwd_args = POU_NetSimulator, {}
     if use_VI: # VI is optional
+        if weight_decay > 0: raise ValueError("Weight decay is not supported for VI (use prior_sigma instead!)")
+
         SimModelClass = PPOU_NetSimulator
         dataset_size_divisor = 1 if VI_counts_timestride_gap_data else time_stride
         dataset_size = model_agnostic_BNN.get_dataset_size(dm.train_dataset)//dataset_size_divisor
@@ -155,19 +153,31 @@ if __name__=='__main__':
         SimModelClass = lambda **kwd_args: SimModelClass_.load_from_checkpoint(ckpt_path, **kwd_args)
 
     if use_CNN_experts:
+        # GOTCHA: can't do this globally because it breaks the IUFNO expert!
+        if use_proportional_k_size and type(CNN_filter_size) is int:
+            CNN_filter_size=proportional_allocation(CNN_filter_size, field_size, cap_at_prop_size=True)
+
         # output_norm_groups=1 by default but specified by the user
         optional_kwd_args |= {'make_expert': CNN, 'k_size': CNN_filter_size, 'skip_connections': True}
     elif use_WNO3d_experts:
+        sys.path.append(f'{os.getcwd()}/WNO/Version_2.0.0')
+        from wno3d_NS import WNO3d
+
         # POU_net calls: make_expert(n_inputs, n_outputs, ndims=ndims, **kwd_args)
         # WNO3d needs: (in_channels, out_channels, size, **other_args)
         optional_kwd_args |= {'make_expert': WNO3d, 'size': field_size, 'level': WNO3d_level}
+    elif use_IUFNO_experts:
+        sys.path.append(f'{os.getcwd()}/IUFNO-CHL')
+        from IUFNO import IUFNO4d # GOTCHA: k_size is actually the kernel size for the U-net! and must be an integer
+        optional_kwd_args |= {'make_expert': IUFNO4d, 'k_modes': k_modes, 'k_size': CNN_filter_size, 'n_layers': n_layers,
+                              'hidden_channels': n_filters, 'hidden_norm_groups': hidden_norm_groups, 'out_norm_groups': out_norm_groups}
     else: optional_kwd_args['k_modes']=k_modes # assuming MOR_Operator expert
 
     # NOTE: we need to update field size based on the stride
     simulator_kwd_args = {'nx': field_size[0], 'ny': field_size[1], 'nz': field_size[2], 'dt': 0.0065*time_stride, 'use_PDE_solver': use_PDE_solver}
     make_gating_net = EqualizedFieldGatingNet if use_normalized_MoE else FieldGatingNet
     model = SimModelClass(n_inputs=ndims, n_outputs=ndims, ndims=ndims, n_experts=n_experts, n_layers=n_layers, hidden_channels=n_filters, weight_decay=weight_decay,
-                          lr=lr, T_max=T_max, one_cycle=one_cycle, three_phase=three_phase, RLoP=RLoP, RLoP_factor=RLoP_factor, RLoP_patience=RLoP_patience,
+                          lr=lr, one_cycle=one_cycle, three_phase=three_phase, RLoP=RLoP, RLoP_factor=RLoP_factor, RLoP_patience=RLoP_patience,
                           n_steps=time_chunking-1, trig_encodings=use_trig, hidden_norm_groups=hidden_norm_groups, out_norm_groups=out_norm_groups,
                           make_optim=make_optim, make_gating_net=make_gating_net, simulator_kwd_args=simulator_kwd_args, **optional_kwd_args)
 

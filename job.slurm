@@ -9,7 +9,7 @@
 #SBATCH --time=1-00:00:00                    # Maximum runtime (HH:MM:SS) (48 hours for WNO-600-epochs)
 #SBATCH --partition=ghx4                     # Partition name
 #SBATCH --account=beoi-dtai-gh
-#SBATCH --job-name=MLE+LR_TS=4_K=20
+#SBATCH --job-name=MLE_TS=4
 
 # Not going to work anymore b/c we would need to save the entire checkpoint which causes OOM...
 # ##SBATCH --signal=SIGUSR1@90
@@ -71,8 +71,8 @@ export FAST_DATALOADERS=0 # warning: they can cause OOMs for production jobs!
 export N_LAYERS=4 # number of expert layers
 export N_FILTERS=32 # number of hidden channels
 export N_EXPERTS=3 # number of experts
-export MAKE_K_SIZE_PROPORTIONAL=0 # whether to rescale K dims to be proportional to the field size (only works when K_MODES or CNN_FILTER_SIZE is given as an integer)
-#export K_MODES='[20,17,20]' # 4 for stride~=1.5, 6 for full STRIDE=1, use this for comparison of FNO to CNN, keep off by default!
+export MAKE_K_SIZE_PROPORTIONAL=1 # whether to rescale K dims to be proportional to the field size (only works when K_MODES or CNN_FILTER_SIZE is given as an integer)
+#export K_MODES=20 # 4 for stride~=1.5, 6 for full STRIDE=1, use this for comparison of FNO to CNN, keep off by default!
 
 # CNN experts?
 export USE_CNN_EXPERTS=0
@@ -86,6 +86,10 @@ export WNO3D_LEVEL=1 # wavelet decomposition level (default 2, higher = more det
 #export STRIDE='[1.609,1.625,1.203]' FAST_DATALOADERS=1 # 64x16x64
 #export BATCH_SIZE=2
 #export N_FILTERS=36
+
+## IU-FNO experts?
+#export USE_IUFNO_EXPERTS=1 CNN_FILTER_SIZE=3 N_EXPERTS=1 N_LAYERS=4 OUT_NORM_GROUPS=0 HIDDEN_NORM_GROUPS=0
+((USE_IUFNO_EXPERTS)) && unset K_MODES # ensure K_MODES is max
 
 ## load experiment settings
 #source experiment_configs/control.sh
