@@ -9,7 +9,7 @@
 #SBATCH --time=1-00:00:00                    # Maximum runtime (HH:MM:SS) (48 hours for WNO-600-epochs)
 #SBATCH --partition=ghx4                     # Partition name
 #SBATCH --account=beoi-dtai-gh
-#SBATCH --job-name=MLE_TS=4
+#SBATCH --job-name=MLE
 
 # Not going to work anymore b/c we would need to save the entire checkpoint which causes OOM...
 # ##SBATCH --signal=SIGUSR1@90
@@ -89,7 +89,8 @@ export WNO3D_LEVEL=1 # wavelet decomposition level (default 2, higher = more det
 
 ## IU-FNO experts?
 #export USE_IUFNO_EXPERTS=1 CNN_FILTER_SIZE=3 N_EXPERTS=1 N_LAYERS=4 OUT_NORM_GROUPS=0 HIDDEN_NORM_GROUPS=0
-((USE_IUFNO_EXPERTS)) && unset K_MODES # ensure K_MODES is max
+((USE_IUFNO_EXPERTS)) && export K_MODES=35 BATCH_SIZE=1 # small K_MODES and BATCH needed to fit in GPU memory
+#((USE_IUFNO_EXPERTS)) && unset K_MODES # ensure K_MODES is max (it's only got 1 layer!!) <-- nvm too much memory...
 
 ## load experiment settings
 #source experiment_configs/control.sh

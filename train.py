@@ -169,8 +169,7 @@ if __name__=='__main__':
     elif use_IUFNO_experts:
         sys.path.append(f'{os.getcwd()}/IUFNO-CHL')
         from IUFNO import IUFNO4d # GOTCHA: k_size is actually the kernel size for the U-net! and must be an integer
-        optional_kwd_args |= {'make_expert': IUFNO4d, 'k_modes': k_modes, 'k_size': CNN_filter_size, 'n_layers': n_layers,
-                              'hidden_channels': n_filters, 'hidden_norm_groups': hidden_norm_groups, 'out_norm_groups': out_norm_groups}
+        optional_kwd_args |= {'make_expert': IUFNO4d, 'k_modes': k_modes, 'k_size': CNN_filter_size}
     else: optional_kwd_args['k_modes']=k_modes # assuming MOR_Operator expert
 
     # NOTE: we need to update field size based on the stride
