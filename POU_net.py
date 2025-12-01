@@ -8,6 +8,35 @@ import MOR_Operator
 
 from contextlib import contextmanager
 
+class MakePositionalEncodings:
+    def __init__(self, ndims, trig_encodings=True):
+        self._ndims = ndims
+        self._trig_encodings = trig_encodings
+        self._cached_mesh_shape = None
+        self._cached_mesh_grid = None
+    def __call__(self, X): # make positional encodings for the given shape
+        shape=X.shape[-self._ndims:]
+        with torch.no_grad():
+            # Create coordinate grids using torch.meshgrid
+            if tuple(shape) == self._cached_mesh_shape and self._cached_mesh_grid.device==X.device:
+                return self._cached_mesh_grid
+            assert len(shape)==self._ndims
+            linspace = lambda dim: torch.linspace(0,1,steps=dim)
+            if self._trig_encodings:
+                linspace = lambda dim: torch.linspace(0,1,steps=dim+1)[:-1]*2*np.pi
+            coords = [linspace(dim) for dim in shape]
+            mesh = torch.meshgrid(*coords, indexing='ij')
+            if self._trig_encodings:
+                mesh = [torch.cos(x) for x in mesh] + [torch.sin(x) for x in mesh]
+            pos_encodings = torch.stack(mesh)[None].to(X.device) # [None] adds batch dim
+            self._cached_mesh_shape = tuple(shape)
+            self._cached_mesh_grid = pos_encodings
+            return pos_encodings
+
+    @property
+    def n_channels(self):
+        return self._ndims*(1+self._trig_encodings)
+
 # Verified to work: 7/18/24
 # Double verified to work (and reproduce specific partition)
 # Triple verified to work (with higher dimensionalities/n_inputs)
@@ -18,43 +47,21 @@ class FieldGatingNet(BasicLightningRegressor):
     Also if n_experts>1, it will implicitly add the option of a 'null expert' (an expert that just predicts 0).
     And it adds some small amount of noise to the gating logits to encourage exploration.
     """
-    def __init__(self, n_inputs, n_experts, ndims, k=2, trig_encodings=True, noise_sd=0.0):
+    def __init__(self, n_inputs, n_experts, ndims, k=2, trig_encodings=True):
         super().__init__()
         assert n_experts>1, 'This class makes no sense with only 1 expert'
         assert k>1, 'K<2 means the gating network will not learn to gate properly.'
         n_experts -= 1 # we implicitly add a zero expert
         self._k = min(k, n_experts) # for (global) top-k selection
         self._ndims = ndims
-        self.noise_sd = noise_sd
-        self._trig_encodings = trig_encodings
+        self._make_positional_encodings = MakePositionalEncodings(ndims, trig_encodings)
         self._softmax = nn.Softmax(dim=1) # this is a injection point for the template pattern (e.g. equalized field gating net)
 
         # NOTE: setting n_experts=n_experts+1 inside the gating_net implicitly adds a "ZeroExpert"
-        self._gating_net = CNN(ndims*(1+trig_encodings), n_experts+1, k_size=1, ndims=ndims)#, **kwd_args)
+        self._gating_net = CNN(self._make_positional_encodings.n_channels, n_experts+1, k_size=1, ndims=ndims)#, **kwd_args)
         self._cache_forward=False # whether we should cache the forward call's outputs
         self._cached_forward_results=None # the cached forward call's outputs
         self._cached_forward_shape=None # for sanity check
-
-        # positional encoding cache vars
-        self._cached_mesh_shape = None # shape of the X for the cache
-        self._cached_mesh_grid = None # cached mesh grid (aka positional encodings)
-
-    def _make_positional_encodings(self, shape):
-        # Create coordinate grids using torch.meshgrid
-        if tuple(shape) == self._cached_mesh_shape and self._cached_mesh_grid.device==self.device:
-            return self._cached_mesh_grid
-        assert len(shape)==self._ndims
-        linspace = lambda dim: torch.linspace(0,1,steps=dim)
-        if self._trig_encodings:
-            linspace = lambda dim: torch.linspace(0,1,steps=dim+1)[:-1]*2*np.pi
-        coords = [linspace(dim) for dim in shape]
-        mesh = torch.meshgrid(*coords, indexing='ij')
-        if self._trig_encodings:
-            mesh = [torch.cos(x) for x in mesh] + [torch.sin(x) for x in mesh]
-        pos_encodings = torch.stack(mesh)[None].to(self.device) # [None] adds batch dim
-        self._cached_mesh_shape = tuple(shape)
-        self._cached_mesh_grid = pos_encodings
-        return pos_encodings
 
     def forward(self, X):
         # this cache assumes the gating network takes no input (which currently it doesn't)
@@ -62,11 +69,8 @@ class FieldGatingNet(BasicLightningRegressor):
             assert self._cached_forward_results is not None
             return self._cached_forward_results
 
-        with torch.no_grad():
-            pos_encodings = self._make_positional_encodings(X.shape[-self._ndims:])
-        #pos_encodings = pos_encodings.expand(X.shape[0], *pos_encodings.shape[1:])
+        pos_encodings = self._make_positional_encodings(X)
         gating_logits = self._gating_net(pos_encodings) # gating_logits.shape=[batch_size, n_experts, *spatial_dims]
-        if self.training and self.noise_sd>0: gating_logits = gating_logits + torch.randn_like(gating_logits, requires_grad=False)*self.noise_sd
         global_logits = torch.randn(gating_logits.shape[1], requires_grad=False) # random selection
         assert len(global_logits.shape)==1 # 1D
 
@@ -202,13 +206,17 @@ class POU_net(L.LightningModule):
     def __init__(self, n_inputs, n_outputs, n_experts=4, ndims=2, lr=0.001, momentum=0.9, weight_decay=0.0,
                  T_max=1, one_cycle=False, three_phase=False, RLoP=False, RLoP_factor=0.9, RLoP_patience:int=15,
                  make_optim: type=torch.optim.AdamW, make_expert: type=MOR_Operator.MOR_Operator,
-                 make_gating_net: type=EqualizedFieldGatingNet, trig_encodings=True, **kwd_args):
+                 make_gating_net: type=EqualizedFieldGatingNet, trig_encodings=True, grid_inputs=False, **kwd_args):
         assert not (one_cycle and RLoP), 'These learning rate schedules are mututally exclusive!'
         super().__init__()
         self.save_hyperparameters()
 
         assert n_experts>0
         if n_experts==1: make_gating_net=DummyGatingNet
+
+        if grid_inputs:
+            self._make_positional_encodings = MakePositionalEncodings(ndims, trig_encodings)
+            n_inputs += self._make_positional_encodings.n_channels # adjust input channels
 
         # NOTE: The gating_net implicitly adds a "ZeroExpert"
         self.gating_net=make_gating_net(n_inputs, n_experts, ndims=ndims, trig_encodings=trig_encodings) # supports n_inputs!=2
@@ -247,6 +255,8 @@ class POU_net(L.LightningModule):
     # Verified to work 7/19/24
     def forward(self, X):
         X = torch.as_tensor(X, device=self.device)
+        if self.grid_inputs:
+            X=torch.cat([X, self._make_positional_encodings(X)], axis=1)
         gating_weights, topk = self.gating_net(X)
         prediction = 0
         for i, k_i in enumerate(topk):

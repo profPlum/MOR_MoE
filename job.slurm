@@ -57,6 +57,7 @@ export ONE_CYCLE=$((! RLoP)) # OneCycle warmup & decay lr schedule. Really impor
 export THREE_PHASE=0 # faster decay in one cycle, usually not needed
 export USE_PDE_SOLVER=1 # whether to use the PDE solver
 export TRIG_ENCODINGS=1 # gives better (nearly periodic) partitions
+export GRID_INPUTS=0 # append positional encodings to inputs for experts
 export USE_NORMALIZED_MOE=1 # importance normalization gives better expert utilization
 export OUT_NORM_GROUPS=1 # whether to use output normalization (you should!)
 export HIDDEN_NORM_GROUPS=1 # whether to use hidden normalization (you should!)
