@@ -18,8 +18,8 @@ class MakePositionalEncodings:
         shape=X.shape[-self._ndims:]
         with torch.no_grad():
             # Create coordinate grids using torch.meshgrid
-            if tuple(shape) == self._cached_mesh_shape and self._cached_mesh_grid.device==X.device:
-                return self._cached_mesh_grid
+            if tuple(shape)==self._cached_mesh_shape and self._cached_mesh_grid.device==X.device:
+                return self._cached_mesh_grid.expand(X.shape[0],*self._cached_mesh_grid.shape[1:])
             assert len(shape)==self._ndims
             linspace = lambda dim: torch.linspace(0,1,steps=dim)
             if self._trig_encodings:
@@ -29,9 +29,9 @@ class MakePositionalEncodings:
             if self._trig_encodings:
                 mesh = [torch.cos(x) for x in mesh] + [torch.sin(x) for x in mesh]
             pos_encodings = torch.stack(mesh)[None].to(X.device) # [None] adds batch dim
-            self._cached_mesh_shape = tuple(shape)
-            self._cached_mesh_grid = pos_encodings
-            return pos_encodings
+        self._cached_mesh_shape = tuple(shape)
+        self._cached_mesh_grid = pos_encodings
+        return self(X)
 
     @property
     def n_channels(self):
