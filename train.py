@@ -108,7 +108,7 @@ def proportional_allocation(scalar_allocation, proportional_to_size, int_cast=Tr
     if cap_at_prop_size: new_size = np.minimum(new_size, proportional_to_size)
     if int_cast: new_size = (new_size+0.5).astype(int)
     print(f'{new_size=}')
-    return tuple(new_size)
+    return list(new_size)
 
 if __name__=='__main__':
     # setup data module
