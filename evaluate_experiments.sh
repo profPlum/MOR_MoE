@@ -8,9 +8,14 @@ evaluate_experiment() {
 }
 
 ls ./lightning_logs/.
+echo how many should we skip \(default=0\)?
+read SKIP
 echo how many should be evaluated?
 read N
-\ls -t ./lightning_logs | head -n $N | \
+
+[[ $SKIP ]] || SKIP=0
+
+\ls -t ./lightning_logs | \head -n $((N+SKIP)) | \tail -n $N | \
 while read experiment_name; do
     evaluate_experiment "$experiment_name"
 done
