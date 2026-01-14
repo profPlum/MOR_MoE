@@ -19,7 +19,7 @@ dependencies:
   - pip
   - pip:
       - wandb==0.19.11
-      - pynvml
+      - pynvml==13.0.1
       - tqdm
       - papermill==2.6.0
       - ptwt==1.0.1 # for WNO
