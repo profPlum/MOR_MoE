@@ -32,17 +32,16 @@ Model Evaluation Notes:
   * grad_inf_norm can be important to assess the stability of the model
   * the pytorch profiler tab can be useful for checking training performance
   * val_R^2 especially for the data_loader_idx=1 is very important (arguably the most)
-* Aside from Weights and Biases, most important model evaluation code is inside **JHTDB_operator.ipynb**, this notebook can:
+* Aside from Weights and Biases, most important model evaluation code is inside **model_eval.ipynb**, this notebook can:
   * perform learned simulations & comparison with DNS baseline
   * create 3d expert partition figures
   * create energy spectrum figures for comparing learned simulation to DNS
 
 *Important* Files:
-* JHTDB_sim_op.py: Integration of PDE solver & POU_net + dataset code (also includes some VI code)
-* POU_net.py: The current POU_net code & FieldGatingNet (also includes PPOU_net, which is to say VI version)
-* MOR_Operator.py: MOR_layer + MOR_Operator modules
-* model_agnostic_BNN.py: code for model agnostic VI
-* grid_figures.py: code for the pretty 4d grid figures I make (e.g. the simulation)
 * train.py: the (python) entrypoint (uses env variables for CLI)
 * job.slurm: the (slurm) entrypoint
-* JHTDB_operator.ipynb: the primary model evaluation notebook
+* model_eval.ipynb: notebook for evaluating trained JHTDB operators
+* JHTDB_sim_op.py: Integration of PDE solver & POU_net + dataset code (also includes some VI code)
+* POU_net.py: The current POU_net code & FieldGatingNet (also includes PPOU_net, the VI version)
+* MOR_Operator.py: MOR_layer + MOR_Operator modules
+* model_agnostic_BNN.py: code for model agnostic VI
