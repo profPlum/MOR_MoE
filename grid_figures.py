@@ -58,7 +58,7 @@ class GridFigure: # Verified to work 5/18/24
         title_seq = []
         if not time_samples:
             if array_3d.shape[-1]>10:
-                time_samples = list(np.linspace(1,array_3d.shape[-1], num=10, dtype=int, endpoint=False))
+                time_samples = list(np.linspace(1,array_3d.shape[-1]-1, num=10, dtype=int, endpoint=True))
             else: time_samples = list(range(1,array_3d.shape[-1]))
 
         for t in time_samples:

@@ -147,7 +147,7 @@ class _UQ_Sim(_Sim):
         return u0
 
     # This needs to output intermediate time-steps to get full loss!
-    def evolve(self,u0,n,intermediate_outputs=False, intermediate_output_stride=1):
+    def evolve(self,u0,n,intermediate_outputs=False, intermediate_output_stride=1, to_cpu=False):
         u = u0
         u_outputs = []
         uq_outputs = []
@@ -161,8 +161,8 @@ class _UQ_Sim(_Sim):
                 warnings.warn(f'Simulation has diverged into NaNs! At step: {i}')
             #assert not (u.isnan().any() or uq.isnan().any())
             if intermediate_outputs and i%intermediate_output_stride==0:
-                u_outputs.append(u)
-                uq_outputs.append(uq)
+                u_outputs.append(u.to('cpu', non_blocking=True) if to_cpu else u)
+                uq_outputs.append(uq.to('cpu', non_blocking=True) if to_cpu else uq)
 
         # remove artificial batch dimension only if it was added
         maybe_squeeze = lambda output: output.squeeze() if len(u.shape)>len(u0.shape) else output
