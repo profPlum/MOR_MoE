@@ -163,7 +163,8 @@ def model_agnostic_dnn_to_bnn(dnn: nn.Module, train_dataset_size: int|Dataset|Da
     dnn.__class__ = type(f'Bayesian{dnn.__class__.__name__}', (type(dnn),), methods)
     return dnn
 
-# TODO: embed the moment accumulation functions into the forward method of the class
+# TODO: embed the moment accumulation functions into the class
+# GOTCHA: this cannot go in the forward method of the class! (because of the caching mechanism), see PredSamplingWrapper instead
 ################################ BNN sampling utility functions: ################################
 
 def clear_cache():
@@ -238,7 +239,7 @@ def get_BNN_pred_moments(bnn_model, x_inputs, n_samples=100, verbose=False, **kw
         range_ = range(n_samples)
         if verbose: range_ = tqdm(range_)
         for i in range_:
-            mu, sigma = bnn_model(x_inputs.float(), **kwd_args)
+            mu, sigma = bnn_model(x_inputs, **kwd_args)
             epistemic_variance.update(mu.unsqueeze(0)) # update it, add 1st dim b/c it is reduced
 
             total_expectation = total_expectation + mu
@@ -266,6 +267,50 @@ def get_BNN_pred_mixture(model, inputs, n_samples, joint=False, **kwd_args):
     pred_mixture = torch.distributions.MixtureSameFamily(categorical, pred_normals)
     if joint: pred_mixture = torch.distributions.Independent(pred_mixture, len(pred_mixture.batch_shape)-1) # -1 for batch dimension
     return pred_mixture
+
+# verified to work: 1/16/26
+from contextlib import contextmanager
+class PredSamplingWrapper: # TODO: support get_BNN_pred_mixture
+    ''' Convenience wrapper for sampling from the posterior of a Bayesian **regression** neural network.
+        Usage: PredSamplingWrapper.wrap_VI_model(VI_model); PredSamplingWrapper.enable_sampling(...): model.forward() '''
+    _n_samples=1
+    _moments=False # whether to output aggregated moments or samples
+    _verbose=False
+
+    def __init__(self, *args, **kwd_args):
+        raise NotImplementedError('PredSamplingWrapper is a wrapper class and should not be instantiated directly.')
+
+    def forward(self, x_inputs, **kwd_args):
+        n_samples = self._n_samples
+        if n_samples>1:
+            sampling_fn = get_BNN_pred_moments if self._moments else get_BNN_pred_distribution
+            mu, sigma = sampling_fn(super().forward, x_inputs, n_samples=n_samples,
+                                    verbose=self._verbose, **kwd_args)
+        else: mu, sigma = super().forward(x_inputs, **kwd_args)
+        return mu, sigma
+
+    @classmethod
+    @contextmanager
+    def enable_sampling(cls, n_samples:int, moments:bool=True, verbose:bool=False):
+        ''' * moments=True will output aggregated moments instead of samples
+            * verbose=True will use tqdm to show progress '''
+        try:
+            cls._n_samples = n_samples
+            cls._moments = moments
+            cls._verbose = verbose
+            yield
+        finally:
+            cls._n_samples = 1
+
+    @classmethod
+    def wrap_VI_model(cls, VI_model):
+        ''' Returns the wrapped VI model so that it can sample from the posterior '''
+
+        # GOTCHA: We redefine the class here to inherit from the original class so as to
+        # carefully avoid a bug where sampling doesn't work due to parameter caching
+        PredSamplingWrapper = type(cls.__name__, (cls, type(VI_model)), {})
+        VI_model.__class__ = PredSamplingWrapper # wrap the forward to sample
+        return VI_model
 
 import gc
 
