@@ -2,6 +2,7 @@ import os, random, warnings
 import torch, numpy as np
 from torch import nn
 import torch.nn.utils.parametrize as parametrize
+from contextlib import contextmanager
 
 # NOTE: We changed it to use sum because the prior p(theta)=p(theta_0)p(theta_1)...p(theta_n) is a product of gaussians
 # which means that more parameters will increase the KL loss. Also KL divergence takes a log which implies the sum.
@@ -58,6 +59,7 @@ _get_rho = lambda sigma: np.log(np.expm1(sigma)+1e-20)
 # NOTE: I opted not to do RhoParametrization on this Parameterization itself because it seemed crazy & confusing to have
 # a Parametrized_BayesianParameterization Parametrization. See what I mean? I can barely say the damn thing.
 class _BayesianParameterization(nn.Module):
+    _sigma_coefficient=1.0 # see _BayesianParameterization.scale_sigma() to temporarily rescale all sigma values!
     def __init__(self, mu_params, posterior_mu_init=None, posterior_sigma_init=0.0486,
                  prior_mu=0.0, prior_sigma=1.0):
         """ For MLE-pretraining: posterior_mu_init and/or prior_mu can be None if you want to copy their values
@@ -113,6 +115,9 @@ class _BayesianParameterization(nn.Module):
         standard_normal = torch_randn_like(self._rho_params, seed=pid_seed)
         sigma_params = nn.functional.softplus(self._rho_params)
 
+        # apply scaling (possibly turning it off)
+        if self._sigma_coefficient!=1.0: sigma_params = sigma_params*self._sigma_coefficient
+
         # Update KL loss based on mu_params & sigma_params
         self._kl_loss = kl_div(mu_params, sigma_params, self.prior_mu, self.prior_sigma)
         sampled_values = mu_params+sigma_params*standard_normal
@@ -122,6 +127,18 @@ class _BayesianParameterization(nn.Module):
 
     def kl_loss(self): # this method apparently is sufficient to work with get_kl_loss(model) as-is!
         return self._kl_loss
+
+    @classmethod
+    @contextmanager
+    def scale_sigma(cls, sigma_coefficient):
+        ''' Used to temporarily change the scale of sigma params for sampling from colder posterior '''
+        try:
+            cls._sigma_coefficient=sigma_coefficient
+            yield
+        finally: cls._sigma_coefficient=1.0
+
+# simpler than class?
+SigmaCoefficient=_BayesianParameterization.scale_sigma
 
 from torch.utils.data import Dataset, DataLoader
 def get_dataset_size(train_dataset: Dataset | DataLoader):
