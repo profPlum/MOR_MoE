@@ -10,9 +10,10 @@ def tshow(x): # utility to "show" tensors without overwhelming people
     except: pass
     x = np.asarray(x)
     size_GB = np.prod(x.shape)*4/1e9 # bytes to GB
-    print('='*30)
-    print(f'{x.shape=}\n{x.dtype=}\n{x.min()=:.2e}\n{x.max()=:.2e}\n{x.mean()=:.2e}\n{x.std()=:.2e}\n{size_GB=:.2e}')
-    print('='*30)
+    out_str = '='*30+'\n'
+    out_str += f'{x.shape=}\n{x.mean()=:.2e}\n{x.std()=:.2e}\n{x.min()=:.2e}\n{x.max()=:.2e}\n{size_GB=:.2e}\n{x.dtype=}\n'
+    out_str += '='*30
+    print(out_str)
 
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters())
