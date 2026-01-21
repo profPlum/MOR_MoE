@@ -101,7 +101,7 @@ def preload_dataset(dataset):
 
 class JHTDBDataModule(L.LightningDataModule):
     def __init__(self, dataset_path: str, batch_size: int, time_chunking: int, time_stride: int=1,
-                 stride: int|list|tuple=1, long_horizon: int=288, train_proportion: float=0.784, fast_dataloaders: bool=False):
+                 stride: int|list|tuple=1, long_horizon: int=400, train_proportion: float=0.8, fast_dataloaders: bool=False):
         assert 0 < train_proportion < 1, 'train_proportion must be between 0 and 1'
         super().__init__()
         self.save_hyperparameters()
