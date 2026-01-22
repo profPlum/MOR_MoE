@@ -84,6 +84,14 @@ class _Sim(L.LightningModule):
                 del vars(self)[name]
                 self.register_buffer(name, value.detach(), persistent=False)
 
+        # u_b = real_channel_flow[0].mean((0,2,3)) for manual advection term
+        self.register_buffer('u_b', torch.zeros(ny), persistent=True)
+        self.use_manual_advection = False
+
+    def manually_match_advection(self, real_channel_flow: torch.Tensor):
+        self.u_b[:] = real_channel_flow[0].mean((0,2,3)) # assign to *persistent* buffer
+        self.use_manual_advection = True
+
     def genIC(self, from_LES=False):
         h = torch.tensor(np.random.normal(0,1,(self.nx,self.ny,self.nz,3))).float().to(self.device)
         hh = _rfft(h) * self.filt2[...,None]
@@ -113,11 +121,38 @@ class _Sim(L.LightningModule):
 
     def NSupd(self,u):
         if not self.use_PDE_solver: return u
-        return self._NSupd(u)
+        u_new = self._NSupd(u)
+        if self.use_manual_advection:
+            u_new = u_new + self.manual_advection_term(u)
+        return u_new
 
     # set the neural operator for correction
     def set_operator(self, op):
         self.op = op
+
+    # NOTE: u.shape==[channel, x, y, z]
+    def manual_advection_term(self, u):
+        u_x = u[0] # [x, y, z]
+
+        # periodic boundary conditions (central difference)
+        dudx = (u_x.roll(1, dims=0)-u_x.roll(-1, dims=0))/2
+        dudz = (u_x.roll(1, dims=2)-u_x.roll(-1, dims=2))/2
+
+        # no slip (wall) boundary condition
+        # central difference for interior points
+        # one-sided difference for boundary points
+        dudy = (u_x[:,2:]-u_x[:,:-2])/2
+        dudy_first = (u_x[:,1]-u_x[:,0])
+        dudy_last = (u_x[:,-1]-u_x[:,-2])
+        dudy = torch.cat([dudy_first, dudy, dudy_last], dim=1)
+
+        jac_row1 = torch.stack([dudx, dudy, dudz], dim=0) # = (1,0,0)*∇u
+        assert tuple(jac_row1.shape) == tuple(u.shape)
+
+        # u_b = real_channel_flow[0].mean((0,2,3))
+        assert self.u_b.shape[0]==u.shape[2] and len(self.u_b.shape)==1
+        self.u_b = self.u_b.reshape(1, 1, -1, 1) # make y-col vector
+        return self.dt * self.u_b * jac_row1 # = dt*(u_b,0,0)⋅∇u
 
     # This needs to output intermediate time-steps to get full loss!
     def evolve(self,u0,n,intermediate_outputs=False, intermediate_output_stride=1, to_cpu=False):

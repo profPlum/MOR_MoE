@@ -157,6 +157,12 @@ class JHTDBDataModule(L.LightningDataModule):
         print(f'{field_size=}')
         return field_size
 
+    @property
+    def u_b(self):
+        # u_b = real_channel_flow[0].mean((0,2,3)) (for manual advection term)
+        full_field = self.load_full_dataset_field()
+        return full_field[0].mean((0,2,3))
+
     def load_full_dataset_field(self, time_stride:int=None):
         ''' Used for comparing full learned simulations to DNS '''
         import os

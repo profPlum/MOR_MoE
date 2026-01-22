@@ -24,6 +24,7 @@ ckpt_path=os.environ.get('CKPT_PATH', None)
 
 use_proportional_k_size=bool(int(os.environ.get('MAKE_K_SIZE_PROPORTIONAL', False))) # if K_MODES or CNN_FILTER_SIZE is given as a integer will create a list where each dimension is proportional to the field size
 use_PDE_solver=bool(int(os.environ.get('USE_PDE_SOLVER', True))) # whether to use the PDE solver
+use_manual_advection=bool(int(os.environ.get('USE_MANUAL_ADVECTION', False))) # whether to use the manual advection term
 use_normalized_MoE=bool(int(os.environ.get('USE_NORMALIZED_MOE', True)))
 use_CNN_experts=bool(int(os.environ.get('USE_CNN_EXPERTS', False)))
 use_WNO3d_experts=bool(int(os.environ.get('USE_WNO3D_EXPERTS', False))) # whether to use WNO3d as experts
@@ -180,6 +181,8 @@ if __name__=='__main__':
                           weight_decay=weight_decay, lr=lr, one_cycle=one_cycle, three_phase=three_phase, RLoP=RLoP, RLoP_factor=RLoP_factor, RLoP_patience=RLoP_patience,
                           trig_encodings=use_trig, grid_inputs=use_grid_inputs, hidden_norm_groups=hidden_norm_groups, out_norm_groups=out_norm_groups,
                           make_optim=make_optim, make_gating_net=make_gating_net, simulator_kwd_args=simulator_kwd_args, **optional_kwd_args)
+    if use_manual_advection:
+        model.simulator.manually_match_advection(dm.load_full_dataset_field())
 
     print(f'num model parameters: {utils.count_parameters(model):.5e}')
     print('model:')
