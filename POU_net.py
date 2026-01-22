@@ -224,6 +224,7 @@ class POU_net(L.LightningModule):
 
         self.train_metrics = MetricsModule(self, n_outputs)
         self.val_metrics = MetricsModule(self, n_outputs, prefix='val_')
+        self.val_last_TS_metrics = MetricsModule(self, n_outputs, prefix='val_last_TS_')
         vars(self).update(locals()); del self.self; del self.kwd_args
 
     def configure_optimizers(self):
@@ -277,15 +278,14 @@ class POU_net(L.LightningModule):
 
     def _log_metrics(self, y_pred, y, val=False):
         if not val: self._log_lr()
+        if val: self.val_last_TS_metrics.log_metrics(y_pred[..., -1], y[..., -1])
         metrics = self.val_metrics if val else self.train_metrics
         metrics.log_metrics(y_pred, y)
 
     def _log_lr(self):
         scheduler = self.lr_schedulers()
-        lrs = scheduler.get_last_lr()
-        if type(lrs) in [list, tuple]:
-            lrs=sum(lrs)/len(lrs) # simplify
-        self.log('lr', lrs, on_step=True, prog_bar=True)
+        lr = scheduler.get_last_lr()
+        self.log('lr', lr, on_step=True, prog_bar=True)
 
 import model_agnostic_BNN
 
