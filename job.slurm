@@ -9,7 +9,7 @@
 #SBATCH --time=1-00:00:00                    # Maximum runtime (HH:MM:SS) (48 hours for WNO-600-epochs)
 #SBATCH --partition=ghx4                     # Partition name
 #SBATCH --account=beoi-dtai-gh
-#SBATCH --job-name=MLE
+#SBATCH --job-name=Everything
 
 # Not going to work anymore b/c we would need to save the entire checkpoint which causes OOM...
 # ##SBATCH --signal=SIGUSR1@90
@@ -56,6 +56,7 @@ export RLoP=0 # Reduce Learning-rate on Plateu, can be useful for resuming (but 
 export ONE_CYCLE=$((! RLoP)) # OneCycle warmup & decay lr schedule. Really important for scaling to multiple GPUs!
 export THREE_PHASE=0 # faster decay in one cycle, usually not needed
 export USE_PDE_SOLVER=1 # whether to use the PDE solver
+export USE_MANUAL_ADVECTION=0 # whether to use manual advection/forcing term in PDE solver
 export TRIG_ENCODINGS=1 # gives better (nearly periodic) partitions
 export GRID_INPUTS=0 # append positional encodings to inputs for experts
 export USE_NORMALIZED_MOE=1 # importance normalization gives better expert utilization
@@ -73,7 +74,7 @@ export N_LAYERS=4 # number of expert layers
 export N_FILTERS=32 # number of hidden channels
 export N_EXPERTS=3 # number of experts
 export MAKE_K_SIZE_PROPORTIONAL=1 # whether to rescale K dims to be proportional to the field size (only works when K_MODES or CNN_FILTER_SIZE is given as an integer)
-#export K_MODES=20 # 4 for stride~=1.5, 6 for full STRIDE=1, use this for comparison of FNO to CNN, keep off by default!
+#export K_MODES=25 # 4 for stride~=1.5, 6 for full STRIDE=1, use this for comparison of FNO to CNN, keep off by default!
 
 # CNN experts?
 export USE_CNN_EXPERTS=0
