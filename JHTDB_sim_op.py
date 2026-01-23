@@ -141,8 +141,8 @@ class _Sim(L.LightningModule):
         # central difference for interior points
         # one-sided difference for boundary points
         dudy = (u_x[:,2:]-u_x[:,:-2])/2
-        dudy_first = (u_x[:,1]-u_x[:,0])
-        dudy_last = (u_x[:,-1]-u_x[:,-2])
+        dudy_first = (u_x[:,1,None]-u_x[:,0,None])
+        dudy_last = (u_x[:,-1,None]-u_x[:,-2,None])
         dudy = torch.cat([dudy_first, dudy, dudy_last], dim=1)
 
         jac_row1 = torch.stack([dudx, dudy, dudz], dim=0) # = (1,0,0)*∇u

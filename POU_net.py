@@ -284,8 +284,10 @@ class POU_net(L.LightningModule):
 
     def _log_lr(self):
         scheduler = self.lr_schedulers()
-        lr = scheduler.get_last_lr()
-        self.log('lr', lr, on_step=True, prog_bar=True)
+        lrs = scheduler.get_last_lr()
+        if type(lrs) in [tuple,list]:
+            lrs = sum(lrs)/len(lrs) # simplify
+        self.log('lr', lrs, on_step=True, prog_bar=True)
 
 import model_agnostic_BNN
 
