@@ -38,10 +38,13 @@ class _Sim(L.LightningModule):
     (the code needs channel dim last but pytorch needs it right after batch dim),
     in a way that is *compatible with vmap* for batching!!
     '''
-    def __init__(self,nx=103,ny=26,nz=77,Lx=8*np.pi,Ly=2.0,Lz=3*np.pi,nu=5e-5,dt=0.0065, use_PDE_solver=True):
+    def __init__(self,nx=103,ny=26,nz=77,Lx=8*np.pi,Ly=2.0,Lz=3*np.pi,nu=5e-5,dt=0.0065,
+                 u_b: torch.Tensor=0, use_PDE_solver=True):
         ''' Defaults are set to the values needed for JHTDB channel flow.
             Also note that nu:=viscosity, Lx,Ly,Lz:=domain dimensions (physical),
-            and nx,ny,nz:=grid dimensions (virtual) '''
+            and nx,ny,nz:=grid dimensions (virtual)
+            u_b:= real_channel_flow[0].mean((0,2,3)) (mean x velocity across the y-dimension)
+            passing a non-zero u_b will automatically enable manual advection (aka forcing)'''
         super().__init__()
         self.nx = nx
         self.ny = ny
@@ -51,6 +54,10 @@ class _Sim(L.LightningModule):
         self.Lz = Lz
         self.nu = nu
         self.use_PDE_solver = use_PDE_solver # whether to use the PDE solver
+
+        self.u_b = torch.as_tensor(u_b) # u_b = real_channel_flow[0].mean((0,2,3)) (for manual advection term)
+        self.use_manual_advection = torch.any(self.u_b != 0) # whether to use the manual advection term
+        assert u_b.shape[0] in [1, ny]
 
         self.k = torch.as_tensor(np.stack(np.meshgrid(np.fft.fftfreq(nx)*nx*2.*np.pi/Lx,
                                        np.fft.fftfreq(ny)*ny*2.*np.pi/Ly,
@@ -83,14 +90,6 @@ class _Sim(L.LightningModule):
             if isinstance(value, torch.Tensor):
                 del vars(self)[name]
                 self.register_buffer(name, value.detach(), persistent=False)
-
-        # u_b = real_channel_flow[0].mean((0,2,3)) for manual advection term
-        self.register_buffer('u_b', torch.zeros(ny), persistent=True)
-        self.use_manual_advection = False
-
-    def manually_match_advection(self, real_channel_flow: torch.Tensor):
-        self.u_b[:] = real_channel_flow[0].mean((0,2,3)) # assign to *persistent* buffer
-        self.use_manual_advection = True
 
     def genIC(self, from_LES=False):
         h = torch.tensor(np.random.normal(0,1,(self.nx,self.ny,self.nz,3))).float().to(self.device)

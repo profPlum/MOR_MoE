@@ -176,13 +176,12 @@ if __name__=='__main__':
 
     # NOTE: we need to update field size based on the stride
     simulator_kwd_args = {'nx': field_size[0], 'ny': field_size[1], 'nz': field_size[2], 'dt': 0.0065*time_stride, 'use_PDE_solver': use_PDE_solver}
+    if use_manual_advection: simulator_kwd_args['u_b'] = dm.u_b
     make_gating_net = EqualizedFieldGatingNet if use_normalized_MoE else FieldGatingNet
     model = SimModelClass(n_inputs=ndims, n_outputs=ndims, ndims=ndims, n_experts=n_experts, n_layers=n_layers, hidden_channels=n_filters, n_steps=time_chunking-1,
                           weight_decay=weight_decay, lr=lr, one_cycle=one_cycle, three_phase=three_phase, RLoP=RLoP, RLoP_factor=RLoP_factor, RLoP_patience=RLoP_patience,
                           trig_encodings=use_trig, grid_inputs=use_grid_inputs, hidden_norm_groups=hidden_norm_groups, out_norm_groups=out_norm_groups,
                           make_optim=make_optim, make_gating_net=make_gating_net, simulator_kwd_args=simulator_kwd_args, **optional_kwd_args)
-    if use_manual_advection:
-        model.simulator.manually_match_advection(dm.load_full_dataset_field())
 
     print(f'num model parameters: {utils.count_parameters(model):.5e}')
     print('model:')
