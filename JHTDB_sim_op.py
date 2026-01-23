@@ -57,7 +57,7 @@ class _Sim(L.LightningModule):
 
         self.u_b = torch.as_tensor(u_b) # u_b = real_channel_flow[0].mean((0,2,3)) (for manual advection term)
         self.use_manual_advection = torch.any(self.u_b != 0) # whether to use the manual advection term
-        assert u_b.shape[0] in [1, ny]
+        assert self.u_b.numel() in [1, ny]
 
         self.k = torch.as_tensor(np.stack(np.meshgrid(np.fft.fftfreq(nx)*nx*2.*np.pi/Lx,
                                        np.fft.fftfreq(ny)*ny*2.*np.pi/Ly,
@@ -149,7 +149,7 @@ class _Sim(L.LightningModule):
         assert tuple(jac_row1.shape) == tuple(u.shape)
 
         # u_b = real_channel_flow[0].mean((0,2,3))
-        assert self.u_b.shape[0]==u.shape[2] and len(self.u_b.shape)==1
+        assert self.u_b.ravel().shape[0]==u.shape[2]
         self.u_b = self.u_b.reshape(1, 1, -1, 1) # make y-col vector
         return self.dt * self.u_b * jac_row1 # = dt*(u_b,0,0)⋅∇u
 
