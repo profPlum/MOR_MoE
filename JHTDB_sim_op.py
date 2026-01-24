@@ -8,6 +8,7 @@ import pytorch_lightning as L
 
 from lightning_utils import *
 from POU_net import POU_net, PPOU_net
+from JHTDB_data_loading import JHTDBDataModule
 
 _rfft = functools.partial(torch.fft.rfftn,dim=[0,1,2])
 _irfft = functools.partial(torch.fft.irfftn,dim=[0,1,2])
@@ -77,19 +78,30 @@ class _Sim(L.LightningModule):
         self.filt2 = torch.as_tensor((np.sqrt(self.knorm2)<=1./3*(min(self.nx,self.ny,self.nz)/2+1)))
         self.Ainv = self.Ainv * filt
         self.dt = dt
+        self.dx = Lx/nx
+        #self.dy = Ly/ny
+        #self.dz = Lz/nz
         self.shapef = [nx,ny,nz]
         self.shapeh = [nx,ny,nz//2+1]
         #self.forcing = 0.*self.k # not used
         #self.forcing[4,4,4,0] = 10. # not used
 
-        self.eta = 1e-3
-        self.nu_num = 1e-3
+        #self.eta = 1e-3 # not used
+        #self.nu_num = 1e-3 # not used
         self.op = IdentityOp() # identity by default
 
         for name, value in vars(self).copy().items():
             if isinstance(value, torch.Tensor):
                 del vars(self)[name]
                 self.register_buffer(name, value.detach(), persistent=False)
+
+    @classmethod # construct a Sim object from a JHTDBDataModule
+    def from_JHTDB_data_module(cls, data_module: JHTDBDataModule, use_manual_advection=False, use_PDE_solver=True):
+        field_size = data_module.field_size
+        kwd_args = {'nx': field_size[0], 'ny': field_size[1], 'nz': field_size[2], 'dt': 0.0065*data_module.time_stride,
+                    'use_PDE_solver': use_PDE_solver}
+        if use_manual_advection: kwd_args['u_b'] = data_module.u_b
+        return cls(**kwd_args)
 
     def genIC(self, from_LES=False):
         h = torch.tensor(np.random.normal(0,1,(self.nx,self.ny,self.nz,3))).float().to(self.device)
@@ -130,28 +142,14 @@ class _Sim(L.LightningModule):
         self.op = op
 
     # NOTE: u.shape==[channel, x, y, z]
+    # verified to work: 1/23/26
     def manual_advection_term(self, u):
-        u_x = u[0] # [x, y, z]
-
-        # periodic boundary conditions (central difference)
-        dudx = (u_x.roll(1, dims=0)-u_x.roll(-1, dims=0))/2
-        dudz = (u_x.roll(1, dims=2)-u_x.roll(-1, dims=2))/2
-
-        # no slip (wall) boundary condition
-        # central difference for interior points
-        # one-sided difference for boundary points
-        dudy = (u_x[:,2:]-u_x[:,:-2])/2
-        dudy_first = (u_x[:,1,None]-u_x[:,0,None])
-        dudy_last = (u_x[:,-1,None]-u_x[:,-2,None])
-        dudy = torch.cat([dudy_first, dudy, dudy_last], dim=1)
-
-        jac_row1 = torch.stack([dudx, dudy, dudz], dim=0) # = (1,0,0)*∇u
-        assert tuple(jac_row1.shape) == tuple(u.shape)
+        dudx = (u.roll(-1, dims=1)-u.roll(1, dims=1))/(2*self.dx)
 
         # u_b = real_channel_flow[0].mean((0,2,3))
         assert self.u_b.ravel().shape[0]==u.shape[2]
         self.u_b = self.u_b.reshape(1, 1, -1, 1) # make y-col vector
-        return self.dt * self.u_b * jac_row1 # = dt*(u_b,0,0)⋅∇u
+        return -self.dt * self.u_b * dudx
 
     # This needs to output intermediate time-steps to get full loss!
     def evolve(self,u0,n,intermediate_outputs=False, intermediate_output_stride=1, to_cpu=False):
