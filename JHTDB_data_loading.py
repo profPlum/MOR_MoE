@@ -121,19 +121,23 @@ class JHTDBDataModule(L.LightningDataModule):
         # Build datasets mirroring the main() logic
         self.dataset = JHTDB_Channel(self.dataset_path, time_chunking=self.time_chunking, stride=self.stride, time_stride=self.time_stride)
         dataset_long_horizon = JHTDB_Channel(self.dataset_path, time_chunking=self.long_horizon, stride=self.stride, time_stride=self.time_stride)
+        if len(self.dataset)<self.batch_size: raise ValueError(f'Dataset files missing! {self.dataset_path=}')
 
         # this splitting is necessary because we need to split on the file level, not the coarse time chunk level
         self.val_long_horizon_dataset = dataset_long_horizon.split(self.train_proportion)[1]
-        if stage!='peek': self.val_long_horizon_dataset = preload_dataset(self.val_long_horizon_dataset)
 
         # this kind of splitting is better for timeseries so that we can measure true extrapolation performance
         self.train_dataset, self.val_dataset = self.dataset.split(self.train_proportion)
-        if stage!='peek':
-            self.train_dataset = preload_dataset(self.train_dataset)
-            self.val_dataset = preload_dataset(self.val_dataset)
-        if stage=='peek':
+
+        if stage=='peek': # sanity checks
             print(f'{len(self.dataset)=}\n{len(self.train_dataset)=}\n{len(self.val_dataset)=}')
             print(f'{len(self.val_long_horizon_dataset)=}')
+        assert min(len(self.dataset), len(self.train_dataset), len(self.val_dataset), len(self.val_long_horizon_dataset))>0, f'Empty datasets! {self.dataset_path=}'
+
+        if stage!='peek': # preload the datasets
+            self.val_long_horizon_dataset = preload_dataset(self.val_long_horizon_dataset)
+            self.train_dataset = preload_dataset(self.train_dataset)
+            self.val_dataset = preload_dataset(self.val_dataset)
 
     def train_dataloader(self):
         return torch.utils.data.DataLoader(self.train_dataset, batch_size=self.batch_size, pin_memory=True, shuffle=True, drop_last=True, **self._fast_dataloader_kwd_args)
