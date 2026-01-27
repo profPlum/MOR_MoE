@@ -109,9 +109,11 @@ class GridFigure: # Verified to work 5/18/24
         row_size[0]=row_size[1]*self.ncols*aspect_ratio**0.5 # width
         return row_size
 
-    def show(self, fig_path: str=None): # render and possibly save the figure
-        if fig_path: assert fig_path.endswith('.png')
-        elif self._title:
+    def show(self, fig_path: str=None, save=False): # render and possibly save the figure
+        if fig_path:
+            assert fig_path.endswith('.png')
+            assert save, 'you gave a figure path but have save=False'
+        elif self._title and save:
             fn = re.sub('[^A-z0-9. =]', '', self._title).replace(' ', '_')
             fig_path=f'./grid_figures/{fn}.png'
             import os # make grid_figures directory if needed
