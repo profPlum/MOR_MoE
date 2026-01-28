@@ -4,7 +4,7 @@ evaluate_experiment() {
     experiment_name="$1"
     echo "Evaluating $experiment_name"
     papermill model_eval.ipynb "./notebook_runs/$experiment_name.ipynb" \
-     -p checkpoint_path "./lightning_logs/$experiment_name/*/last.ckpt"
+     -p checkpoint_path "./lightning_logs/$experiment_name/*/*.ckpt"
 }
 
 ls ./lightning_logs/. | \tail -n +2 | cat -n # ls and enumermate

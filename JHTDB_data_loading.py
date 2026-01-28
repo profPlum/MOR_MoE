@@ -105,7 +105,7 @@ class JHTDBDataModule(L.LightningDataModule):
         assert 0 < train_proportion < 1, 'train_proportion must be between 0 and 1'
         super().__init__()
         self.save_hyperparameters()
-        long_horizon = max(1, long_horizon // time_stride)
+        long_horizon = max(2, long_horizon // time_stride) # must be at least 2 to have input and output
         vars(self).update(locals()); del self.self # save configuration args settings
         self.setup('peek') # trivial setup to expose basic dataset info
 
