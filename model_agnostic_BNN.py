@@ -343,6 +343,7 @@ class CoverageCalculator:
         import warnings
         if n_epochs>1 and not joint:
             warnings.warn('Don\'t use epochs>1 unless joint=True, are very likely unnecessary otherwise.')
+        assert model.device.type != 'cpu', 'model must be on GPU!'
 
         # immediately compute truth quantiles for later reuse
         print('pre-computing truth quantiles:', flush=True)

@@ -200,9 +200,9 @@ class ZeroExpert(L.LightningModule):
 
 class POU_net(L.LightningModule):
     ''' POU_net minus the useless L2 regularization '''
-    max_abs_pred=2 #  when this is two the fraction on the inside disappears making it simpler to explain (also training data in [-0.1,1.2])
+    #  when max_abs_pred is two the fraction on the inside disappears making it simpler to explain (also training data in [-0.1,1.2])
+    max_abs_pred=2 # GOTCHA: given equal weighting of the zero expert the actual bounds are tighter but still valid...
     bound_outputs = lambda self, x: torch.tanh(x*(2/self.max_abs_pred))*self.max_abs_pred
-
     def __init__(self, n_inputs, n_outputs, n_experts=4, ndims=2, lr=0.001, momentum=0.9, weight_decay=0.0,
                  T_max=1, one_cycle=False, three_phase=False, RLoP=False, RLoP_factor=0.9, RLoP_patience:int=15,
                  make_optim: type=torch.optim.AdamW, make_expert: type=MOR_Operator.MOR_Operator,
