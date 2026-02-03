@@ -44,6 +44,7 @@ srun --ntasks-per-node=1 nvidia-smi
 # these new values recover the old defaults with new scaling rules
 VI_LR=1.563e-5
 MLE_LR=3.125e-5
+MLE_GRAD_CLIP=8.944e-2 # old/original value
 
 # (VI+TRIG) 1550 epochs takes 20 hours (with 4 GH200s, measured 4/2/25)
 # Everything 1600 epochs takes 33 hours (with 4 GH200s, measured 9/23/25)
