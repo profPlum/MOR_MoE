@@ -106,6 +106,10 @@ class _Sim(L.LightningModule):
         #self.forcing = 0.*self.k # not used
         #self.forcing[4,4,4,0] = 10. # not used
 
+        # sanity checks: these filters act in Fourier space (rfft over last dim)
+        assert tuple(filt.shape) == tuple(self.shapeh), f"Unexpected filt shape {tuple(filt.shape)} vs {tuple(self.shapeh)}"
+        assert tuple(self.filt2.shape) == tuple(self.shapeh), f"Unexpected filt2 shape {tuple(self.filt2.shape)} vs {tuple(self.shapeh)}"
+
         #self.eta = 1e-3 # not used
         #self.nu_num = 1e-3 # not used
         self.op = IdentityOp() # identity by default
