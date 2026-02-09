@@ -116,7 +116,7 @@ class _BayesianParameterization(nn.Module):
         sigma_params = nn.functional.softplus(self._rho_params)
 
         # apply scaling (possibly turning it off)
-        if self._sigma_coefficient!=1.0: sigma_params = sigma_params*self._sigma_coefficient
+        if self._sigma_coefficient!=1.0: sigma_params = sigma_params*float(self._sigma_coefficient)
 
         # Update KL loss based on mu_params & sigma_params
         self._kl_loss = kl_div(mu_params, sigma_params, self.prior_mu, self.prior_sigma)
