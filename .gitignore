@@ -3,9 +3,12 @@
 *.hdf5
 *.h5
 *.pt
+*.patch
 grid_figures
 __pycache__
 lightning_logs
 notebook_runs
 archive
 data/turbulence_output
+wandb
+logs
