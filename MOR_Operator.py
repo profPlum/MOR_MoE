@@ -27,7 +27,7 @@ def make_rfft_corner_slices(img1_shape, img2_shape, fft_dims=None, rfft=True, ve
     if verbose: print(f'{valid_corner_slices=}')
     return itertools.product(*valid_corner_slices) # cartesian product gives all corners
 
-class MOR_Layer(BasicLightningRegressor):
+class MOR_Layer(L.LightningModule):
     """ A single Nd MOR operator layer. """
     def __init__(self, in_channels=1, out_channels=1, k_modes=32, ndims=2, num_h_layers=1, norm_groups=1, **kwd_args):
         ''' pass norm_groups=0 to disable group norm or >1 for better group norm '''
@@ -100,8 +100,7 @@ class MOR_Layer(BasicLightningRegressor):
 class MOR_Operator(BasicLightningRegressor):
     """
     Essentially a stack of MORLayer-Nd layers + skip connections.
-    Without skip-connections this operator doesn't work at all
-    (assuming multiple layers), b/c of 1 channel bottleneck & b/c
+    Skip-connections are important to overcome the low-pass bottleneck!
     """
     def __init__(self, in_channels=1, out_channels=1, hidden_channels=32, n_layers=4, hidden_norm_groups=1, out_norm_groups=1, **kwd_args):
         super().__init__()
