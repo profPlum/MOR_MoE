@@ -40,14 +40,15 @@ class _Sim(L.LightningModule):
     in a way that is *compatible with vmap* for batching!!
     '''
     def __init__(self,nx=103,ny=26,nz=77,Lx=8*np.pi,Ly=2.0,Lz=3*np.pi,nu=5e-5,dt=0.0065,
-                 u_b: torch.Tensor=0, use_PDE_solver=True, anisotropic_filter: bool=True):
+                 u_b: torch.Tensor=0, use_PDE_solver=True, anisotropic_filter: bool=True, disable_filter: bool=False):
         ''' Defaults are set to the values needed for JHTDB channel flow.
             Also note that nu:=viscosity, Lx,Ly,Lz:=domain dimensions (physical),
             and nx,ny,nz:=grid dimensions (virtual)
             u_b:= real_channel_flow[0].mean((0,2,3)) (mean x velocity across the y-dimension)
             passing a non-zero u_b will automatically enable manual advection (aka forcing)
             anisotropic_filter:= if True, apply per-dimension 2/3 dealiasing in index space (recommended for anisotropic Lx,Ly,Lz);
-                                if False, use the legacy isotropic |k|-ball cutoff.'''
+                                if False, use the legacy isotropic |k|-ball cutoff. Ignored if disable_filter=True.
+            disable_filter:= if True, do not apply any spectral truncation (filt and filt2 are all-ones).'''
         super().__init__()
         self.nx = nx
         self.ny = ny
@@ -76,7 +77,13 @@ class _Sim(L.LightningModule):
 
         self.knorm2 = torch.sum(self.k**2,-1).real.float()
         self.Ainv =  torch.as_tensor(1./(1.+nu*np.einsum('...j,...j->...',self.k,self.k)))
-        if anisotropic_filter:
+        self.shapef = [nx,ny,nz]
+        self.shapeh = [nx,ny,nz//2+1]
+
+        if disable_filter:
+            filt = torch.ones(self.shapeh, dtype=torch.float32)
+            self.filt2 = torch.ones(self.shapeh, dtype=torch.float32)
+        elif anisotropic_filter:
             # Dealiasing/truncation in *index space* (2/3-rule per dimension).
             # This avoids unit-mismatch issues when Lx,Ly,Lz are anisotropic (e.g. Ly=2 makes ky spacing large in physical units).
             kx_idx = np.fft.fftfreq(nx) * nx
@@ -101,8 +108,6 @@ class _Sim(L.LightningModule):
         self.dx = Lx/nx
         #self.dy = Ly/ny
         #self.dz = Lz/nz
-        self.shapef = [nx,ny,nz]
-        self.shapeh = [nx,ny,nz//2+1]
         #self.forcing = 0.*self.k # not used
         #self.forcing[4,4,4,0] = 10. # not used
 
@@ -121,12 +126,12 @@ class _Sim(L.LightningModule):
                 self.register_buffer(name, value.detach(), persistent=False)
 
     @classmethod # construct a Sim object from a JHTDBDataModule
-    def from_JHTDB_data_module(cls, data_module: JHTDBDataModule, use_manual_advection=False, use_PDE_solver=True, anisotropic_filter: bool=True):
+    def from_JHTDB_data_module(cls, data_module: JHTDBDataModule, use_manual_advection=False, **kwd_args):
+        """Build Sim from data module. nx,ny,nz,dt are taken from the module; all kwd_args are forwarded to the constructor."""
         field_size = data_module.field_size
-        kwd_args = {'nx': field_size[0], 'ny': field_size[1], 'nz': field_size[2], 'dt': 0.0065*data_module.time_stride,
-                    'use_PDE_solver': use_PDE_solver, 'anisotropic_filter': anisotropic_filter}
-        if use_manual_advection: kwd_args['u_b'] = data_module.u_b
-        return cls(**kwd_args)
+        merged = {'nx': field_size[0], 'ny': field_size[1], 'nz': field_size[2], 'dt': 0.0065*data_module.time_stride, **kwd_args}
+        if use_manual_advection: merged['u_b'] = data_module.u_b
+        return cls(**merged)
 
     def genIC(self, from_LES=False):
         h = torch.tensor(np.random.normal(0,1,(self.nx,self.ny,self.nz,3))).float().to(self.device)
