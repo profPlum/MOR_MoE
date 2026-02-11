@@ -195,9 +195,8 @@ if __name__=='__main__':
     job_name = os.environ.get("SLURM_JOB_NAME", 'JHTDB_MOR_MoE')
     version = os.environ.get("SLURM_JOB_ID", None)
     wandb.login(key='251c77a548925cf7f08eecaf2b159ea8d49457c3')
-    logger = WandbLogger(project="MOR_MoE", name=job_name, version=version)#, log_model="all")
-    #logger.watch(model) # For W&B to log gradients and model topology
-    #logger.experiment.config.update({'grad_clip': gradient_clip_val, 'VI_prior_sigma': VI_prior_sigma})
+    logger = WandbLogger(project="MOR_MoE", name=job_name, version=version)
+    logger.experiment.config.update({'grad_clip': gradient_clip_val, 'VI_counts_timestride_gap_data': VI_counts_timestride_gap_data, 'use_manual_advection': use_manual_advection})
 
     # Weight-only sharded checkpoints are needed to avoid OOM problem caused by large model size
     model_checkpoint_callback=L.callbacks.ModelCheckpoint(f"lightning_logs/{job_name}/{version}", save_weights_only=True, save_last=False,
