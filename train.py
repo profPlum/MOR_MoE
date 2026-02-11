@@ -14,7 +14,7 @@ n_filters: int=int(os.environ.get('N_FILTERS', 32)) # hidden layer width (aka # 
 time_chunking: int=int(os.environ.get('TIME_CHUNKING', 9)) # how many self-aware recursive steps to take
 time_stride: int=int(os.environ.get('TIME_STRIDE', 1)) # temporal stride between selected frames
 batch_size: int=int(os.environ.get('BATCH_SIZE', 2)) # batch size, with VI experts we can only fit 1 batch w/ 20 A100
-scale_lr=True # multiply by DDP (total) batch_size
+scale_lr_and_clip=True # multiply by DDP (total) batch_size
 lr: float=float(os.environ.get('LR', 1.563e-5)) # (VI) learning rate (will be scaled by recurisve steps)
 weight_decay: float=float(os.environ.get('WEIGHT_DECAY', 0.0)) # weight decay
 max_epochs=int(os.environ.get('MAX_EPOCHS', 500))
@@ -145,8 +145,9 @@ if __name__=='__main__':
     # scale lr & grad clip by: the number of *output* timesteps in one full batch (this follows scaling equations)
     scale_of_batch_data = num_nodes*num_gpus_per_node*batch_size*(time_chunking-1) # (includes time)
     print(f'b4 scaling: {lr=}, {gradient_clip_val=}')
-    if scale_lr: lr *= scale_of_batch_data
-    gradient_clip_val /= scale_of_batch_data**0.5
+    if scale_lr_and_clip:
+        lr *= scale_of_batch_data
+        gradient_clip_val /= scale_of_batch_data**0.5
     print(f'after scaling: {lr=}, {gradient_clip_val=}')
     print(f'{scale_of_batch_data=}')
 
