@@ -26,6 +26,7 @@ use_proportional_k_size=bool(int(os.environ.get('MAKE_K_SIZE_PROPORTIONAL', Fals
 use_PDE_solver=bool(int(os.environ.get('USE_PDE_SOLVER', True))) # whether to use the PDE solver
 use_manual_advection=bool(int(os.environ.get('USE_MANUAL_ADVECTION', False))) # whether to use the manual advection term
 anisotropic_filter=bool(int(os.environ.get('ANISOTROPIC_FILTER', True))) # per-dimension 2/3 dealiasing filter (recommended for anisotropic Lx,Ly,Lz)
+disable_filter=bool(int(os.environ.get('DISABLE_FILTER', False))) # if True, no spectral truncation (all modes kept)
 use_normalized_MoE=bool(int(os.environ.get('USE_NORMALIZED_MOE', True)))
 use_CNN_experts=bool(int(os.environ.get('USE_CNN_EXPERTS', False)))
 use_WNO3d_experts=bool(int(os.environ.get('USE_WNO3D_EXPERTS', False))) # whether to use WNO3d as experts
@@ -178,7 +179,7 @@ if __name__=='__main__':
 
     # NOTE: we need to update field size based on the stride
     simulator_kwd_args = {'nx': field_size[0], 'ny': field_size[1], 'nz': field_size[2], 'dt': 0.0065*time_stride,
-                          'use_PDE_solver': use_PDE_solver, 'anisotropic_filter': anisotropic_filter}
+                          'use_PDE_solver': use_PDE_solver, 'anisotropic_filter': anisotropic_filter, 'disable_filter': disable_filter}
     if use_manual_advection: simulator_kwd_args['u_b'] = dm.u_b
     make_gating_net = EqualizedFieldGatingNet if use_normalized_MoE else FieldGatingNet
     model = SimModelClass(n_inputs=ndims, n_outputs=ndims, ndims=ndims, n_experts=n_experts, n_layers=n_layers, hidden_channels=n_filters, n_steps=time_chunking-1,
