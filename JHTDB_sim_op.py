@@ -40,12 +40,14 @@ class _Sim(L.LightningModule):
     in a way that is *compatible with vmap* for batching!!
     '''
     def __init__(self,nx=103,ny=26,nz=77,Lx=8*np.pi,Ly=2.0,Lz=3*np.pi,nu=5e-5,dt=0.0065,
-                 u_b: torch.Tensor=0, use_PDE_solver=True):
+                 u_b: torch.Tensor=0, use_PDE_solver=True, anisotropic_filter: bool=True):
         ''' Defaults are set to the values needed for JHTDB channel flow.
             Also note that nu:=viscosity, Lx,Ly,Lz:=domain dimensions (physical),
             and nx,ny,nz:=grid dimensions (virtual)
             u_b:= real_channel_flow[0].mean((0,2,3)) (mean x velocity across the y-dimension)
-            passing a non-zero u_b will automatically enable manual advection (aka forcing)'''
+            passing a non-zero u_b will automatically enable manual advection (aka forcing)
+            anisotropic_filter:= if True, apply per-dimension 2/3 dealiasing in index space (recommended for anisotropic Lx,Ly,Lz);
+                                if False, use the legacy isotropic |k|-ball cutoff.'''
         super().__init__()
         self.nx = nx
         self.ny = ny
@@ -74,9 +76,27 @@ class _Sim(L.LightningModule):
 
         self.knorm2 = torch.sum(self.k**2,-1).real.float()
         self.Ainv =  torch.as_tensor(1./(1.+nu*np.einsum('...j,...j->...',self.k,self.k)))
-        filt = torch.as_tensor((np.sqrt(self.knorm2)<=2./3*(min(self.nx,self.ny,self.nz)/2+1))) # only used locally
-        self.filt2 = torch.as_tensor((np.sqrt(self.knorm2)<=1./3*(min(self.nx,self.ny,self.nz)/2+1)))
-        self.Ainv = self.Ainv * filt
+        if anisotropic_filter:
+            # Dealiasing/truncation in *index space* (2/3-rule per dimension).
+            # This avoids unit-mismatch issues when Lx,Ly,Lz are anisotropic (e.g. Ly=2 makes ky spacing large in physical units).
+            kx_idx = np.fft.fftfreq(nx) * nx
+            ky_idx = np.fft.fftfreq(ny) * ny
+            kz_idx = np.fft.rfftfreq(nz) * nz
+            KX, KY, KZ = np.meshgrid(kx_idx, ky_idx, kz_idx, indexing='ij')
+
+            filt = torch.as_tensor(
+                (np.abs(KX) <= nx/3) & (np.abs(KY) <= ny/3) & (np.abs(KZ) <= nz/3)
+            )
+            self.filt2 = torch.as_tensor(
+                (np.abs(KX) <= nx/6) & (np.abs(KY) <= ny/6) & (np.abs(KZ) <= nz/6)
+            )
+        else:
+            # Legacy isotropic cutoff in physical |k|. Note: threshold is in grid-count units, so this can be overly
+            # restrictive when Lx,Ly,Lz are anisotropic.
+            filt = torch.as_tensor((torch.sqrt(self.knorm2) <= 2./3*(min(self.nx,self.ny,self.nz)/2+1))) # only used locally
+            self.filt2 = torch.as_tensor((torch.sqrt(self.knorm2) <= 1./3*(min(self.nx,self.ny,self.nz)/2+1)))
+
+        self.Ainv = self.Ainv * filt.to(self.Ainv.dtype)
         self.dt = dt
         self.dx = Lx/nx
         #self.dy = Ly/ny
@@ -97,10 +117,10 @@ class _Sim(L.LightningModule):
                 self.register_buffer(name, value.detach(), persistent=False)
 
     @classmethod # construct a Sim object from a JHTDBDataModule
-    def from_JHTDB_data_module(cls, data_module: JHTDBDataModule, use_manual_advection=False, use_PDE_solver=True):
+    def from_JHTDB_data_module(cls, data_module: JHTDBDataModule, use_manual_advection=False, use_PDE_solver=True, anisotropic_filter: bool=True):
         field_size = data_module.field_size
         kwd_args = {'nx': field_size[0], 'ny': field_size[1], 'nz': field_size[2], 'dt': 0.0065*data_module.time_stride,
-                    'use_PDE_solver': use_PDE_solver}
+                    'use_PDE_solver': use_PDE_solver, 'anisotropic_filter': anisotropic_filter}
         if use_manual_advection: kwd_args['u_b'] = data_module.u_b
         return cls(**kwd_args)
 
