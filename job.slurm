@@ -9,7 +9,7 @@
 #SBATCH --time=1-00:00:00                    # Maximum runtime (HH:MM:SS) (48 hours for WNO-600-epochs)
 #SBATCH --partition=ghx4                     # Partition name
 #SBATCH --account=beoi-dtai-gh
-#SBATCH --job-name=MLE_TS=16
+#SBATCH --job-name=Everything_TS=16_prior=0.05
 
 # Not going to work anymore b/c we would need to save the entire checkpoint which causes OOM...
 # ##SBATCH --signal=SIGUSR1@90
@@ -49,8 +49,8 @@ MLE_GRAD_CLIP=8.944e-2 # old/original value
 # (VI+TRIG) 1550 epochs takes 20 hours (with 4 GH200s, measured 4/2/25)
 # Everything 1600 epochs takes 33 hours (with 4 GH200s, measured 9/23/25)
 export MAX_EPOCHS=1600 # MUST BE ACCURATELY ADJUSTED based on estimated epochs (this ensures that OneCycle is properly calibrated)
-export LR=$MLE_LR # this is 4x higher than theory suggests (it is only possible b/c grad clip)
-export GRAD_CLIP=500000 # it is best to keep this value, it will automatically be adjusted based on number of recursive timesteps & batch_size
+export LR=$VI_LR # this is 4x higher than theory suggests (it is only possible b/c grad clip)
+export GRAD_CLIP=50 # it is best to keep this value, it will automatically be adjusted based on number of recursive timesteps & batch_size
 export WEIGHT_DECAY=0.0 # 0.01 is AdamW default
 export OPTIM='AdamW' # RAdam is better for resuming, otherwise use Adam
 export RLoP=0 # Reduce Learning-rate on Plateu, can be useful for resuming (but otherwise keep it off!). Also bash booleans are binary
@@ -63,8 +63,8 @@ export GRID_INPUTS=0 # append positional encodings to inputs for experts
 export USE_NORMALIZED_MOE=1 # importance normalization gives better expert utilization
 export OUT_NORM_GROUPS=1 # whether to use output normalization (you should!)
 export HIDDEN_NORM_GROUPS=1 # whether to use hidden normalization (you should!)
-export VI=0 # use VI or not (in bash binary booleans have the best support for boolean logic)
-export VI_PRIOR_SIGMA=0.2 # approximately reflects the values of sigma at initialization
+export VI=1 # use VI or not (in bash binary booleans have the best support for boolean logic)
+export VI_PRIOR_SIGMA=0.05 # approximately reflects the values of sigma at initialization
 export VI_COUNTS_TIMESTRIDE_GAP_DATA=1 # whether to count the gap data between timestrides in the dataset size for VI
 export TIME_STRIDE=16 # must be integer-valued
 export STRIDE=1 # e.g. 1.5 or a crazy list [1.5,1.3,1.8] for smaller experiments
@@ -115,7 +115,7 @@ source experiment_configs/everything.sh # NO-OP b/c everything is already the de
 #export CKPT_PATH='/home/dsdeigh/MOR_MoE/lightning_logs/PARTIAL_VI_RLoP_Extension/477516/checkpoints/epoch=206-step=7452.ckpt.consolidated'
 
 # Run your PyTorch Lightning script
-srun --kill-on-bad-exit python -O train.py
+srun --kill-on-bad-exit python train.py
 #srun --kill-on-bad-exit python -m pdb train.py
 
 # Optional: Debugging info

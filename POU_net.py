@@ -338,6 +338,10 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
 
         return loss
 
+    def validation_step(self, batch, batch_idx=None, data_loader_idx=0):
+        with model_agnostic_BNN.SigmaCoefficient(0): # like dropout and for fairness when comparing to MLE we will disable sampling for validation metrics
+            return super().validation_step(batch, batch_idx=None, data_loader_idx=0)
+
     def _log_metrics(self, y_pred: tuple, y: torch.Tensor, val=False):
         y_pred_mu, y_pred_sigma = y_pred # break apart pred tuple
         super()._log_metrics(y_pred_mu, y, val=val) # log regular mu metrics & lr (implicitly)
