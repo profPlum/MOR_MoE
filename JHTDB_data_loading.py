@@ -11,7 +11,8 @@ class JHTDB_Channel(torch.utils.data.Dataset):
     this predict everything at once because that would make the dataset size=1.
     '''
     def __init__(self, path:str, time_chunking=5, stride:int|list|tuple=1, time_stride:int=1):
-        self.path=path
+        self._path=path
+        self._total_files = len(glob(f'{path}/*.h5')) # for performance reasons, we precompute the total number of files
         self.time_chunking=time_chunking
         self.time_stride=time_stride
         assert type(time_stride) is int
@@ -23,6 +24,10 @@ class JHTDB_Channel(torch.utils.data.Dataset):
 
         self._split_start_proportion = 0
         self._split_end_proportion = 1.0 # exclusive 1.0=length of dataset
+
+    @property
+    def path(self): # read-only
+        return self._path
 
     def split(self, proportion: float):
         assert 0 <= proportion <= 1, 'proportion must be between 0 and 1'
@@ -43,15 +48,18 @@ class JHTDB_Channel(torch.utils.data.Dataset):
 
     @property
     def _split_file_index_range(self) -> tuple[int, int]:
-        num_files = len(glob(f'{self.path}/*.h5'))
-        start_index = int(num_files * self._split_start_proportion)
-        end_index = int(num_files * self._split_end_proportion)
+        start_index = int(self._total_files * self._split_start_proportion)
+        end_index = int(self._total_files * self._split_end_proportion)
         return start_index, end_index
 
     def __len__(self):
         # NOTE: for overlapping chunks, you'd use num_files - ((self.time_chunking - 1) * self.time_stride)
-        # GOTCHA: it might be better to apply the data augmentation randomly rather than changing the length (for VI consistency);
-        # that being said, it wouldn't really work with dataset preloading, and I'm not sure how it would interact with existing offseting.
+        start_index, end_index = self._split_file_index_range
+        num_files = end_index - start_index
+        return num_files - ((self.time_chunking - 1) * self.time_stride)
+
+    @property
+    def Bayesian_dataset_size(self):
         start_index, end_index = self._split_file_index_range
         num_files = end_index - start_index
         base_blocks = num_files // (self.time_chunking * self.time_stride)  # full blocks only
@@ -65,11 +73,10 @@ class JHTDB_Channel(torch.utils.data.Dataset):
         files = []
         velocity_fields = []
         start_index, end_index = self._split_file_index_range
-        offset = index % self.time_stride
-        index = index // self.time_stride
+
         # NOTE: for overlapping chunks, you'd use range(index, index+self.time_chunking*self.time_stride, self.time_stride)
-        for i in range(index*self.time_chunking*self.time_stride, (index+1)*self.time_chunking*self.time_stride, self.time_stride):
-            i+=1 + offset + start_index # 1-based indexing + offset to utilize all data with time stride + start index to skip split files
+        for i in range(index, index+self.time_chunking*self.time_stride, self.time_stride):
+            i+=1 + start_index  # 1-based indexing + start index to skip split files
             assert i <= end_index, f'File index: {i} is above maximum {end_index}'
             try: files.append(h5py.File(f'{self.path}/channel_t={i}.h5', 'r')) # keep open for stacking
             except OSError as e:
