@@ -142,8 +142,9 @@ if __name__=='__main__':
         if weight_decay > 0: raise ValueError("Weight decay is not supported for VI (use prior_sigma instead!)")
 
         SimModelClass = PPOU_NetSimulator
-        dataset_size_divisor = 1 if VI_counts_timestride_gap_data else time_stride
-        dataset_size = model_agnostic_BNN.get_dataset_size(dm.train_dataset)//dataset_size_divisor
+        dataset_size_divisor = len(dm.train_dataset) / dm.bayesian_train_dataset_length # correct for data augmentation
+        dataset_size_divisor *= 1 if VI_counts_timestride_gap_data else time_stride # deal with ambiguity about whether to count gap data as truly "independent" samples
+        dataset_size = int(model_agnostic_BNN.get_dataset_size(dm.train_dataset)/dataset_size_divisor + 0.5) # round to nearest integer
         optional_kwd_args = {'prior_cfg': {'prior_sigma': VI_prior_sigma}, 'train_dataset_size': dataset_size}
 
     # scale lr & grad clip by: the number of *output* timesteps in one full batch (this follows scaling equations)
