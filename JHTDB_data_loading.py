@@ -4,7 +4,7 @@ import numpy as np
 from glob import glob
 import pytorch_lightning as L
 
-# Verified to work: 8/23/24
+# Verified to work: 3/6/26
 class JHTDB_Channel(torch.utils.data.Dataset):
     '''
     Dataset for the JHTDB autoregressive problem... It is not possible to make
@@ -52,14 +52,15 @@ class JHTDB_Channel(torch.utils.data.Dataset):
         end_index = int(self._total_files * self._split_end_proportion)
         return start_index, end_index
 
-    def __len__(self):
+    def __len__(self): # Verified to work: 3/6/26
         # NOTE: for overlapping chunks, you'd use num_files - ((self.time_chunking - 1) * self.time_stride)
         start_index, end_index = self._split_file_index_range
         num_files = end_index - start_index
         return num_files - ((self.time_chunking - 1) * self.time_stride)
 
     @property
-    def Bayesian_dataset_size(self):
+    def bayesian_dataset_length(self):
+        ''' dataset length that corrects for data augmentation '''
         start_index, end_index = self._split_file_index_range
         num_files = end_index - start_index
         base_blocks = num_files // (self.time_chunking * self.time_stride)  # full blocks only
@@ -74,6 +75,7 @@ class JHTDB_Channel(torch.utils.data.Dataset):
         velocity_fields = []
         start_index, end_index = self._split_file_index_range
 
+        # Verified to work: 3/6/26
         # NOTE: for overlapping chunks, you'd use range(index, index+self.time_chunking*self.time_stride, self.time_stride)
         for i in range(index, index+self.time_chunking*self.time_stride, self.time_stride):
             i+=1 + start_index  # 1-based indexing + start index to skip split files
@@ -136,9 +138,13 @@ class JHTDBDataModule(L.LightningDataModule):
         # this kind of splitting is better for timeseries so that we can measure true extrapolation performance
         self.train_dataset, self.val_dataset = self.dataset.split(self.train_proportion)
 
+        # IMPORTANT: dataset length that corrects for data augmentation (required for Bayesian inference)
+        self.bayesian_train_dataset_length = self.train_dataset.bayesian_dataset_length
+
         if stage=='peek': # sanity checks
-            print(f'{len(self.dataset)=}\n{len(self.train_dataset)=}\n{len(self.val_dataset)=}')
-            print(f'{len(self.val_long_horizon_dataset)=}')
+            print("NOTE: self.bayesian_train_dataset_length is the dataset length *before* data augmentation\n(required for VI to count data accurately!)\n")
+            print(f'{len(self.dataset)=}\n{len(self.train_dataset)=}\n{self.bayesian_train_dataset_length=}')
+            print(f'{len(self.val_dataset)=}\n{len(self.val_long_horizon_dataset)=}')
         assert min(len(self.dataset), len(self.train_dataset), len(self.val_dataset), len(self.val_long_horizon_dataset))>0, f'Empty datasets! {self.dataset_path=}'
 
         if stage!='peek': # preload the datasets
