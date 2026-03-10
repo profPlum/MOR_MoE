@@ -48,7 +48,8 @@ MLE_GRAD_CLIP=8.944e-2 # old/original value
 
 # (VI+TRIG) 1550 epochs takes 20 hours (with 4 GH200s, measured 4/2/25)
 # Everything 1600 epochs takes 33 hours (with 4 GH200s, measured 9/23/25)
-export MAX_EPOCHS=1600 # MUST BE ACCURATELY ADJUSTED based on estimated epochs (this ensures that OneCycle is properly calibrated)
+# NOTE: 168 epochs (with data augmentation) has the same number of steps as 1600 epochs (without data augmentation)
+export MAX_EPOCHS=168 # MUST BE ACCURATELY ADJUSTED based on estimated epochs (this ensures that OneCycle is properly calibrated)
 export LR=$VI_LR # this is 4x higher than theory suggests (it is only possible b/c grad clip)
 export GRAD_CLIP=50 # it is best to keep this value, it will automatically be adjusted based on number of recursive timesteps & batch_size
 export WEIGHT_DECAY=0.0 # 0.01 is AdamW default
