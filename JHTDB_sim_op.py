@@ -165,6 +165,10 @@ class _Sim(L.LightningModule):
             #assert not u.isnan().any()
             if intermediate_outputs and i%intermediate_output_stride==0:
                 outputs.append(u.to('cpu', non_blocking=True) if to_cpu else u)
+        if intermediate_outputs and (n-1) % intermediate_output_stride != 0:
+            # Always include the final state so downstream metrics that rely on "last timestep"
+            # remain aligned with the unstrided behavior.
+            outputs.append(u.to('cpu', non_blocking=True) if to_cpu else u)
 
         # time dim is the last dim (if it exists)
         outputs = torch.stack(outputs,axis=-1) if intermediate_outputs else u
@@ -195,6 +199,11 @@ class _UQ_Sim(_Sim):
             if intermediate_outputs and i%intermediate_output_stride==0:
                 u_outputs.append(u.to('cpu', non_blocking=True) if to_cpu else u)
                 uq_outputs.append(uq.to('cpu', non_blocking=True) if to_cpu else uq)
+        if intermediate_outputs and (n-1) % intermediate_output_stride != 0:
+            # Always include the final state so downstream metrics that rely on "last timestep"
+            # remain aligned with the unstrided behavior.
+            u_outputs.append(u.to('cpu', non_blocking=True) if to_cpu else u)
+            uq_outputs.append(uq.to('cpu', non_blocking=True) if to_cpu else uq)
 
         # remove artificial batch dimension only if it was added
         maybe_squeeze = lambda output: output.squeeze() if len(u.shape)>len(u0.shape) else output
