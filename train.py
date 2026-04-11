@@ -227,8 +227,8 @@ if __name__=='__main__':
     strategy = L.strategies.FSDPStrategy(state_dict_type='sharded') if num_nodes*num_gpus_per_node > 1 else 'auto' # sharded reduces peak memory usage but still allows resuming in full!
     trainer = L.Trainer(max_epochs=max_epochs, gradient_clip_val=gradient_clip_val, gradient_clip_algorithm='value',
                         accelerator='gpu', strategy=strategy, num_nodes=num_nodes, devices=num_gpus_per_node,
-                        profiler='simple', logger=logger, plugins=[SLURMEnvironment()], log_every_n_steps=20,
-                        callbacks=[model_checkpoint_callback, MemMonitorCallback()])
+                        profiler='simple', logger=logger, log_every_n_steps=20, check_val_every_n_epoch=5, # x5 epochs to deal with explosion of long-horizon windows (from augmentation)
+                        plugins=[SLURMEnvironment()], callbacks=[model_checkpoint_callback, MemMonitorCallback()])
 
     # long validation loader causes various problems with profiler & GPU utilization...
     trainer.fit(model, datamodule=dm)#, ckpt_path=ckpt_path)
