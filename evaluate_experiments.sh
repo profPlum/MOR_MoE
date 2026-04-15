@@ -15,10 +15,17 @@ echo how many should we skip \(default=0\)?
 read SKIP
 echo how many should be evaluated?
 read N
+echo how many hours should we wait \(default=0\)?
+read HOURS
 
 [[ $SKIP ]] || SKIP=0
+[[ $HOURS ]] || HOURS=0
 
-\ls -t ./lightning_logs | \tail -n +$((SKIP+1)) | \head -n $N | \
+# pre-save while the files are fixed/known
+experiment_names=$(\ls -t ./lightning_logs | \tail -n +$((SKIP+1)) | \head -n $N)
+
+sleep $((HOURS*3600))
+
 while read experiment_name; do
     evaluate_experiment "$experiment_name"
-done
+done <<< "$experiment_names"
