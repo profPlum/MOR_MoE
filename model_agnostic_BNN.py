@@ -299,28 +299,37 @@ class PredSamplingWrapper: # TODO: support get_BNN_pred_mixture
     _n_samples=1
     _moments=False # whether to output aggregated moments or samples
     _verbose=False
+    _MAP_sample_first=False # whether to sample the MAP first before sampling from the posterior (gets stored at index 0)
 
     def __init__(self, *args, **kwd_args):
         raise NotImplementedError('PredSamplingWrapper is a wrapper class and should not be instantiated directly.')
 
     def forward(self, x_inputs, **kwd_args):
-        n_samples = self._n_samples
-        if n_samples>1:
+        if self._n_samples>1:
+            if self._MAP_sample_first: # make MAP prediction before tqdm progress bar
+                with SigmaCoefficient(0.0):
+                    mu_MAP, sigma_MAP = super().forward(x_inputs, **kwd_args)
             sampling_fn = get_BNN_pred_moments if self._moments else get_BNN_pred_distribution
-            mu, sigma = sampling_fn(super().forward, x_inputs, n_samples=n_samples,
+            mu, sigma = sampling_fn(super().forward, x_inputs, n_samples=self._n_samples,
                                     verbose=self._verbose, **kwd_args)
+            if self._MAP_sample_first: # add MAP prediction to the beginning of the stack
+                mu = torch.cat([mu_MAP[None], mu], dim=0)
+                sigma = torch.cat([sigma_MAP[None], sigma], dim=0)
         else: mu, sigma = super().forward(x_inputs, **kwd_args)
         return mu, sigma
 
     @classmethod
     @contextmanager
-    def enable_sampling(cls, n_samples:int, moments:bool=True, verbose:bool=False):
+    def enable_sampling(cls, n_samples:int, moments:bool=True,
+                        MAP_sample_first:bool=False, verbose:bool=False):
         ''' * moments=True will output aggregated moments instead of samples
             * verbose=True will use tqdm to show progress '''
         try:
             cls._n_samples = n_samples
             cls._moments = moments
             cls._verbose = verbose
+            cls._MAP_sample_first = MAP_sample_first
+            assert not (cls._MAP_sample_first and cls._moments), 'MAP sampling and moments are not compatible!'
             yield
         finally:
             cls._n_samples = 1
