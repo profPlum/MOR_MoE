@@ -6,10 +6,10 @@
 #SBATCH --mem-per-gpu=185GB                  # CPU+GPU RAM per GPU < 1/4*0.85 of total node RAM = 120GB*0.85 = 102GB
 #SBATCH --gpus-per-node=1                    # GPUs per task is 1
 #SBATCH --cpus-per-task=70                   # CORES per task for data loaders (72 avail per GPU) (very few really used)
-#SBATCH --time=1-00:00:00                    # Maximum runtime (HH:MM:SS) (48 hours for WNO-600-epochs)
+#SBATCH --time=1-12:00:00                    # Maximum runtime (HH:MM:SS) (48 hours for WNO-600-epochs)
 #SBATCH --partition=ghx4                     # Partition name
 #SBATCH --account=beoi-dtai-gh
-#SBATCH --job-name=Everything_TS=4
+#SBATCH --job-name=MLE_TS=4_DA_fast
 
 # Not going to work anymore b/c we would need to save the entire checkpoint which causes OOM...
 # ##SBATCH --signal=SIGUSR1@90
@@ -75,7 +75,7 @@ export USE_NORMALIZED_MOE=1 # importance normalization gives better expert utili
 export OUT_NORM_GROUPS=1 # whether to use output normalization (you should!)
 export HIDDEN_NORM_GROUPS=1 # whether to use hidden normalization (you should!)
 export DROPOUT=0.0 # maybe this makes VI redundant?
-export VI=1 # use VI or not (in bash binary booleans have the best support for boolean logic)
+export VI=0 # use VI or not (in bash binary booleans have the best support for boolean logic)
 export VI_PRIOR_SIGMA=0.2 # approximately reflects the values of sigma at initialization
 export VI_COUNTS_TIMESTRIDE_GAP_DATA=1 # whether to count the gap data between timestrides in the dataset size for VI
 export VI_PROPAGATE_UQ=1 # whether to propagate uncertainty through the LES model across timesteps (as additional input channels)
