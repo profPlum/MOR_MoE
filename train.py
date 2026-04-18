@@ -27,6 +27,8 @@ use_PDE_solver=bool(int(os.environ.get('USE_PDE_SOLVER', True))) # whether to us
 use_manual_advection=bool(int(os.environ.get('USE_MANUAL_ADVECTION', False))) # whether to use the manual advection term
 anisotropic_filter=bool(int(os.environ.get('ANISOTROPIC_FILTER', False))) # per-dimension 2/3 dealiasing filter (recommended for anisotropic Lx,Ly,Lz)
 disable_filter=bool(int(os.environ.get('DISABLE_FILTER', False))) # if True, no spectral truncation (all modes kept)
+dealias_before_quadratic=bool(int(os.environ.get('DEALIAS_BEFORE_QUADRATIC', False))) # if True, apply filt before u*u in PDE update
+apply_pde_filter_bottleneck=bool(int(os.environ.get('APPLY_PDE_FILTER_BOTTLENECK', True))) # if True, keep legacy low-pass bottleneck in PDE step
 use_normalized_MoE=bool(int(os.environ.get('USE_NORMALIZED_MOE', True)))
 use_CNN_experts=bool(int(os.environ.get('USE_CNN_EXPERTS', False)))
 use_WNO3d_experts=bool(int(os.environ.get('USE_WNO3D_EXPERTS', False))) # whether to use WNO3d as experts
@@ -179,7 +181,8 @@ if __name__=='__main__':
 
     # NOTE: we need to update field size based on the stride
     simulator_kwd_args = {'nx': field_size[0], 'ny': field_size[1], 'nz': field_size[2], 'dt': 0.0065*time_stride,
-                          'use_PDE_solver': use_PDE_solver, 'anisotropic_filter': anisotropic_filter, 'disable_filter': disable_filter}
+                          'use_PDE_solver': use_PDE_solver, 'anisotropic_filter': anisotropic_filter, 'disable_filter': disable_filter,
+                          'dealias_before_quadratic': dealias_before_quadratic, 'apply_pde_filter_bottleneck': apply_pde_filter_bottleneck}
     if use_manual_advection: simulator_kwd_args['u_b'] = dm.u_b
     make_gating_net = EqualizedFieldGatingNet if use_normalized_MoE else FieldGatingNet
     model = SimModelClass(n_inputs=ndims, n_outputs=ndims, ndims=ndims, n_experts=n_experts, n_layers=n_layers, hidden_channels=n_filters, n_steps=time_chunking-1,
@@ -200,7 +203,9 @@ if __name__=='__main__':
     version = os.environ.get("SLURM_JOB_ID", None)
     wandb.login(key='251c77a548925cf7f08eecaf2b159ea8d49457c3')
     logger = WandbLogger(project="MOR_MoE", name=job_name, version=version)
-    logger.experiment.config.update({'grad_clip': gradient_clip_val, 'use_VI': use_VI, 'VI_counts_timestride_gap_data': VI_counts_timestride_gap_data, 'use_manual_advection': use_manual_advection})
+    logger.experiment.config.update({'grad_clip': gradient_clip_val, 'use_VI': use_VI, 'VI_counts_timestride_gap_data': VI_counts_timestride_gap_data,
+                                     'use_manual_advection': use_manual_advection, 'dealias_before_quadratic': dealias_before_quadratic,
+                                     'apply_pde_filter_bottleneck': apply_pde_filter_bottleneck})
 
     # Weight-only sharded checkpoints are needed to avoid OOM problem caused by large model size
     model_checkpoint_callback=L.callbacks.ModelCheckpoint(f"lightning_logs/{job_name}/{version}", save_weights_only=True, save_last=False,
