@@ -84,6 +84,7 @@ class _Sim(L.LightningModule):
             filt = torch.ones(self.shapeh, dtype=torch.float32)
             self.filt2 = torch.ones(self.shapeh, dtype=torch.float32)
         elif anisotropic_filter:
+            print('Using anisotropic filter')
             # Dealiasing/truncation in *index space* (2/3-rule per dimension).
             # This avoids unit-mismatch issues when Lx,Ly,Lz are anisotropic (e.g. Ly=2 makes ky spacing large in physical units).
             kx_idx = np.fft.fftfreq(nx) * nx
@@ -98,6 +99,7 @@ class _Sim(L.LightningModule):
                 (np.abs(KX) <= nx/6) & (np.abs(KY) <= ny/6) & (np.abs(KZ) <= nz/6)
             )
         else:
+            print('Using isotropic (legacy) filter')
             # Legacy isotropic cutoff in physical |k|. Note: threshold is in grid-count units, so this can be overly
             # restrictive when Lx,Ly,Lz are anisotropic.
             filt = torch.as_tensor((torch.sqrt(self.knorm2) <= 2./3*(min(self.nx,self.ny,self.nz)/2+1))) # only used locally
