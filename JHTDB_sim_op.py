@@ -40,7 +40,8 @@ class _Sim(L.LightningModule):
     in a way that is *compatible with vmap* for batching!!
     '''
     def __init__(self,nx=103,ny=26,nz=77,Lx=8*np.pi,Ly=2.0,Lz=3*np.pi,nu=5e-5,dt=0.0065,
-                 u_b: torch.Tensor=0, use_PDE_solver=True, anisotropic_filter: bool=False, disable_filter: bool=False):
+                 u_b: torch.Tensor=0, use_PDE_solver=True, anisotropic_filter: bool=False, disable_filter: bool=False,
+                 dealias_before_quadratic: bool=False, apply_pde_filter_bottleneck: bool=True):
         ''' Defaults are set to the values needed for JHTDB channel flow.
             Also note that nu:=viscosity, Lx,Ly,Lz:=domain dimensions (physical),
             and nx,ny,nz:=grid dimensions (virtual)
@@ -48,7 +49,9 @@ class _Sim(L.LightningModule):
             passing a non-zero u_b will automatically enable manual advection (aka forcing)
             anisotropic_filter:= if True, apply per-dimension 2/3 dealiasing in index space (recommended for anisotropic Lx,Ly,Lz);
                                 if False, use the legacy isotropic |k|-ball cutoff. Ignored if disable_filter=True.
-            disable_filter:= if True, do not apply any spectral truncation (filt and filt2 are all-ones).'''
+            disable_filter:= if True, do not apply any spectral truncation (filt and filt2 are all-ones).
+            dealias_before_quadratic:= if True, apply filt before forming the quadratic term u*u (reduces aliasing).
+            apply_pde_filter_bottleneck:= if True, apply filt to every PDE step (legacy low-pass bottleneck).'''
         super().__init__()
         self.nx = nx
         self.ny = ny
@@ -58,6 +61,8 @@ class _Sim(L.LightningModule):
         self.Lz = Lz
         self.nu = nu
         self.use_PDE_solver = use_PDE_solver # whether to use the PDE solver
+        self.dealias_before_quadratic = dealias_before_quadratic
+        self.apply_pde_filter_bottleneck = apply_pde_filter_bottleneck
 
         self.u_b = torch.as_tensor(u_b) # u_b = real_channel_flow[0].mean((0,2,3)) (for manual advection term)
         self.use_manual_advection = torch.any(self.u_b != 0) # whether to use the manual advection term
@@ -105,7 +110,9 @@ class _Sim(L.LightningModule):
             filt = torch.as_tensor((torch.sqrt(self.knorm2) <= 2./3*(min(self.nx,self.ny,self.nz)/2+1))) # only used locally
             self.filt2 = torch.as_tensor((torch.sqrt(self.knorm2) <= 1./3*(min(self.nx,self.ny,self.nz)/2+1)))
 
-        self.Ainv = self.Ainv * filt.to(self.Ainv.dtype)
+        self.filt = filt
+        if self.apply_pde_filter_bottleneck:
+            self.Ainv = self.Ainv * self.filt.to(self.Ainv.dtype)
         self.dt = dt
         self.dx = Lx/nx
         #self.dy = Ly/ny
@@ -114,7 +121,7 @@ class _Sim(L.LightningModule):
         #self.forcing[4,4,4,0] = 10. # not used
 
         # sanity checks: these filters act in Fourier space (rfft over last dim)
-        assert tuple(filt.shape) == tuple(self.shapeh), f"Unexpected filt shape {tuple(filt.shape)} vs {tuple(self.shapeh)}"
+        assert tuple(self.filt.shape) == tuple(self.shapeh), f"Unexpected filt shape {tuple(self.filt.shape)} vs {tuple(self.shapeh)}"
         assert tuple(self.filt2.shape) == tuple(self.shapeh), f"Unexpected filt2 shape {tuple(self.filt2.shape)} vs {tuple(self.shapeh)}"
 
         #self.eta = 1e-3 # not used
@@ -153,7 +160,10 @@ class _Sim(L.LightningModule):
         u = u.permute(1,2,-1,0) #torch.moveaxis(u, 0, -1)
         uh = _rfft(u)
         assert list(uh.shape)[:-1]==self.shapeh
-        u2h = _rfft(torch.einsum('...i,...j->...ij',u,u))
+        u_for_quadratic = u
+        if self.dealias_before_quadratic:
+            u_for_quadratic = _irfft(uh * self.filt[...,None].to(uh.dtype), s=self.shapef)
+        u2h = _rfft(torch.einsum('...i,...j->...ij',u_for_quadratic,u_for_quadratic))
         u = _irfft(self.Ainv[...,None]*(
             uh + self.dt*(-1.j*torch.einsum('...j,...ij->...i',self.k,u2h)
                  + 1.j*_divide_no_nan(torch.einsum('...i,...j,...k,...jk->...i',self.k,self.k,self.k,u2h),self.knorm2[...,None])
