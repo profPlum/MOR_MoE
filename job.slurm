@@ -3,7 +3,7 @@
 #SBATCH --error=logs/%x_%j.err               # Error file (%x: job-name, %j: job-id)
 #SBATCH --nodes=1                            # Trying allocating a whole node to play nice with pytorch-lightning
 #SBATCH --ntasks-per-node=1                  # Tasks per node (usually 1 for PyTorch)
-#SBATCH --mem-per-gpu=115GB                  # CPU? RAM per GPU < 1/4 of the total node RAM = 120GB
+#SBATCH --mem-per-gpu=100GB                  # CPU? RAM per GPU < 1/4*0.85 of total node RAM = 120GB*0.85 = 102GB
 #SBATCH --gpus-per-node=1                    # GPUs per task is 1
 #SBATCH --cpus-per-task=72                   # CORES per task for data loaders (72 avail per GPU) (very few really used)
 #SBATCH --time=1-00:00:00                    # Maximum runtime (HH:MM:SS) (48 hours for WNO-600-epochs)
