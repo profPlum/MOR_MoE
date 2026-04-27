@@ -74,7 +74,7 @@ class FieldGatingNet(BasicLightningRegressor):
         global_logits = torch.randn(gating_logits.shape[1], requires_grad=False) # random selection
         assert len(global_logits.shape)==1 # 1D
 
-        # add in the obligitory null expert (always the last index in the softmax)
+        # add in the obligatory null expert (always the last index in the softmax)
         global_topk = torch.topk(global_logits[:-1], self._k, dim=0, sorted=False).indices # we don't want to select null expert twice!
         global_topk = torch.cat([global_topk, torch.tensor([-1], device=global_topk.device, dtype=global_topk.dtype)])
         gating_logits = gating_logits[:, global_topk] # first dim is batch_dim
@@ -197,6 +197,35 @@ class ZeroExpert(L.LightningModule):
         try: return 0, F.softplus(self._sigma)
         except AttributeError: return 0
 '''
+
+class SigmaExpert(L.LightningModule):
+    def __init__(self, *args, sigma=False, **kwd_args):
+        super().__init__(*args, **kwd_args)
+        if sigma: self._rho=nn.Parameter(torch.randn([]))
+    def forward(self, *args):
+        X = super().forward(*args)
+        try: return torch.cat([X, self._rho.expand_as(X)], axis=1)
+        except AttributeError: return X
+
+class ZeroExpert(L.LightningModule):
+    def __init__(self, *args, **kwd_args):
+        super().__init__(*args, **kwd_args)
+        self._zero = torch.zeros(1, device=self.device, dtype=self.dtype)
+    def forward(self, X):
+        return self._zero.expand_as(X)
+
+class DampingExpert(L.LightningModule):
+    def __init__(self, damping_coef=None):
+        super().__init__()
+        inv_sigmoid = lambda x: torch.log(x/(1-x))
+        v = torch.randn(1) if damping_coef is None else inv_sigmoid(torch.as_tensor(damping_coef))
+        self._damping_coef = nn.Parameter(v, requires_grad=damping_coef is None)
+    def forward(self, X):
+        return -X * torch.sigmoid(self._damping_coef)
+
+# apparently you can trust torch.compile to optimize away the zero addition
+class SigmaZeroExpert(SigmaExpert, ZeroExpert): pass
+class SigmaDampingExpert(SigmaExpert, DampingExpert): pass
 
 class POU_net(L.LightningModule):
     ''' POU_net minus the useless L2 regularization '''

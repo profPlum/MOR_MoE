@@ -152,6 +152,9 @@ class _Sim(L.LightningModule):
         self.u_b = self.u_b.reshape(1, 1, -1, 1) # make y-col vector
         return -self.dt * self.u_b * dudx
 
+    def apply_correction(self, u): # NOTE: this is the only place where the operator is used
+        return u + self.op.forward(u)*self.dt
+
     # This needs to output intermediate time-steps to get full loss!
     def evolve(self,u0,n,intermediate_outputs=False, intermediate_output_stride=1, to_cpu=False):
         u = u0
@@ -159,7 +162,7 @@ class _Sim(L.LightningModule):
         if len(u.shape)==4: # all permute ops above assume 4 dims (before vmap)
             u = u[None] # add batch dim
         for i in range(n):
-            u = self.op.forward(self.vmap_NSupd(u)) # NOTE: this is the only place where the operator is used
+            u = self.apply_correction(self.vmap_NSupd(u)) # NOTE: this is the only place where the operator is used
             if u.isnan().any():
                 warnings.warn(f'Simulation has diverged into NaNs! At step: {i}')
             #assert not u.isnan().any()
@@ -178,6 +181,10 @@ class _UQ_Sim(_Sim):
         if from_LES: u0 = u0[0] # remove unnecessary uq tensor
         return u0
 
+    def apply_correction(self, u, uq):
+        u_new, uq_new = self.op.forward(u, uq)
+        return u + u_new*self.dt, uq_new #(uq**2 + uq_new**2*self.dt**2)**0.5
+
     # This needs to output intermediate time-steps to get full loss!
     def evolve(self,u0,n,intermediate_outputs=False, intermediate_output_stride=1, to_cpu=False):
         u = u0
@@ -189,7 +196,7 @@ class _UQ_Sim(_Sim):
         uq = torch.zeros(1,device=u.device, dtype=u.dtype).expand(*u.shape)
         #uq = None
         for i in range(n):
-            u, uq = self.op.forward(self.vmap_NSupd(u), uq)
+            u, uq = self.apply_correction(self.vmap_NSupd(u), uq) #self.op.forward(NSupd(u), uq)
             if u.isnan().any() or uq.isnan().any():
                 warnings.warn(f'Simulation has diverged into NaNs! At step: {i}')
             #assert not (u.isnan().any() or uq.isnan().any())
