@@ -44,21 +44,20 @@ class FieldGatingNet(BasicLightningRegressor):
     """
     Essentially a Gating Operator that outputs class probabilities across the field.
     It is now a function of the field itself and the coordinates of the field positions!
-    Also if n_experts>1, it will implicitly add the option of a 'null expert' (an expert that just predicts 0).
+    If there is more than one expert, the final expert is reserved as a baseline expert and always included.
     And it adds some small amount of noise to the gating logits to encourage exploration.
     """
     def __init__(self, n_inputs, n_experts, ndims, k=2, trig_encodings=True):
         super().__init__()
         assert n_experts>1, 'This class makes no sense with only 1 expert'
         assert k>1, 'K<2 means the gating network will not learn to gate properly.'
-        n_experts -= 1 # we implicitly add a zero expert
-        self._k = min(k, n_experts) # for (global) top-k selection
+        self._baseline_idx = -1
+        self._k = min(k, n_experts - 1) # for (global) top-k selection of non-baseline experts
         self._ndims = ndims
         self._make_positional_encodings = MakePositionalEncodings(ndims, trig_encodings)
         self._softmax = nn.Softmax(dim=1) # this is a injection point for the template pattern (e.g. equalized field gating net)
 
-        # NOTE: setting n_experts=n_experts+1 inside the gating_net implicitly adds a "ZeroExpert"
-        self._gating_net = CNN(self._make_positional_encodings.n_channels, n_experts+1, k_size=1, ndims=ndims)#, **kwd_args)
+        self._gating_net = CNN(self._make_positional_encodings.n_channels, n_experts, k_size=1, ndims=ndims)#, **kwd_args)
         self._cache_forward=False # whether we should cache the forward call's outputs
         self._cached_forward_results=None # the cached forward call's outputs
         self._cached_forward_shape=None # for sanity check
@@ -71,20 +70,15 @@ class FieldGatingNet(BasicLightningRegressor):
 
         pos_encodings = self._make_positional_encodings(X)
         gating_logits = self._gating_net(pos_encodings) # gating_logits.shape=[batch_size, n_experts, *spatial_dims]
-        global_logits = torch.randn(gating_logits.shape[1], requires_grad=False) # random selection
+        global_logits = torch.randn(gating_logits.shape[1], device=gating_logits.device, requires_grad=False) # random selection
         assert len(global_logits.shape)==1 # 1D
 
-        # add in the obligatory null expert (always the last index in the softmax)
-        global_topk = torch.topk(global_logits[:-1], self._k, dim=0, sorted=False).indices # we don't want to select null expert twice!
-        global_topk = torch.cat([global_topk, torch.tensor([-1], device=global_topk.device, dtype=global_topk.dtype)])
+        # Always include the final baseline expert after randomly selecting learned experts.
+        global_topk = torch.topk(global_logits[:-1], self._k, dim=0, sorted=False).indices # don't select baseline twice
+        global_topk = torch.cat([global_topk, global_topk.new_tensor([self._baseline_idx])])
         gating_logits = gating_logits[:, global_topk] # first dim is batch_dim
-        gating_weights = self._softmax(gating_logits) # keep null expert for now
+        gating_weights = self._softmax(gating_logits)
         # this is a injection point for the template pattern (e.g. equalized field gating net)
-
-        # after the 'null expert' has influenced the softmax normalization
-        # it can disappear (we won't waste any flops on it...)
-        gating_weights = gating_weights[:,:-1] # remove null expert
-        global_topk = global_topk[:-1]
 
         # return results
         results = gating_weights, global_topk
@@ -152,7 +146,7 @@ class DummyGatingNet(nn.Module):
     def cached_gating_weights(self):
         yield
 
-# these metrics need to be seperated for validation & training!
+# these metrics need to be separated for validation & training!
 class MetricsModule(L.LightningModule):
     def __init__(self, parent_module:L.LightningModule, n_outputs:int, prefix=''):
         super().__init__()
@@ -162,7 +156,8 @@ class MetricsModule(L.LightningModule):
         self.n_outputs=n_outputs
         self.prefix=prefix
 
-        self.r2_score = torchmetrics.R2Score(num_outputs=n_outputs)
+        try: self.r2_score = torchmetrics.R2Score(num_outputs=n_outputs)
+        except ValueError: self.r2_score = torchmetrics.R2Score()
         self.MAE = torchmetrics.MeanAbsoluteError()
         self.sMAPE = torchmetrics.SymmetricMeanAbsolutePercentageError()
         #self.wMAPE = torchmetrics.WeightedMeanAbsolutePercentageError()
@@ -189,72 +184,73 @@ class MetricsModule(L.LightningModule):
             #log_metric('explained_variance')
             #log_metric('wMAPE')
 
-''' # we did this implicitly instead of using the class
-class ZeroExpert(L.LightningModule):
-    def __init__(self, sigma=False):
-        if sigma: self._sigma=nn.Parameter(torch.randn([]))
-    def forward(self, *args):
-        try: return 0, F.softplus(self._sigma)
-        except AttributeError: return 0
-'''
-
 class SigmaExpert(L.LightningModule):
-    def __init__(self, *args, sigma=False, **kwd_args):
+    def __init__(self, *args, sigma=True, **kwd_args):
         super().__init__(*args, **kwd_args)
-        if sigma: self._rho=nn.Parameter(torch.randn([]))
+        self._rho=nn.Parameter(torch.randn([]))
     def forward(self, *args):
         X = super().forward(*args)
-        try: return torch.cat([X, self._rho.expand_as(X)], axis=1)
-        except AttributeError: return X
+        return torch.cat([X, self._rho.expand_as(X)], axis=1)
 
-class ZeroExpert(L.LightningModule):
-    def __init__(self, *args, **kwd_args):
-        super().__init__(*args, **kwd_args)
-        self._zero = torch.zeros(1, device=self.device, dtype=self.dtype)
-    def forward(self, X):
-        return self._zero.expand_as(X)
+class _BaselineExpert(L.LightningModule): pass
 
-class DampingExpert(L.LightningModule):
-    def __init__(self, damping_coef=None):
+class ZeroExpert(_BaselineExpert):
+    def __init__(self, ndims):
         super().__init__()
+        self.ndims = ndims
+        self.register_buffer('_zero', torch.zeros(1), persistent=False)
+    def forward(self, X):
+        return self._zero.to(X.device, dtype=X.dtype).expand_as(X[:,:self.ndims])
+
+class DampingExpert(_BaselineExpert):
+    def __init__(self, ndims, damping_coef=None):
+        super().__init__()
+        self.ndims = ndims
         inv_sigmoid = lambda x: torch.log(x/(1-x))
         v = torch.randn(1) if damping_coef is None else inv_sigmoid(torch.as_tensor(damping_coef))
         self._damping_coef = nn.Parameter(v, requires_grad=damping_coef is None)
     def forward(self, X):
-        return -X * torch.sigmoid(self._damping_coef)
+        return -X[:,:self.ndims] * torch.sigmoid(self._damping_coef)
 
 # apparently you can trust torch.compile to optimize away the zero addition
-class SigmaZeroExpert(SigmaExpert, ZeroExpert): pass
-class SigmaDampingExpert(SigmaExpert, DampingExpert): pass
+class _SigmaZeroExpert(SigmaExpert, ZeroExpert): pass
+class _SigmaDampingExpert(SigmaExpert, DampingExpert): pass
 
 class POU_net(L.LightningModule):
     ''' POU_net minus the useless L2 regularization '''
-    #  when max_abs_pred is two the fraction on the inside disappears making it simpler to explain (also training data in [-0.1,1.2])
-    max_abs_pred=2 # GOTCHA: given equal weighting of the zero expert the actual bounds are tighter but still valid...
-    bound_outputs = lambda self, x: torch.tanh(x*(2/self.max_abs_pred))*self.max_abs_pred
+    ##  when max_abs_pred is two the fraction on the inside disappears making it simpler to explain (also training data in [-0.1,1.2])
+    #max_abs_pred=2 # GOTCHA: given equal weighting of the zero expert the actual bounds are tighter but still valid...
+    #bound_outputs = lambda self, x: torch.tanh(x*(2/self.max_abs_pred))*self.max_abs_pred
+    bound_outputs = lambda self, x: x
     def __init__(self, n_inputs, n_outputs, n_experts=4, ndims=2, lr=0.001, momentum=0.9, weight_decay=0.0,
                  T_max=1, one_cycle=False, three_phase=False, RLoP=False, RLoP_factor=0.9, RLoP_patience:int=15,
                  make_optim: type=torch.optim.AdamW, make_expert: type=MOR_Operator.MOR_Operator,
-                 make_gating_net: type=EqualizedFieldGatingNet, trig_encodings=True, grid_inputs=False, **kwd_args):
-        assert not (one_cycle and RLoP), 'These learning rate schedules are mututally exclusive!'
+                 make_gating_net: type=EqualizedFieldGatingNet, make_baseline_expert: type=ZeroExpert,
+                 trig_encodings=True, grid_inputs=False, **kwd_args):
+        assert not (one_cycle and RLoP), 'These learning rate schedules are mutually exclusive!'
         super().__init__()
         self.save_hyperparameters()
-
-        assert n_experts>0
-        if n_experts==1: make_gating_net=DummyGatingNet
 
         if grid_inputs:
             self._make_positional_encodings = MakePositionalEncodings(ndims, trig_encodings)
             n_inputs += self._make_positional_encodings.n_channels # adjust input channels
 
-        # NOTE: The gating_net implicitly adds a "ZeroExpert"
+        assert n_experts>0
+        if n_experts==1: make_gating_net=DummyGatingNet
+        vars(self).update(locals()); del self.self; del self.kwd_args
+
+        n_learned_experts = n_experts - int(n_experts > 1)
+        learned_experts = [make_expert(n_inputs, n_outputs, ndims=ndims, **kwd_args) for i in range(n_learned_experts)]
+        baseline_experts = [make_baseline_expert(ndims=ndims)] if n_experts > 1 else []
+        if baseline_experts: assert isinstance(baseline_experts[0], _BaselineExpert)
+
+        # With multiple experts, the final slot is an explicit baseline expert included by the gating net.
         self.gating_net=make_gating_net(n_inputs, n_experts, ndims=ndims, trig_encodings=trig_encodings) # supports n_inputs!=2
-        self.experts=nn.ModuleList([make_expert(n_inputs, n_outputs, ndims=ndims, **kwd_args) for i in range(max(n_experts-1,1))])
+        self.experts=nn.ModuleList(learned_experts + baseline_experts)
 
         self.train_metrics = MetricsModule(self, n_outputs)
         self.val_metrics = MetricsModule(self, n_outputs, prefix='val_')
         self.val_last_TS_metrics = MetricsModule(self, n_outputs, prefix='val_last_TS_')
-        vars(self).update(locals()); del self.self; del self.kwd_args
 
     def configure_optimizers(self):
         optim_kwd_args = {'lr': self.lr, 'weight_decay': self.weight_decay}
@@ -324,7 +320,11 @@ class POU_net(L.LightningModule):
 import model_agnostic_BNN
 
 class PPOU_net(POU_net): # Not really, it's POU+VI
-    def __init__(self, n_inputs, n_outputs, train_dataset_size, *args, prior_cfg={}, **kwd_args):
+    def __init__(self, n_inputs, n_outputs, train_dataset_size, *args, prior_cfg={},
+                 make_baseline_expert: type=ZeroExpert, **kwd_args):
+        sigma_expert_map = {ZeroExpert: _SigmaZeroExpert, DampingExpert: _SigmaDampingExpert}
+        kwd_args['make_baseline_expert'] = sigma_expert_map.get(make_baseline_expert, make_baseline_expert)
+
         # we double output channels to have the sigma predictions too
         super().__init__(n_inputs*2, n_outputs*2, *args, **kwd_args)
 
@@ -343,11 +343,6 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
         # this context works recursively
         with self.gating_net.cached_gating_weights():
             mu_pred, rho_pred = super().forward(X, apply_output_bounds=False).tensor_split(2, dim=1)
-
-            # handle zero expert (confirmed this doesn't require that zero expert exists, it will gracefully handle it)
-            gating_weights, topk = self.gating_net(X) # this is cached and requires no compute
-            zero_expert_gating_weights = 1-gating_weights.sum(axis=1, keepdim=True).clip(max=1.0) # recover zero expert weights
-            rho_pred = rho_pred + zero_expert_gating_weights*self._zero_expert_rho # add zero expert contrib
 
         # self.bound_outputs bounds the mu preds within [-2,2]
         return self.bound_outputs(mu_pred), F.softplus(rho_pred)+1e-4

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os, random, warnings
 import torch, numpy as np
 from torch import nn
