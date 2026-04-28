@@ -1,4 +1,5 @@
 import torch
+import functools
 from torch import nn
 import torch.nn.functional as F
 from torch.optim import lr_scheduler
@@ -52,6 +53,7 @@ class FieldGatingNet(BasicLightningRegressor):
         assert n_experts>1, 'This class makes no sense with only 1 expert'
         assert k>1, 'K<2 means the gating network will not learn to gate properly.'
         self._baseline_idx = -1
+        assert self._baseline_idx == -1, 'Baseline expert index must be -1'
         self._k = min(k, n_experts - 1) # for (global) top-k selection of non-baseline experts
         self._ndims = ndims
         self._make_positional_encodings = MakePositionalEncodings(ndims, trig_encodings)
@@ -185,12 +187,12 @@ class MetricsModule(L.LightningModule):
             #log_metric('wMAPE')
 
 class SigmaExpert(L.LightningModule):
-    def __init__(self, *args, sigma=True, **kwd_args):
+    def __init__(self, *args, **kwd_args):
         super().__init__(*args, **kwd_args)
         self._rho=nn.Parameter(torch.randn([]))
-    def forward(self, *args):
-        X = super().forward(*args)
-        return torch.cat([X, self._rho.expand_as(X)], axis=1)
+    def forward(self, *args, **kwd_args):
+        Y = super().forward(*args, **kwd_args)
+        return torch.cat([Y, self._rho.expand_as(Y)], axis=1)
 
 class _BaselineExpert(L.LightningModule): pass
 
@@ -206,11 +208,11 @@ class DampingExpert(_BaselineExpert):
     def __init__(self, ndims, damping_coef=None):
         super().__init__()
         self.ndims = ndims
-        inv_sigmoid = lambda x: torch.log(x/(1-x))
-        v = torch.randn(1) if damping_coef is None else inv_sigmoid(torch.as_tensor(damping_coef))
+        assert damping_coef is None or damping_coef > 0, 'Damping coefficient must be positive'
+        v = torch.randn(1) if damping_coef is None else torch.log(torch.as_tensor(damping_coef).float())
         self._damping_coef = nn.Parameter(v, requires_grad=damping_coef is None)
     def forward(self, X):
-        return -X[:,:self.ndims] * torch.sigmoid(self._damping_coef)
+        return -X[:,:self.ndims] * torch.exp(self._damping_coef)
 
 # apparently you can trust torch.compile to optimize away the zero addition
 class _SigmaZeroExpert(SigmaExpert, ZeroExpert): pass
@@ -323,7 +325,11 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
     def __init__(self, n_inputs, n_outputs, train_dataset_size, *args, prior_cfg={},
                  make_baseline_expert: type=ZeroExpert, **kwd_args):
         sigma_expert_map = {ZeroExpert: _SigmaZeroExpert, DampingExpert: _SigmaDampingExpert}
-        kwd_args['make_baseline_expert'] = sigma_expert_map.get(make_baseline_expert, make_baseline_expert)
+        if isinstance(make_baseline_expert, functools.partial):
+            make_baseline_expert = functools.partial(sigma_expert_map.get(make_baseline_expert.func, make_baseline_expert.func),
+                                                     *make_baseline_expert.args, **(make_baseline_expert.keywords or {}))
+        else: make_baseline_expert = sigma_expert_map.get(make_baseline_expert, make_baseline_expert)
+        kwd_args['make_baseline_expert'] = make_baseline_expert
 
         # we double output channels to have the sigma predictions too
         super().__init__(n_inputs*2, n_outputs*2, *args, **kwd_args)
