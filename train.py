@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-import functools
 import os, sys
 import torch
 
@@ -27,7 +26,7 @@ use_proportional_k_size=bool(int(os.environ.get('MAKE_K_SIZE_PROPORTIONAL', Fals
 use_PDE_solver=bool(int(os.environ.get('USE_PDE_SOLVER', True))) # whether to use the PDE solver
 use_manual_advection=bool(int(os.environ.get('USE_MANUAL_ADVECTION', False))) # whether to use the manual advection term
 use_normalized_MoE=bool(int(os.environ.get('USE_NORMALIZED_MOE', True)))
-use_damping_expert=bool(int(os.environ.get('USE_DAMPING_EXPERT', False)))
+use_delta_model=bool(int(os.environ.get('USE_DELTA_MODEL', False)))
 use_CNN_experts=bool(int(os.environ.get('USE_CNN_EXPERTS', False)))
 use_WNO3d_experts=bool(int(os.environ.get('USE_WNO3D_EXPERTS', False))) # whether to use WNO3d as experts
 use_IUFNO_experts=bool(int(os.environ.get('USE_IUFNO_EXPERTS', False))) # IUFNO experts
@@ -184,7 +183,7 @@ if __name__=='__main__':
     simulator_kwd_args = {'nx': field_size[0], 'ny': field_size[1], 'nz': field_size[2], 'dt': 0.0065*time_stride, 'use_PDE_solver': use_PDE_solver}
     if use_manual_advection: simulator_kwd_args['u_b'] = dm.u_b
     make_gating_net = EqualizedFieldGatingNet if use_normalized_MoE else FieldGatingNet
-    make_baseline_expert = functools.partial(DampingExpert, damping_coef=1/simulator_kwd_args['dt']) if use_damping_expert else ZeroExpert
+    make_baseline_expert = DampingExpert if use_delta_model else ZeroExpert
     model = SimModelClass(n_inputs=ndims, n_outputs=ndims, ndims=ndims, n_experts=n_experts, n_layers=n_layers, hidden_channels=n_filters, n_steps=time_chunking-1,
                           weight_decay=weight_decay, lr=lr, one_cycle=one_cycle, three_phase=three_phase, RLoP=RLoP, RLoP_factor=RLoP_factor, RLoP_patience=RLoP_patience,
                           trig_encodings=use_trig, grid_inputs=use_grid_inputs, hidden_norm_groups=hidden_norm_groups, out_norm_groups=out_norm_groups,
@@ -206,7 +205,7 @@ if __name__=='__main__':
     wandb.login(key='251c77a548925cf7f08eecaf2b159ea8d49457c3')
     logger = WandbLogger(project="MOR_MoE", name=job_name, version=version)
     logger.experiment.config.update({'grad_clip': gradient_clip_val, 'use_VI': use_VI, 'VI_counts_timestride_gap_data': VI_counts_timestride_gap_data,
-                                     'use_manual_advection': use_manual_advection, 'use_damping_expert': use_damping_expert})
+                                     'use_manual_advection': use_manual_advection, 'use_delta_model': use_delta_model})
 
     # Weight-only sharded checkpoints are needed to avoid OOM problem caused by large model size
     model_checkpoint_callback=L.callbacks.ModelCheckpoint(f"lightning_logs/{job_name}/{version}", save_weights_only=True, save_last=False,

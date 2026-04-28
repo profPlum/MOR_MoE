@@ -1,5 +1,4 @@
 import torch
-import functools
 from torch import nn
 import torch.nn.functional as F
 from torch.optim import lr_scheduler
@@ -44,9 +43,8 @@ class MakePositionalEncodings:
 class FieldGatingNet(BasicLightningRegressor):
     """
     Essentially a Gating Operator that outputs class probabilities across the field.
-    It is now a function of the field itself and the coordinates of the field positions!
     If there is more than one expert, the final expert is reserved as a baseline expert and always included.
-    And it adds some small amount of noise to the gating logits to encourage exploration.
+    It randomizes the selected experts to encourage exploration.
     """
     def __init__(self, n_inputs, n_experts, ndims, k=2, trig_encodings=True):
         super().__init__()
@@ -205,14 +203,11 @@ class ZeroExpert(_BaselineExpert):
         return self._zero.to(X.device, dtype=X.dtype).expand_as(X[:,:self.ndims])
 
 class DampingExpert(_BaselineExpert):
-    def __init__(self, ndims, damping_coef=None):
+    def __init__(self, ndims):
         super().__init__()
         self.ndims = ndims
-        assert damping_coef is None or damping_coef > 0, 'Damping coefficient must be positive'
-        v = torch.randn(1) if damping_coef is None else torch.log(torch.as_tensor(damping_coef).float())
-        self._damping_coef = nn.Parameter(v, requires_grad=damping_coef is None)
     def forward(self, X):
-        return -X[:,:self.ndims] * torch.exp(self._damping_coef)
+        return -X[:,:self.ndims]
 
 # apparently you can trust torch.compile to optimize away the zero addition
 class _SigmaZeroExpert(SigmaExpert, ZeroExpert): pass
@@ -230,6 +225,8 @@ class POU_net(L.LightningModule):
                  make_gating_net: type=EqualizedFieldGatingNet, make_baseline_expert: type=ZeroExpert,
                  trig_encodings=True, grid_inputs=False, **kwd_args):
         assert not (one_cycle and RLoP), 'These learning rate schedules are mutually exclusive!'
+        assert n_experts>0
+        if n_experts==1: make_gating_net=DummyGatingNet
         super().__init__()
         self.save_hyperparameters()
 
@@ -237,18 +234,17 @@ class POU_net(L.LightningModule):
             self._make_positional_encodings = MakePositionalEncodings(ndims, trig_encodings)
             n_inputs += self._make_positional_encodings.n_channels # adjust input channels
 
-        assert n_experts>0
-        if n_experts==1: make_gating_net=DummyGatingNet
         vars(self).update(locals()); del self.self; del self.kwd_args
 
         n_learned_experts = n_experts - int(n_experts > 1)
         learned_experts = [make_expert(n_inputs, n_outputs, ndims=ndims, **kwd_args) for i in range(n_learned_experts)]
-        baseline_experts = [make_baseline_expert(ndims=ndims)] if n_experts > 1 else []
-        if baseline_experts: assert isinstance(baseline_experts[0], _BaselineExpert)
+        baseline_expert = make_baseline_expert(ndims=ndims)
+        assert isinstance(baseline_expert, _BaselineExpert)
+        self._use_delta_model = isinstance(baseline_expert, DampingExpert)
 
         # With multiple experts, the final slot is an explicit baseline expert included by the gating net.
         self.gating_net=make_gating_net(n_inputs, n_experts, ndims=ndims, trig_encodings=trig_encodings) # supports n_inputs!=2
-        self.experts=nn.ModuleList(learned_experts + baseline_experts)
+        self.experts=nn.ModuleList(learned_experts + ([baseline_expert] if n_experts > 1 else []))
 
         self.train_metrics = MetricsModule(self, n_outputs)
         self.val_metrics = MetricsModule(self, n_outputs, prefix='val_')
@@ -280,16 +276,20 @@ class POU_net(L.LightningModule):
         self.log('grad_inf_norm_total', norms_inf['grad_inf_norm_total'].item(), sync_dist=True, reduce_fx='max')
         self.log('grad_2.0_norm_total', norms_2['grad_2.0_norm_total'].item(), sync_dist=True, reduce_fx='mean')
 
-    # Verified to work 7/19/24
-    def forward(self, X, apply_output_bounds: bool=True):
-        X = torch.as_tensor(X, device=self.device)
-        if self.grid_inputs:
-            X=torch.cat([X, self._make_positional_encodings(X)], axis=1)
+    def _expert_mixture(self, X):
+        if self.grid_inputs: X = torch.cat([X, self._make_positional_encodings(X)], axis=1)
         gating_weights, topk = self.gating_net(X)
         prediction = 0
         for i, k_i in enumerate(topk):
             prediction = prediction + gating_weights[:,i:i+1]*self.experts[k_i](X)
-        return self.bound_outputs(prediction) if apply_output_bounds else prediction
+        return prediction
+
+    # Verified to work 7/19/24
+    def forward(self, X):
+        X = torch.as_tensor(X, device=self.device)
+        prediction = self.bound_outputs(self._expert_mixture(X))
+        if self._use_delta_model: prediction = X[:,:self.ndims] + prediction
+        return prediction
 
     def training_step(self, batch, batch_idx=None, val=False):
         X, y = batch
@@ -325,10 +325,7 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
     def __init__(self, n_inputs, n_outputs, train_dataset_size, *args, prior_cfg={},
                  make_baseline_expert: type=ZeroExpert, **kwd_args):
         sigma_expert_map = {ZeroExpert: _SigmaZeroExpert, DampingExpert: _SigmaDampingExpert}
-        if isinstance(make_baseline_expert, functools.partial):
-            make_baseline_expert = functools.partial(sigma_expert_map.get(make_baseline_expert.func, make_baseline_expert.func),
-                                                     *make_baseline_expert.args, **(make_baseline_expert.keywords or {}))
-        else: make_baseline_expert = sigma_expert_map.get(make_baseline_expert, make_baseline_expert)
+        make_baseline_expert = sigma_expert_map.get(make_baseline_expert, make_baseline_expert)
         kwd_args['make_baseline_expert'] = make_baseline_expert
 
         # we double output channels to have the sigma predictions too
@@ -346,12 +343,12 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
         if Y is None: Y = torch.zeros(1,device=X.device, dtype=X.dtype).expand(*X.shape)
         X = torch.cat([X,Y], axis=1)
 
-        # this context works recursively
-        with self.gating_net.cached_gating_weights():
-            mu_pred, rho_pred = super().forward(X, apply_output_bounds=False).tensor_split(2, dim=1)
+        mu_pred, rho_pred = self._expert_mixture(X).tensor_split(2, dim=1)
 
         # self.bound_outputs bounds the mu preds within [-2,2]
-        return self.bound_outputs(mu_pred), F.softplus(rho_pred)+1e-4
+        mu_pred = self.bound_outputs(mu_pred)
+        if self._use_delta_model: mu_pred = X[:,:self.ndims] + mu_pred
+        return mu_pred, F.softplus(rho_pred)+1e-4
 
     def training_step(self, batch, batch_idx=None, val=False):
         X, y = batch
