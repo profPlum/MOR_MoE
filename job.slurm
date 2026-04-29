@@ -3,13 +3,13 @@
 #SBATCH --error=logs/%x_%j.err               # Error file (%x: job-name, %j: job-id)
 #SBATCH --nodes=1                            # Trying allocating a whole node to play nice with pytorch-lightning
 #SBATCH --ntasks-per-node=1                  # Tasks per node (usually 1 for PyTorch)
-#SBATCH --mem-per-gpu=100GB                  # CPU? RAM per GPU < 1/4*0.85 of total node RAM = 120GB*0.85 = 102GB
+#SBATCH --mem-per-gpu=185GB                  # CPU+GPU RAM per GPU < 1/4*0.85 of total node RAM = 120GB*0.85 = 102GB
 #SBATCH --gpus-per-node=1                    # GPUs per task is 1
-#SBATCH --cpus-per-task=72                   # CORES per task for data loaders (72 avail per GPU) (very few really used)
+#SBATCH --cpus-per-task=70                   # CORES per task for data loaders (72 avail per GPU) (very few really used)
 #SBATCH --time=1-00:00:00                    # Maximum runtime (HH:MM:SS) (48 hours for WNO-600-epochs)
 #SBATCH --partition=ghx4                     # Partition name
 #SBATCH --account=beoi-dtai-gh
-#SBATCH --job-name=Everything_TS=16_prior=0.05
+#SBATCH --job-name=Everything_TS=4
 
 # Not going to work anymore b/c we would need to save the entire checkpoint which causes OOM...
 # ##SBATCH --signal=SIGUSR1@90
@@ -64,9 +64,9 @@ export USE_NORMALIZED_MOE=1 # importance normalization gives better expert utili
 export OUT_NORM_GROUPS=1 # whether to use output normalization (you should!)
 export HIDDEN_NORM_GROUPS=1 # whether to use hidden normalization (you should!)
 export VI=1 # use VI or not (in bash binary booleans have the best support for boolean logic)
-export VI_PRIOR_SIGMA=0.05 # approximately reflects the values of sigma at initialization
+export VI_PRIOR_SIGMA=0.2 # approximately reflects the values of sigma at initialization
 export VI_COUNTS_TIMESTRIDE_GAP_DATA=1 # whether to count the gap data between timestrides in the dataset size for VI
-export TIME_STRIDE=16 # must be integer-valued
+export TIME_STRIDE=4 # must be integer-valued
 export STRIDE=1 # e.g. 1.5 or a crazy list [1.5,1.3,1.8] for smaller experiments
 export TIME_CHUNKING=10 # 10 is default now b/c we can fit it in GH200s
 export BATCH_SIZE=2 # GH200 can handle batch_size=2! (it has > x2 the memory of A100)
@@ -75,7 +75,7 @@ export N_LAYERS=4 # number of expert layers
 export N_FILTERS=32 # number of hidden channels
 export N_EXPERTS=3 # number of experts
 export MAKE_K_SIZE_PROPORTIONAL=1 # whether to rescale K dims to be proportional to the field size (only works when K_MODES or CNN_FILTER_SIZE is given as an integer)
-#export K_MODES=25 # 4 for stride~=1.5, 6 for full STRIDE=1, use this for comparison of FNO to CNN, keep off by default!
+#export K_MODES=23 # 4 for stride~=1.5, 6 for full STRIDE=1, use this for comparison of FNO to CNN, keep off by default!
 
 # CNN experts?
 export USE_CNN_EXPERTS=0
