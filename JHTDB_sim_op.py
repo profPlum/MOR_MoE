@@ -185,7 +185,9 @@ class _UQ_Sim(_Sim):
         uq_outputs = []
         if len(u.shape)==4: # all permute ops above assume 4 dims (before vmap)
             u = u[None] # add batch dim
-        uq = None
+
+        uq = torch.zeros(1,device=u.device, dtype=u.dtype).expand(*u.shape)
+        #uq = None
         for i in range(n):
             u, uq = self.op.forward(self.vmap_NSupd(u), uq)
             if u.isnan().any() or uq.isnan().any():
