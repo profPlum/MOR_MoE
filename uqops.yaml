@@ -1,8 +1,8 @@
-# NOTE: set export CONDA_OVERRIDE_CUDA="12.4" before importing
+# NOTE: set export CONDA_OVERRIDE_CUDA="12.8" before importing
 name: uqops
 channels:
-  - defaults
   - conda-forge
+  - defaults
 dependencies:
   - python==3.11.0
   - numpy==1.26.4 # >=1.15.0
@@ -13,9 +13,10 @@ dependencies:
   - wurlitzer==3.0.2 #>=2.0.2
   - matplotlib==3.10.0 #>=3.0.0
   - jupyter
-  - pytorch-gpu==2.4.0
-  - pytorch-lightning==2.4.0
+  - pytorch-gpu==2.9.1
+  - pytorch-lightning==2.6.1
   - torchmetrics==1.5.2
+  - triton==3.5.1
   - pip
   - pip:
       - wandb==0.19.11
