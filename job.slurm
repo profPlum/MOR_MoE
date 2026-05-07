@@ -20,6 +20,12 @@
 conda activate uqops
 #module load cuda/11.8.0
 
+# fix bugged dynamo toolchain
+unset CC
+unset CXX
+export CC=gcc
+export CXX=g++
+
 #export NCCL_DEBUG=INFO
 #export NCCL_P2P_DISABLE=1
 #export TORCH_DISTRIBUTED_DEBUG=INFO

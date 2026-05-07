@@ -276,12 +276,14 @@ class POU_net(L.LightningModule):
         loss = self.training_step(batch, batch_idx, val=True)
         return loss
 
+    @torch.compiler.disable
     def _log_metrics(self, y_pred, y, val=False):
         if not val: self._log_lr()
         if val: self.val_last_TS_metrics.log_metrics(y_pred[..., -1], y[..., -1])
         metrics = self.val_metrics if val else self.train_metrics
         metrics.log_metrics(y_pred, y)
 
+    @torch.compiler.disable
     def _log_lr(self):
         scheduler = self.lr_schedulers()
         lrs = scheduler.get_last_lr()
