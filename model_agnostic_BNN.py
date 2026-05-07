@@ -98,6 +98,7 @@ class _BayesianParameterization(nn.Module):
         return self.prior_mu.abs() if self._prior_sigma<0.0 else self._prior_sigma
         # self._prior_sigma<0.0 implies that we are doing MOPED-style informed prior
 
+    @torch.compile.disable
     def forward(self, mu_params):
         is_complex = torch.is_complex(mu_params)
         if is_complex:
