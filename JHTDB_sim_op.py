@@ -89,6 +89,7 @@ class _Sim(L.LightningModule):
         #self.eta = 1e-3 # not used
         #self.nu_num = 1e-3 # not used
         self.op = IdentityOp() # identity by default
+        self.vmap_NSupd = torch.vmap(self.NSupd) # only this needs vmapping, NeuralOp is already batched
 
         for name, value in vars(self).copy().items():
             if isinstance(value, torch.Tensor):
@@ -155,11 +156,10 @@ class _Sim(L.LightningModule):
     def evolve(self,u0,n,intermediate_outputs=False, intermediate_output_stride=1, to_cpu=False):
         u = u0
         outputs = []
-        NSupd = torch.vmap(self.NSupd) # only this needs vmapping, NeuralOp is already batched
         if len(u.shape)==4: # all permute ops above assume 4 dims (before vmap)
             u = u[None] # add batch dim
         for i in range(n):
-            u = self.op.forward(NSupd(u)) # NOTE: this is the only place where the operator is used
+            u = self.op.forward(self.vmap_NSupd(u)) # NOTE: this is the only place where the operator is used
             if u.isnan().any():
                 warnings.warn(f'Simulation has diverged into NaNs! At step: {i}')
             #assert not u.isnan().any()
@@ -183,12 +183,11 @@ class _UQ_Sim(_Sim):
         u = u0
         u_outputs = []
         uq_outputs = []
-        NSupd = torch.vmap(self.NSupd) # only this needs vmapping, NeuralOp is already batched
         if len(u.shape)==4: # all permute ops above assume 4 dims (before vmap)
             u = u[None] # add batch dim
         uq = None
         for i in range(n):
-            u, uq = self.op.forward(NSupd(u), uq)
+            u, uq = self.op.forward(self.vmap_NSupd(u), uq)
             if u.isnan().any() or uq.isnan().any():
                 warnings.warn(f'Simulation has diverged into NaNs! At step: {i}')
             #assert not (u.isnan().any() or uq.isnan().any())
