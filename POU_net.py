@@ -254,7 +254,7 @@ class POU_net(L.LightningModule):
         self.log('grad_2.0_norm_total', norms_2['grad_2.0_norm_total'].item(), sync_dist=True, reduce_fx='mean')
 
     # Verified to work 7/19/24
-    def forward(self, X):
+    def forward(self, X, apply_output_bounds: bool=True):
         X = torch.as_tensor(X, device=self.device)
         if self.grid_inputs:
             X=torch.cat([X, self._make_positional_encodings(X)], axis=1)
@@ -262,14 +262,13 @@ class POU_net(L.LightningModule):
         prediction = 0
         for i, k_i in enumerate(topk):
             prediction = prediction + gating_weights[:,i:i+1]*self.experts[k_i](X)
-        return self.bound_outputs(prediction)
+        return self.bound_outputs(prediction) if apply_output_bounds else prediction
 
     def training_step(self, batch, batch_idx=None, val=False):
         X, y = batch
         y_pred = self(X).reshape(y.shape)
         loss = F.mse_loss(y_pred, y)
-        self.log(f'{val*"val_"}loss', loss.item(), sync_dist=val, prog_bar=not val)
-        self._log_metrics(y_pred, y, val) # log additional metrics
+        self._log_metrics(y_pred, y, val, loss=loss) # log additional metrics
         return loss
 
     def validation_step(self, batch, batch_idx=None, data_loader_idx=0):
@@ -277,7 +276,9 @@ class POU_net(L.LightningModule):
         return loss
 
     @torch.compiler.disable
-    def _log_metrics(self, y_pred, y, val=False):
+    def _log_metrics(self, y_pred, y, val=False, loss: torch.Tensor|None=None):
+        if loss is not None:
+            self.log(f'{val*"val_"}loss', loss.detach(), sync_dist=val, prog_bar=not val)
         if not val: self._log_lr()
         if val: self.val_last_TS_metrics.log_metrics(y_pred[..., -1], y[..., -1])
         metrics = self.val_metrics if val else self.train_metrics
@@ -302,7 +303,7 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
         model_agnostic_BNN.model_agnostic_dnn_to_bnn(self, train_dataset_size, prior_cfg=prior_cfg)
 
         # add additional set of metrics for validating aleatoric UQ itself compared to error
-        self.val_UQ_metrics = MetricsModule(self, n_outputs, prefix='val_UQ_')
+        #self.val_UQ_metrics = MetricsModule(self, n_outputs, prefix='val_UQ_')
         self._zero_expert_rho=nn.Parameter(torch.randn([1]))
 
     # original forward before probabilistic considerations
@@ -312,10 +313,7 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
 
         # this context works recursively
         with self.gating_net.cached_gating_weights():
-            bound_outputs = self.bound_outputs
-            self.bound_outputs=lambda x: x # temporarily remove output bounds so we can get the raw logits
-            mu_pred, rho_pred = super().forward(X).tensor_split(2, dim=1)
-            self.bound_outputs = bound_outputs
+            mu_pred, rho_pred = super().forward(X, apply_output_bounds=False).tensor_split(2, dim=1)
 
             # handle zero expert (confirmed this doesn't require that zero expert exists, it will gracefully handle it)
             gating_weights, topk = self.gating_net(X) # this is cached and requires no compute
@@ -334,19 +332,19 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
         kl_loss = self.get_kl_loss()#/(num_data*y[0].numel()) # (weighted)
         loss = model_agnostic_BNN.nll_regression(y_pred_mu, y, y_pred_sigma=y_pred_sigma, reduction=torch.mean) + kl_loss # posterior loss
 
-        self.log(f'{val*"val_"}loss', loss.item(), sync_dist=val, prog_bar=not val)
-        if not val: self.log('kl_loss', kl_loss.item(), sync_dist=val, prog_bar=True)
-        self._log_metrics(y_pred_all, y, val) # log additional metrics (mu & sigma variants)
-
+        self._log_metrics(y_pred_all, y, val, loss=loss, kl_loss=kl_loss) # log additional metrics (mu & sigma variants)
         return loss
 
     def validation_step(self, batch, batch_idx=None, data_loader_idx=0):
         with model_agnostic_BNN.SigmaCoefficient(0): # like dropout and for fairness when comparing to MLE we will disable sampling for validation metrics
-            return super().validation_step(batch, batch_idx=None, data_loader_idx=0)
+            return super().validation_step(batch, batch_idx=batch_idx, data_loader_idx=data_loader_idx)
 
-    def _log_metrics(self, y_pred: tuple, y: torch.Tensor, val=False):
+    @torch.compiler.disable
+    def _log_metrics(self, y_pred: tuple, y: torch.Tensor, val=False, loss: torch.Tensor|None=None, kl_loss: torch.Tensor|None=None):
         y_pred_mu, y_pred_sigma = y_pred # break apart pred tuple
-        super()._log_metrics(y_pred_mu, y, val=val) # log regular mu metrics & lr (implicitly)
+        super()._log_metrics(y_pred_mu, y, val=val, loss=loss) # log regular mu metrics & lr (implicitly)
+        if (kl_loss is not None) and (not val):
+            self.log('kl_loss', kl_loss.detach(), sync_dist=False, prog_bar=True)
 
         '''
         if not val: return # UQ metrics for training would be overkill...
