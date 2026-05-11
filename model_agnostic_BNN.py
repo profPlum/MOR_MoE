@@ -20,8 +20,8 @@ def kl_div(mu_q, sigma_q, mu_p, sigma_p):
     """
     assert not (torch.is_complex(mu_q) or torch.is_complex(sigma_q))
 
-    mu_p = torch.as_tensor(mu_p)
-    sigma_p = torch.as_tensor(sigma_p)
+    mu_p = torch.as_tensor(mu_p, dtype=mu_q.dtype, device=mu_q.device)
+    sigma_p = torch.as_tensor(sigma_p, dtype=mu_q.dtype, device=mu_q.device)
     kl = torch.log(sigma_p) - torch.log(sigma_q) + \
         (sigma_q**2 + (mu_q - mu_p)**2) / (2 * sigma_p**2) - 0.5
     return kl.sum()
@@ -36,7 +36,7 @@ def get_kl_loss(m):
     assert torch.isfinite(kl_loss) or not kl_loss.requires_grad, f'kl_loss={kl_loss.item()}'
     return kl_loss
 
-_pt_nll_classificiation = torch.nn.NLLLoss(reduction='sum') # sum needed for the true NLL
+_pt_nll_classificiation = torch.nn.NLLLoss(reduction='mean') # sum needed for the true NLL
 nll_classification = lambda y_pred, y: _pt_nll_classificiation(y_pred, y)
 
 # Truest NLL! (for regression)
@@ -98,7 +98,7 @@ class _BayesianParameterization(nn.Module):
         return self.prior_mu.abs() if self._prior_sigma<0.0 else self._prior_sigma
         # self._prior_sigma<0.0 implies that we are doing MOPED-style informed prior
 
-    @torch.compile.disable
+    @torch.compiler.disable
     def forward(self, mu_params):
         is_complex = torch.is_complex(mu_params)
         if is_complex:
@@ -112,18 +112,16 @@ class _BayesianParameterization(nn.Module):
             gen = None if seed is None else torch.Generator(device=input.device).manual_seed(seed)
             return torch.randn(input.size(), generator=gen, dtype=input.dtype,
                                layout=input.layout, device=input.device)
-
         standard_normal = torch_randn_like(self._rho_params, seed=pid_seed)
         sigma_params = nn.functional.softplus(self._rho_params)
 
         # Update KL loss based on mu_params & sigma_params
         self._kl_loss = kl_div(mu_params, sigma_params, self.prior_mu, self.prior_sigma)
-        # NOTE: kl loss is independent of sigma scaling, since common use case is _sigma_coefficient==0
-
-        # apply sampled sigma scaling (possibly turning it off)
-        if self._sigma_coefficient!=1.0:
+        
+        if self._sigma_coefficient!=1.0: # apply sampled sigma scaling (possibly turning it off)
             assert not self.training, 'sigma scaling is not allowed during training!'
             sigma_params = sigma_params*self._sigma_coefficient
+
         sampled_values = mu_params+sigma_params*standard_normal
         if is_complex:
             sampled_values = torch.view_as_complex(sampled_values)
