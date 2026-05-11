@@ -182,14 +182,20 @@ def get_dataset_size(train_dataset: Dataset | DataLoader):
 def model_agnostic_dnn_to_bnn(dnn: nn.Module, train_dataset_size: int|Dataset|DataLoader, prior_cfg: dict = {}):
     if 'Bayesian' in type(dnn).__name__: return
 
+    type_cache = {} # reuse types so that torch.compile doesn't recompile for each instance
     # apply _BayesianParameterization
     def visit_parametrize(module: nn.Module):
-        #print(module)
+        # Register all params first, then normalize the generated parametrized class once.
+        original_type = type(module)
+        did_parametrize = False
         for name, param in list(module.named_parameters(recurse=False)):
             assert '.' not in name
             if param.requires_grad:
                 parametrize.register_parametrization(module, name, _BayesianParameterization(param, **prior_cfg))
+                did_parametrize = True
             else: print('param: ', name, 'doesnt require gradient!', flush=True)
+        if did_parametrize:
+            module.__class__ = type_cache.setdefault(original_type, type(module))
     dnn.apply(visit_parametrize)
 
     original_type = type(dnn)
