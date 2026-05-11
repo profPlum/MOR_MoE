@@ -4,8 +4,19 @@ from torch import nn
 import torch.nn.utils.parametrize as parametrize
 from contextlib import contextmanager
 
+def _safe_compile(fn):
+    try: return torch.compile(fn)
+    except Exception: return fn
+
 # NOTE: We changed it to use sum because the prior p(theta)=p(theta_0)p(theta_1)...p(theta_n) is a product of gaussians
 # which means that more parameters will increase the KL loss. Also KL divergence takes a log which implies the sum.
+def _kl_div_flat(mu_q, sigma_q, mu_p, sigma_p):
+    kl = torch.log(sigma_p) - torch.log(sigma_q) + \
+        (sigma_q**2 + (mu_q - mu_p)**2) / (2 * sigma_p**2) - 0.5
+    return kl.sum()
+
+_kl_div_flat = _safe_compile(_kl_div_flat)
+
 def kl_div(mu_q, sigma_q, mu_p, sigma_p):
     """
     Calculates kl divergence between two gaussians (Q || P)
@@ -20,11 +31,11 @@ def kl_div(mu_q, sigma_q, mu_p, sigma_p):
     """
     assert not (torch.is_complex(mu_q) or torch.is_complex(sigma_q))
 
-    mu_p = torch.as_tensor(mu_p)
-    sigma_p = torch.as_tensor(sigma_p)
-    kl = torch.log(sigma_p) - torch.log(sigma_q) + \
-        (sigma_q**2 + (mu_q - mu_p)**2) / (2 * sigma_p**2) - 0.5
-    return kl.sum()
+    mu_q = torch.as_tensor(mu_q).ravel()
+    sigma_q = torch.as_tensor(sigma_q).ravel()
+    mu_p = torch.as_tensor(mu_p, device=mu_q.device, dtype=mu_q.dtype).ravel()
+    sigma_p = torch.as_tensor(sigma_p, device=mu_q.device, dtype=mu_q.dtype).ravel()
+    return _kl_div_flat(mu_q, sigma_q, mu_p, sigma_p)
 
 # NOTE: We changed it to use sum because the prior p(theta)=p(theta_0)p(theta_1)...p(theta_n) is a product of gaussians
 # which means that more parameters will increase the KL loss. Also KL divergence is log(prob) which implies the sum.
@@ -60,6 +71,7 @@ _get_rho = lambda sigma: np.log(np.expm1(sigma)+1e-20)
 # a Parametrized_BayesianParameterization Parametrization. See what I mean? I can barely say the damn thing.
 class _BayesianParameterization(nn.Module):
     _sigma_coefficient=1.0 # see _BayesianParameterization.scale_sigma() to temporarily rescale all sigma values!
+    _generators = {}
     def __init__(self, mu_params, posterior_mu_init=None, posterior_sigma_init=0.0486,
                  prior_mu=0.0, prior_sigma=1.0):
         """ For MLE-pretraining: posterior_mu_init and/or prior_mu can be None if you want to copy their values
@@ -98,33 +110,47 @@ class _BayesianParameterization(nn.Module):
         return self.prior_mu.abs() if self._prior_sigma<0.0 else self._prior_sigma
         # self._prior_sigma<0.0 implies that we are doing MOPED-style informed prior
 
-    @torch.compile.disable
     def forward(self, mu_params):
         is_complex = torch.is_complex(mu_params)
         if is_complex:
             mu_params = torch.view_as_real(mu_params)
 
-        ## Here we make the seed for *bayesian sampling* unique across processes for better batch parallelism!
-        ## NOTE: It's ugly b/c: don't want it to make the global seed unique per-process
-        #pid_seed = (random.randint(0, 2**63-1) + os.getpid() + hash(os.uname().nodename)) % (2**64)
-        pid_seed = (1+torch.distributed.get_rank()+torch.randint(2**63-1,size=(1,)).item()) if torch.distributed.is_initialized() else None
-        def torch_randn_like(input, seed=None): # supports seeding ...unlike torch.randn_like()
-            gen = None if seed is None else torch.Generator(device=input.device).manual_seed(seed)
-            return torch.randn(input.size(), generator=gen, dtype=input.dtype,
-                               layout=input.layout, device=input.device)
-
-        standard_normal = torch_randn_like(self._rho_params, seed=pid_seed)
-        sigma_params = nn.functional.softplus(self._rho_params)
-
-        # apply scaling (possibly turning it off)
-        if self._sigma_coefficient!=1.0: sigma_params = sigma_params*float(self._sigma_coefficient)
-
-        # Update KL loss based on mu_params & sigma_params
-        self._kl_loss = kl_div(mu_params, sigma_params, self.prior_mu, self.prior_sigma)
-        sampled_values = mu_params+sigma_params*standard_normal
+        mu_shape = mu_params.shape
+        sampled_values_flat, self._kl_loss = self._forward(
+            mu_params.ravel(),
+            self.prior_mu.ravel(),
+            self.prior_sigma.ravel(),
+            self._rho_params.ravel(),
+            float(self._sigma_coefficient),
+        )
+        sampled_values = sampled_values_flat.reshape(mu_shape)
         if is_complex:
             sampled_values = torch.view_as_complex(sampled_values)
         return sampled_values
+
+    @classmethod
+    def _forward(cls, mu_params_flat, prior_mu_flat, prior_sigma_flat, rho_params_flat, sigma_coefficient: float):
+        standard_normal_flat = cls._torch_randn_like(rho_params_flat)
+        sigma_params = nn.functional.softplus(rho_params_flat)
+        if sigma_coefficient!=1.0:
+            sigma_params = sigma_params * sigma_coefficient
+        kl_loss = kl_div(mu_params_flat, sigma_params, prior_mu_flat, prior_sigma_flat)
+        sampled_values = mu_params_flat + sigma_params * standard_normal_flat
+        return sampled_values, kl_loss
+
+    @classmethod
+    def _torch_randn_like(cls, input):
+        rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
+        key = (str(input.device), rank)
+        generator = cls._generators.get(key)
+        if generator is None:
+            # Here we make the seed for *bayesian sampling* unique across processes for better batch parallelism!
+            # Keep the original seed construction, but only once per (device, rank).
+            seed = 1 + rank + torch.randint(2**63-1, size=(1,)).item()
+            generator = torch.Generator(device=input.device).manual_seed(seed)
+            cls._generators[key] = generator
+        return torch.randn(input.size(), generator=generator, dtype=input.dtype,
+                           layout=input.layout, device=input.device)
 
     def kl_loss(self): # this method apparently is sufficient to work with get_kl_loss(model) as-is!
         return self._kl_loss
@@ -140,6 +166,7 @@ class _BayesianParameterization(nn.Module):
 
 # simpler than class?
 SigmaCoefficient=_BayesianParameterization.scale_sigma
+_BayesianParameterization._forward = classmethod(_safe_compile(_BayesianParameterization._forward.__func__))
 
 from torch.utils.data import Dataset, DataLoader
 def get_dataset_size(train_dataset: Dataset | DataLoader):
