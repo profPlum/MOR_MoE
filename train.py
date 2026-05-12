@@ -15,7 +15,7 @@ time_chunking: int=int(os.environ.get('TIME_CHUNKING', 9)) # how many self-aware
 time_stride: int=int(os.environ.get('TIME_STRIDE', 1)) # temporal stride between selected frames
 batch_size: int=int(os.environ.get('BATCH_SIZE', 2)) # batch size, with VI experts we can only fit 1 batch w/ 20 A100
 scale_lr_and_clip=True # multiply by DDP (total) batch_size
-lr: float=float(os.environ.get('LR', 1.563e-5)) # (VI) learning rate (will be scaled by recurisve steps)
+lr: float=float(os.environ.get('LR', 1.563e-5)) # (VI) learning rate (will be scaled by recursive steps)
 weight_decay: float=float(os.environ.get('WEIGHT_DECAY', 0.0)) # weight decay
 max_epochs=int(os.environ.get('MAX_EPOCHS', 500))
 gradient_clip_val=float(os.environ.get('GRAD_CLIP', 50)) # grad clip adjusted based on new scaling rule
@@ -50,7 +50,7 @@ VI_prior_sigma=float(os.environ.get('VI_PRIOR_SIGMA', 0.2)) # this prior sigma a
 
 # NOTE: cosine+warmrestarts is the default scheduler (with T_max=1)
 one_cycle=bool(int(os.environ.get('ONE_CYCLE', True))) # scheduler
-three_phase=bool(int(os.environ.get('THREE_PHASE', False))) # adds decay after inital bump
+three_phase=bool(int(os.environ.get('THREE_PHASE', False))) # adds decay after initial bump
 RLoP=bool(int(os.environ.get('RLoP', False))) # scheduler
 RLoP_factor=0.9
 RLoP_patience=15
@@ -72,6 +72,9 @@ import torch
 import pytorch_lightning as L
 torch.set_float32_matmul_precision('high')
 torch._dynamo.config.capture_scalar_outputs = True # capture tensor.item()
+if hasattr(torch._dynamo.config, 'recompile_limit'):
+    torch._dynamo.config.recompile_limit = 32
+    torch._dynamo.config.accumulated_recompile_limit = 512
 #torch.backends.cuda.matmul.allow_tf32 = True
 #torch.backends.cudnn.allow_tf32 = True
 ## the flags above make roughly 14% of all ops use tensor cores!
