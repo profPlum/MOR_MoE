@@ -71,13 +71,12 @@ RLoP_patience=15
 import torch
 import pytorch_lightning as L
 torch.set_float32_matmul_precision('high')
+# the flag above makes roughly 14% of all ops use tensor cores!
+
 torch._dynamo.config.capture_scalar_outputs = True # capture tensor.item()
 if hasattr(torch._dynamo.config, 'recompile_limit'):
     torch._dynamo.config.recompile_limit = 32
     torch._dynamo.config.accumulated_recompile_limit = 512
-#torch.backends.cuda.matmul.allow_tf32 = True
-#torch.backends.cudnn.allow_tf32 = True
-## the flags above make roughly 14% of all ops use tensor cores!
 
 # Import Custom Modules
 from MOR_Operator import MOR_Operator
