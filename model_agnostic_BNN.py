@@ -20,8 +20,8 @@ def kl_div(mu_q, sigma_q, mu_p, sigma_p):
     """
     assert not (torch.is_complex(mu_q) or torch.is_complex(sigma_q))
 
-    mu_p = torch.as_tensor(mu_p)
-    sigma_p = torch.as_tensor(sigma_p)
+    mu_p = torch.as_tensor(mu_p, dtype=mu_q.dtype, device=mu_q.device)
+    sigma_p = torch.as_tensor(sigma_p, dtype=mu_q.dtype, device=mu_q.device)
     kl = torch.log(sigma_p) - torch.log(sigma_q) + \
         (sigma_q**2 + (mu_q - mu_p)**2) / (2 * sigma_p**2) - 0.5
     return kl.sum()
@@ -36,7 +36,7 @@ def get_kl_loss(m):
     assert torch.isfinite(kl_loss) or not kl_loss.requires_grad, f'kl_loss={kl_loss.item()}'
     return kl_loss
 
-_pt_nll_classificiation = torch.nn.NLLLoss(reduction='sum') # sum needed for the true NLL
+_pt_nll_classificiation = torch.nn.NLLLoss(reduction='mean') # sum needed for the true NLL
 nll_classification = lambda y_pred, y: _pt_nll_classificiation(y_pred, y)
 
 # Truest NLL! (for regression)
@@ -112,7 +112,6 @@ class _BayesianParameterization(nn.Module):
             gen = None if seed is None else torch.Generator(device=input.device).manual_seed(seed)
             return torch.randn(input.size(), generator=gen, dtype=input.dtype,
                                layout=input.layout, device=input.device)
-
         standard_normal = torch_randn_like(self._rho_params, seed=pid_seed)
         sigma_params = nn.functional.softplus(self._rho_params)
 
