@@ -17,7 +17,7 @@
 
 # Load modules or environment
 . ~/.bashrc
-conda activate uqops
+conda activate uqops-dynamo
 #module load cuda/11.8.0
 
 # fix bugged dynamo toolchain
