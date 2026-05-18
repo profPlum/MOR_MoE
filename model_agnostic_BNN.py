@@ -115,11 +115,14 @@ class _BayesianParameterization(nn.Module):
         standard_normal = torch_randn_like(self._rho_params, seed=pid_seed)
         sigma_params = nn.functional.softplus(self._rho_params)
 
-        # apply scaling (possibly turning it off)
-        if self._sigma_coefficient!=1.0: sigma_params = sigma_params*float(self._sigma_coefficient)
-
         # Update KL loss based on mu_params & sigma_params
         self._kl_loss = kl_div(mu_params, sigma_params, self.prior_mu, self.prior_sigma)
+        # NOTE: kl loss is independent of sigma scaling, since common use case is _sigma_coefficient==0
+
+        # apply sampled sigma scaling (possibly turning it off)
+        if self._sigma_coefficient!=1.0:
+            assert not self.training, 'sigma scaling is not allowed during training!'
+            sigma_params = sigma_params*self._sigma_coefficient
         sampled_values = mu_params+sigma_params*standard_normal
         if is_complex:
             sampled_values = torch.view_as_complex(sampled_values)
@@ -133,7 +136,7 @@ class _BayesianParameterization(nn.Module):
     def scale_sigma(cls, sigma_coefficient):
         ''' Used to temporarily change the scale of sigma params for sampling from colder posterior '''
         try:
-            cls._sigma_coefficient=sigma_coefficient
+            cls._sigma_coefficient=float(sigma_coefficient)
             yield
         finally: cls._sigma_coefficient=1.0
 
