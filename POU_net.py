@@ -250,6 +250,25 @@ class POU_net(L.LightningModule):
         self.val_metrics = MetricsModule(self, n_outputs, prefix='val_')
         self.val_last_TS_metrics = MetricsModule(self, n_outputs, prefix='val_last_TS_')
 
+    def on_load_checkpoint(self, checkpoint): # patch for backwards compatibility
+        module_state_dict = checkpoint.get('module_state_dict', checkpoint.get('state_dict'))
+        if module_state_dict is None: return
+
+        def rename_keys(old_prefix: str, new_prefix: str|None):
+            found_any = False
+            for k in [k for k in module_state_dict if k.startswith(old_prefix)]: # cannot mutate inplace while iterating
+                old = module_state_dict.pop(k)
+                if new_prefix is not None:
+                    module_state_dict[new_prefix + k.removeprefix(old_prefix)] = old
+                    print(f'renamed {k} to {new_prefix + k.removeprefix(old_prefix)}', flush=True)
+                found_any = True
+            return found_any
+
+        replaced_any = rename_keys('_experts.', 'experts.') # TODO: delete me
+        if replaced_any: rename_keys('_zero_expert_rho', None) # TODO: delete me
+        else: rename_keys('_zero_expert_rho', f'experts.{len(self.experts)-1}.parametrizations._rho') # this is the only important line
+        #rename_keys('_zero_expert_rho', f'experts.{len(self.experts)-1}.parametrizations._rho') # this is the only important line
+
     def configure_optimizers(self):
         optim_kwd_args = {'lr': self.lr, 'weight_decay': self.weight_decay}
         if self.make_optim==torch.optim.SGD:
@@ -334,10 +353,6 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
         # make VI reparameterize our entire model
         model_agnostic_BNN.model_agnostic_dnn_to_bnn(self, train_dataset_size, prior_cfg=prior_cfg)
 
-        # add additional set of metrics for validating aleatoric UQ itself compared to error
-        #self.val_UQ_metrics = MetricsModule(self, n_outputs, prefix='val_UQ_')
-        self._zero_expert_rho=nn.Parameter(torch.randn([1]))
-
     # original forward before probabilistic considerations
     def forward(self, X, Y=None):
         if Y is None: Y = torch.zeros(1,device=X.device, dtype=X.dtype).expand(*X.shape)
@@ -372,12 +387,3 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
         super()._log_metrics(y_pred_mu, y, val=val, loss=loss) # log regular mu metrics & lr (implicitly)
         if (kl_loss is not None) and (not val):
             self.log('kl_loss', kl_loss.detach(), sync_dist=False, prog_bar=True)
-
-        '''
-        if not val: return # UQ metrics for training would be overkill...
-        sigma_to_mad_coef = (2/torch.pi)**0.5 # this magic constant can be multiplied with sigma of a 1d guassian to obtain the MAD! E[|X-E[X]|] (expected absolute error)
-        with torch.inference_mode():
-            y_abs_error=(y-y_pred_mu).abs() # y_pred_mu is to y, as y_pred_sigma is to y_abs_error
-            y_pred_MAD = y_pred_sigma*sigma_to_mad_coef
-            self.val_UQ_metrics.log_metrics(y_pred_MAD, y_abs_error)
-        ''';
