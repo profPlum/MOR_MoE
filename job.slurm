@@ -73,6 +73,7 @@ export GRID_INPUTS=0 # append positional encodings to inputs for experts
 export USE_NORMALIZED_MOE=1 # importance normalization gives better expert utilization
 export OUT_NORM_GROUPS=1 # whether to use output normalization (you should!)
 export HIDDEN_NORM_GROUPS=1 # whether to use hidden normalization (you should!)
+export DROPOUT=0.0 # maybe this makes VI redundant?
 export VI=1 # use VI or not (in bash binary booleans have the best support for boolean logic)
 export VI_PRIOR_SIGMA=0.2 # approximately reflects the values of sigma at initialization
 export VI_COUNTS_TIMESTRIDE_GAP_DATA=1 # whether to count the gap data between timestrides in the dataset size for VI

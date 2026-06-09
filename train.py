@@ -11,6 +11,7 @@ assert type(stride) in [int, float, list, tuple]
 n_experts: int=int(os.environ.get('N_EXPERTS', 3)) # number of experts in MoE
 n_layers: int=int(os.environ.get('N_LAYERS', 4)) # number of layers in the POU net
 n_filters: int=int(os.environ.get('N_FILTERS', 32)) # hidden layer width (aka # of filters)
+dropout: float=float(os.environ.get('DROPOUT', 0.0))
 time_chunking: int=int(os.environ.get('TIME_CHUNKING', 9)) # how many self-aware recursive steps to take
 time_stride: int=int(os.environ.get('TIME_STRIDE', 1)) # temporal stride between selected frames
 batch_size: int=int(os.environ.get('BATCH_SIZE', 2)) # batch size, with VI experts we can only fit 1 batch w/ 20 A100
@@ -181,6 +182,7 @@ if __name__=='__main__':
         from IUFNO import IUFNO4d # GOTCHA: k_size is actually the kernel size for the U-net! and must be an integer
         optional_kwd_args |= {'make_expert': IUFNO4d, 'k_modes': k_modes, 'k_size': CNN_filter_size}
     else: optional_kwd_args['k_modes']=k_modes # assuming MOR_Operator expert
+    if dropout > 0: optional_kwd_args['dropout']=dropout # right now only supported for MOR_Operator
 
     # NOTE: we need to update field size based on the stride
     simulator_kwd_args = {'nx': field_size[0], 'ny': field_size[1], 'nz': field_size[2], 'dt': 0.0065*time_stride,

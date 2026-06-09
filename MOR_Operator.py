@@ -29,7 +29,7 @@ def make_rfft_corner_slices(img1_shape, img2_shape, fft_dims=None, rfft=True, ve
 
 class MOR_Layer(L.LightningModule):
     """ A single Nd MOR operator layer. """
-    def __init__(self, in_channels=1, out_channels=1, k_modes=32, ndims=2, num_h_layers=1, norm_groups=1, **kwd_args):
+    def __init__(self, in_channels=1, out_channels=1, k_modes=32, ndims=2, num_h_layers=1, norm_groups=1, dropout=0.0, **kwd_args):
         ''' pass norm_groups=0 to disable group norm or >1 for better group norm '''
         super().__init__()
         vars(self).update(locals()); del self.self
@@ -52,6 +52,9 @@ class MOR_Layer(L.LightningModule):
 
         self.g_mode_params = make_g(*g_channels)
         self.h_mlp=CNN(*mlp_channels, k_size=1, n_layers=num_h_layers, ndims=ndims, output_activation=True, **kwd_args)
+
+        dropout_layer = [nn.Dropout1d, nn.Dropout2d, nn.Dropout3d][ndims-1]
+        self.dropout = dropout_layer(dropout) if dropout > 0 else lambda x: x
 
     def forward(self, u):
         u = torch.as_tensor(u, device=self.device)
@@ -95,7 +98,7 @@ class MOR_Layer(L.LightningModule):
 
         assert u_ifft.shape[-self.ndims:]==u.shape[-self.ndims:]
 
-        return u_ifft
+        return self.dropout(u_ifft)
 
 class MOR_Operator(BasicLightningRegressor):
     """
