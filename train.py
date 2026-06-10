@@ -52,6 +52,7 @@ hidden_norm_groups = int(os.environ.get('HIDDEN_NORM_GROUPS', 1))
 use_VI = bool(int(os.environ.get('VI', True))) # whether to enable VI
 VI_counts_timestride_gap_data = bool(int(os.environ.get('VI_COUNTS_TIMESTRIDE_GAP_DATA', True))) # whether to count the gap data between timestrides in the dataset size for VI
 VI_prior_sigma=float(os.environ.get('VI_PRIOR_SIGMA', 0.2)) # this prior sigma almost matches he sigma of initialization
+VI_propagate_UQ = bool(int(os.environ.get('VI_PROPAGATE_UQ', True))) # whether to propagate uncertainty through recursive steps (can be off for control experiments)
 
 # NOTE: cosine+warmrestarts is the default scheduler (with T_max=1)
 one_cycle=bool(int(os.environ.get('ONE_CYCLE', True))) # scheduler
@@ -189,6 +190,8 @@ if __name__=='__main__':
                           'use_PDE_solver': use_PDE_solver, 'anisotropic_filter': anisotropic_filter, 'disable_filter': disable_filter,
                           'dealias_before_quadratic': dealias_before_quadratic, 'apply_pde_filter_bottleneck': apply_pde_filter_bottleneck}
     if use_manual_advection: simulator_kwd_args['u_b'] = dm.u_b
+    if use_VI: simulator_kwd_args['propagate_uq'] = VI_propagate_UQ
+
     make_gating_net = EqualizedFieldGatingNet if use_normalized_MoE else FieldGatingNet
     model = SimModelClass(n_inputs=ndims, n_outputs=ndims, ndims=ndims, n_experts=n_experts, n_layers=n_layers, hidden_channels=n_filters, n_steps=time_chunking-1,
                           weight_decay=weight_decay, lr=lr, one_cycle=one_cycle, three_phase=three_phase, RLoP=RLoP, RLoP_factor=RLoP_factor, RLoP_patience=RLoP_patience,

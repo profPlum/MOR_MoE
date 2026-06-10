@@ -214,6 +214,10 @@ class _Sim(L.LightningModule):
 
 # For use with PPOU_net
 class _UQ_Sim(_Sim):
+    def __init__(self, *args, propagate_uq: bool=True, **kwd_args):
+        super().__init__(*args, **kwd_args)
+        self.propagate_uq = propagate_uq
+
     def genIC(self, from_LES=False):
         u0 = super(_UQ_Sim,self).genIC(from_LES=from_LES)
         if from_LES: u0 = u0[0] # remove unnecessary uq tensor
@@ -227,9 +231,10 @@ class _UQ_Sim(_Sim):
         if len(u.shape)==4: # all permute ops above assume 4 dims (before vmap)
             u = u[None] # add batch dim
 
-        uq = torch.zeros(1,device=u.device, dtype=u.dtype).expand(*u.shape)
         #uq = None
+        uq = zero_uq = torch.zeros(1,device=u.device, dtype=u.dtype).expand(*u.shape)
         for i in range(n):
+            if not self.propagate_uq: uq = zero_uq
             u, uq = self.op.forward(self.vmap_NSupd(u), uq)
             if u.isnan().any() or uq.isnan().any():
                 warnings.warn(f'Simulation has diverged into NaNs! At step: {i}')
