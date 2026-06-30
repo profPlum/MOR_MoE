@@ -207,10 +207,14 @@ class _Sim(L.LightningModule):
             if intermediate_outputs and i%intermediate_output_stride==0:
                 outputs.append(u.to('cpu', non_blocking=True) if to_cpu else u)
 
-        torch.cuda.synchronize() # async sync
+        if intermediate_outputs and to_cpu:
+            torch.cuda.synchronize() # async sync
+
+        # (tl;dr: stack(axis=-1)) to_cpu is used for evaluation which has the pattern of indexing individual timesteps and this helps OS paging
+        fancy_stack = lambda outputs: torch.stack(outputs,axis=0).moveaxis(0,-1) if to_cpu else torch.stack(outputs,axis=-1)
 
         # time dim is the last dim (if it exists)
-        outputs = torch.stack(outputs,axis=-1) if intermediate_outputs else u
+        outputs = fancy_stack(outputs) if intermediate_outputs else u
         return outputs.squeeze() if len(u.shape)>len(u0.shape) else outputs
         # remove artificial batch dimension only if it was added
 
@@ -247,13 +251,15 @@ class _UQ_Sim(_Sim):
 
         # remove artificial batch dimension only if it was added
         maybe_squeeze = lambda output: output.squeeze() if len(u.shape)>len(u0.shape) else output
+        fancy_stack = lambda outputs: torch.stack(outputs,axis=0).moveaxis(0,-1) if to_cpu else torch.stack(outputs,axis=-1)
+        # (tl;dr: stack(axis=-1)) to_cpu is used for evaluation which has the pattern of indexing individual timesteps and this helps OS paging
 
         if intermediate_outputs and to_cpu:
             torch.cuda.synchronize() # async sync
 
         if intermediate_outputs: # time dim is the last dim (if it exists)
-            u_outputs = maybe_squeeze(torch.stack(u_outputs,axis=-1))
-            uq_outputs = maybe_squeeze(torch.stack(uq_outputs,axis=-1))
+            u_outputs = maybe_squeeze(fancy_stack(u_outputs))
+            uq_outputs = maybe_squeeze(fancy_stack(uq_outputs))
             return u_outputs, uq_outputs
         else: return maybe_squeeze(u), maybe_squeeze(uq)
 
