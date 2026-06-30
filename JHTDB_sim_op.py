@@ -201,7 +201,7 @@ class _Sim(L.LightningModule):
             u = u[None] # add batch dim
         for i in range(n):
             u = self.op.forward(self.vmap_NSupd(u)) # NOTE: this is the only place where the operator is used
-            if u.isnan().any():
+            if i%100==0 and u.isnan().any():
                 warnings.warn(f'Simulation has diverged into NaNs! At step: {i}')
             #assert not u.isnan().any()
             if intermediate_outputs and i%intermediate_output_stride==0:
@@ -238,7 +238,7 @@ class _UQ_Sim(_Sim):
         for i in range(n):
             if not self.propagate_uq: uq = zero_uq
             u, uq = self.op.forward(self.vmap_NSupd(u), uq)
-            if u.isnan().any() or uq.isnan().any():
+            if i%100==0 and (u.isnan().any() or uq.isnan().any()):
                 warnings.warn(f'Simulation has diverged into NaNs! At step: {i}')
             #assert not (u.isnan().any() or uq.isnan().any())
             if intermediate_outputs and i%intermediate_output_stride==0:
