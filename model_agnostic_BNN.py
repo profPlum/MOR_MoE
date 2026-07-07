@@ -60,14 +60,14 @@ _get_rho = lambda sigma: np.log(np.expm1(sigma)+1e-20)
 # a Parametrized_BayesianParameterization Parametrization. See what I mean? I can barely say the damn thing.
 class _BayesianParameterization(nn.Module):
     _sigma_coefficient=1.0 # see _BayesianParameterization.scale_sigma() to temporarily rescale all sigma values!
-    _generators = {}
     def __init__(self, mu_params, posterior_mu_init=None, posterior_sigma_init=0.0486,
                  prior_mu=0.0, prior_sigma=1.0):
         """ For MLE-pretraining: posterior_mu_init and/or prior_mu can be None if you want to copy their values
             from mu_params (for MLE-pretraining). Also if you want to do MOPED-style prior-sigma setting then leave
             prior_sigma=None (with prior_mu=None as well). """
         super().__init__()
-        if torch.is_complex(mu_params): mu_params = torch.view_as_real(mu_params)
+        if torch.is_complex(mu_params):
+            mu_params = torch.view_as_real(mu_params)
 
         # prior_sigma is None implies prior_mu is None
         if prior_sigma is None:
@@ -101,9 +101,18 @@ class _BayesianParameterization(nn.Module):
     @torch.compiler.disable
     def forward(self, mu_params):
         is_complex = torch.is_complex(mu_params)
-        if is_complex: mu_params = torch.view_as_real(mu_params)
+        if is_complex:
+            mu_params = torch.view_as_real(mu_params)
 
-        standard_normal = self._torch_randn_like(self._rho_params)
+        ## Here we make the seed for *bayesian sampling* unique across processes for better batch parallelism!
+        ## NOTE: It's ugly b/c: don't want it to make the global seed unique per-process
+        #pid_seed = (random.randint(0, 2**63-1) + os.getpid() + hash(os.uname().nodename)) % (2**64)
+        pid_seed = (1+torch.distributed.get_rank()+torch.randint(2**63-1,size=(1,)).item()) if torch.distributed.is_initialized() else None
+        def torch_randn_like(input, seed=None): # supports seeding ...unlike torch.randn_like()
+            gen = None if seed is None else torch.Generator(device=input.device).manual_seed(seed)
+            return torch.randn(input.size(), generator=gen, dtype=input.dtype,
+                               layout=input.layout, device=input.device)
+        standard_normal = torch_randn_like(self._rho_params, seed=pid_seed)
         sigma_params = nn.functional.softplus(self._rho_params)
 
         # Update KL loss based on mu_params & sigma_params
@@ -114,22 +123,9 @@ class _BayesianParameterization(nn.Module):
             sigma_params = sigma_params*self._sigma_coefficient
 
         sampled_values = mu_params+sigma_params*standard_normal
-        if is_complex: sampled_values = torch.view_as_complex(sampled_values)
+        if is_complex:
+            sampled_values = torch.view_as_complex(sampled_values)
         return sampled_values
-
-    @classmethod
-    def _torch_randn_like(cls, input):
-        rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
-        key = (str(input.device), rank) # rank is probably a sufficient key but, this is "safer"
-        generator = cls._generators.get(key)
-        if generator is None:
-            # Here we make the seed for *bayesian sampling* unique across processes for better batch parallelism!
-            # Keep the original seed construction, but only once per (device, rank).
-            seed = 1 + rank + torch.randint(2**63-1, size=(1,)).item()
-            generator = torch.Generator(device=input.device).manual_seed(seed)
-            cls._generators[key] = generator
-        return torch.randn(input.size(), generator=generator, dtype=input.dtype,
-                           layout=input.layout, device=input.device)
 
     def kl_loss(self): # this method apparently is sufficient to work with get_kl_loss(model) as-is!
         return self._kl_loss
