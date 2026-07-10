@@ -24,6 +24,7 @@ dependencies:
       - tqdm
       - papermill==2.6.0
       - scrapbook==0.5.0
+      - pandas==3.0.3 # for eval
       - ptwt==1.0.1 # for WNO
       - pytorch_wavelets==1.3.0 # for WNO
       - xarray==2025.10.0 # for WNO
