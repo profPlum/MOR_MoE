@@ -1,0 +1,440 @@
+import torch
+import numpy as np
+import pytorch_lightning as L
+import matplotlib.pyplot as plt
+
+import scrapbook as sb
+def glue_and_print(key, value):
+    try: value=value.item()
+    except: pass
+    print(f'{key}={value}')
+    sb.glue(key, value)
+
+from utils import *
+import JHTDB_sim_op
+from JHTDB_sim_op import POU_NetSimulator, PPOU_NetSimulator
+
+import model_agnostic_BNN # the script is now fully compatible with the current model
+from model_agnostic_BNN import PredSamplingWrapper
+
+import sys
+sys.path.append('./WNO/Version_2.0.0')
+sys.path.append('./IUFNO-CHL')
+from glob import glob
+
+import utils
+def load_model(path, device='cuda', **kwd_args):
+    ''' Wraps up all the nonsense involved in loading an inference model properly into one function. '''
+    paths = glob(path)
+    assert len(paths)==1, f'found these files: {paths}, but expected to find exactly one.'
+    path = paths[0]
+    print(f'loading model from path: {path}')
+
+    try:
+        print('loading VI model...')
+        model = PPOU_NetSimulator.load_from_checkpoint(path, weights_only=False, **kwd_args)
+        PredSamplingWrapper.wrap_VI_model(model)
+    except Exception as e:
+        try:
+            print('loading deterministic model...')
+            model = POU_NetSimulator.load_from_checkpoint(path, weights_only=False, **kwd_args)
+        except: raise
+
+    model = model.to(device)
+    model.eval()
+
+    print(f'num model parameters: {utils.count_parameters(model):.5e}')
+
+    # freeze everything
+    for parameter in model.parameters():
+        parameter.requires_grad=False
+    print('done!')
+    return model
+
+import contextlib
+class SimulationFlowThroughSequence:
+    ''' Data structure for indexing shifted simulation flow throughs '''
+    n_steps_per_flow_thru: int = None
+
+    @staticmethod
+    @contextlib.contextmanager
+    def flow_through_multiplier(n_flow_through_times_multiplier: int):
+        cls = SimulationFlowThroughSequence # shorthand, but a static method none the less
+        assert cls.n_steps_per_flow_thru % n_flow_through_times_multiplier == 0, f'{cls.n_steps_per_flow_thru=}, {n_flow_through_times_multiplier=}'
+        try:
+            cls.n_steps_per_flow_thru //= n_flow_through_times_multiplier
+            yield
+        finally: # cleanup
+            cls.n_steps_per_flow_thru *= n_flow_through_times_multiplier
+
+    # Verified to work: 7/16/26
+    def continuous_index_range(self, length=None, stride=2):
+        ''' Like a continuous version of range(length) for indexing shifted flow throughs (usually of this simulation).
+            Also it is periodic across the flow throughs so it will always sample the same points in a flow through'''
+        if length is None: length = len(self)
+        return np.linspace(0, length-1, num=max(0, (length-1)*self.n_steps_per_flow_thru//stride+1), endpoint=True)
+
+    @classmethod
+    def from_output(cls, sim_data): return cls(sim_data)
+
+    def __init__(self, sim_data):
+        assert type(self.n_steps_per_flow_thru) is int, 'cls.n_steps_per_flow_thru must be specified'
+        assert sim_data.shape[-1] % self.n_steps_per_flow_thru == 0, f'{sim_data.shape[-1]=}, {self.n_steps_per_flow_thru=}'
+        self.full = sim_data # raw simulation data
+
+    @property # for legacy and clarity
+    def flow_thru(self): return self
+
+    def __getitem__(self, index):
+        if not -len(self) <= index <= len(self)-1: raise IndexError(f'index {index} out of bounds for flow through sequence of length {len(self)}')
+        if index < 0: index += len(self) # standardize to positive indexing, e.g. -1 -> len(self)-1
+        start_index = int(index*self.n_steps_per_flow_thru)
+        data_slice = self.full[...,start_index:start_index+self.n_steps_per_flow_thru]
+        assert data_slice.shape[-1] == self.n_steps_per_flow_thru, f'{data_slice.shape[-1]=}, {self.n_steps_per_flow_thru=}'
+        return data_slice
+    def __len__(self): return self.full.shape[-1]//self.n_steps_per_flow_thru
+
+    # verified to work: 7/17/26
+    def slice_flow_thru(self, start: int|None, stop: int|None=None):
+        ''' start inclusive, stop exclusive like python slicing '''
+        from copy import copy
+        new = copy(self)
+        def standardize(x):
+            if x is None: return None
+            if x < 0: x += len(self)
+            return int(x * self.n_steps_per_flow_thru)
+        new.full = self.full[...,standardize(start):standardize(stop)]
+        return new
+
+    def get_samples(self, flow_thru_index=-1): return self[flow_thru_index][None]
+
+    def make_4d_sim_fig(self, vel_comp_idx:int|str='X', prefix='',
+                        num_z=6, vel_component_names = ['X','Y','Z'], show=True):
+        if type(vel_comp_idx) is str: vel_comp_idx = vel_component_names.index(vel_comp_idx)
+        from grid_figures import GridFigure
+        fig = GridFigure(f'{prefix}3d Channel Flow: {vel_component_names[vel_comp_idx]} Velocity')
+        sim_data = self.full.cpu()
+        viz_time_stride = 4000//self.n_steps_per_flow_thru
+        for z in np.linspace(0, sim_data.shape[-2]-1, num=num_z, dtype=int):
+            fig.add_3d_row(sim_data[vel_comp_idx,:,:,z], f'{z=}', x_title_func=lambda t: f't={t*viz_time_stride}',
+                        img_getter=lambda array_3d, t: array_3d[:,:,t].T)
+        if show: fig.show()
+        return fig
+
+class UQSimulationFlowThroughSequence(SimulationFlowThroughSequence):
+    ''' Adds self.uq (with derived E_{y~N(mu, sigma)}[|y_tilde - y|] for MAP prediction)
+        and self.uq.sample_moments (with original moments). '''
+    def __init__(self, sim_data, uq=None, sample_moments=None):
+        super().__init__(sim_data)
+        self.uq = uq # nested UQ Simulation
+        self.sample_moments = sample_moments # raw sample moments (for flow stats)
+
+    @classmethod
+    def from_output(cls, sim_data):
+        ''' Constructs a Simulation object from the output of the model.
+        If the model outputs UQ, then the nested Simulation.uq Simulation will also contain simulation uncertainty.
+        And the Simulation.uq.sample_moments attribute will contain the raw sample moments '''
+
+        sim_uq = None # default
+        if type(sim_data) in (tuple, list): # handle uq
+            assert len(sim_data) == 2
+            sim_samples, sim_samples_uq = sim_data # unpack
+
+            # aggregate "moments"
+            sim_data = sim_samples[0]
+            sim_data_uq = cls._expected_normal_MAE(sim_data, sim_samples[1:], sim_samples_uq[1:]).mean(0)
+            # first calculate E_{y~N(mu, sigma)}[|y_tilde - y|] (for each epistemic mixture mode) then take expectation over mixture modes
+
+            sample_moments = cls(sim_samples[1:], uq=cls(sim_samples_uq[1:]))
+            sim_uq = cls(sim_data_uq, sample_moments=sample_moments)
+        return cls(sim_data, uq=sim_uq)
+
+    @staticmethod # verified to work: 4/16/26
+    def _expected_normal_MAE(y_tilde, mu, sigma):
+        ''' = E_{y~N(mu, sigma)}[|y_tilde - y|] (analytic solution) '''
+        standard_normal = torch.distributions.Normal(0,1)
+        alpha = (y_tilde - mu) / sigma
+        phi = torch.exp(standard_normal.log_prob(alpha))
+        Phi = standard_normal.cdf(alpha)
+        return sigma * (2 * phi + alpha * (2 * Phi - 1))
+
+    # verified to work: 7/17/26
+    def slice_flow_thru(self, start: int|None, stop: int|None=None):
+        new = super().slice_flow_thru(start, stop)
+        if self.uq: new.uq = self.uq.slice_flow_thru(start, stop)
+        if self.sample_moments: new.sample_moments = self.sample_moments.slice_flow_thru(start, stop)
+        return new
+
+    def get_samples(self, flow_thru_index=-1, use_MAP=False):
+        ''' sample from sim.uq.sample_moments or return MAP prediction in compatible shape '''
+        if self.uq and not use_MAP: # self.uq.sample_moments is mu, self.uq.sample_moments.uq is sigma
+            pred_samples = [self.uq.sample_moments.flow_thru[flow_thru_index],
+                            self.uq.sample_moments.uq.flow_thru[flow_thru_index]]
+            return torch.distributions.Normal(*pred_samples).sample()
+        else: return super().get_samples(flow_thru_index)
+
+class CharacteristicTimeMSEModel:
+    def __init__(self, field_tensor, n_windows=2):
+        field_tensor = field_tensor.detach()
+        window_size = field_tensor.shape[-1] - n_windows + 1
+        print(f'window_size=field_tensor.shape[-1]-n_windows+1={window_size}')
+        # ^ verified to work: 1/21/26
+
+        # basic u0 MSE (for plotting later)
+        self.u0 = field_tensor[...,0]
+        self.u0_MSE = torch.vmap(torch.mean)((field_tensor.moveaxis(-1, 0)-self.u0)**2)
+
+        MSEs = [] # MSEs[i] is the MSE of the u0 from time i to i+window_size
+        from tqdm import tqdm
+        for i in tqdm(range(field_tensor.shape[-1]-window_size+1)):
+            u0 = field_tensor[...,i]
+            time_window = field_tensor.moveaxis(-1, 0)[i:i+window_size]
+            MSEs.append(torch.vmap(torch.mean)((time_window-u0)**2))
+        MSEs = torch.stack(MSEs, dim=0)
+
+        import scipy.optimize as optimize
+        t = np.arange(window_size)
+        def exp_error_residual(x):
+            C, t_c = x # this is what the array means
+            pred_MSE = C*(1-np.exp(-t/t_c))
+            return (abs(MSEs-pred_MSE)).mean().item()
+        opt_result = optimize.shgo(exp_error_residual, bounds=((1e-16, 100), (1, 500)))
+        #opt_result = optimize.minimize(exp_error_residual, x0=np.random.uniform(1, 250, size=2))
+        self.asymptotic_MSE, self.characteristic_time = opt_result.x
+        print(f'{opt_result=}')
+        print(f'characteristic_time=t_c={self.characteristic_time}, asymptotic_MSE=C={self.asymptotic_MSE}')
+
+    def predict_MSE(self, t):
+        return self.asymptotic_MSE*(1-np.exp(-t/self.characteristic_time))
+
+    def plot_MSE_vs_pred(self, other_model=None, other_model_label='other'):
+        print(f'characteristic_time=t_c={self.characteristic_time}, asymptotic_MSE=C={self.asymptotic_MSE}')
+        t = np.arange(self.u0_MSE.shape[0])
+        if other_model:
+            plt.plot(other_model.u0_MSE, label=other_model_label+'.u0_MSE')
+            plt.plot(other_model.predict_MSE(t), label=other_model_label+'.prediction')
+        plt.plot(self.u0_MSE, label='$MSE(u_0,u_t)$')
+        plt.plot(self.predict_MSE(t), label='prediction')
+        plt.axvline(self.characteristic_time, color='k', linestyle='--', label=f't_c={self.characteristic_time}')
+        plt.axhline(self.asymptotic_MSE, color='k', linestyle=':', label=f'C={self.asymptotic_MSE}')
+        plt.legend()
+        plt.title('MSE of u0 vs time')
+        plt.show()
+
+#########################################################
+# Cross-Correlation Diagnostics
+#########################################################
+
+import pandas as pd
+def self_xcor(flow_data):
+    ''' Takes the X-cross-correlation of the flow data with itself beginning vs ending of the flow.
+    Assumes flow_data.shape==(3,Nx,Ny,Nz,times) '''
+    f1 = flow_data[...,0]
+    f2 = flow_data[...,-1]
+
+    # * .mean(0,2,3) can be on the outside of the irfft but it is moved inside to make the irfft more efficient
+    # * and iFFT(FFT(X).conj()*FFT(Y)) = cross_correlation(X,Y) (essentially template matching by sliding one across the other
+    # * .conj() ensures similar signal maximizes the real component (x-iy)(x+iy)=x^2-(iy)^2=x^2+y^2 (also is necessary to avoid the "flip" that happens in convolution)
+    # * field - field.mean(1, keepdims=True) centers each signal like how you center variables when taking correlation (same with scale normalization)
+    def x_normalize_spatial_field(field):
+        ''' Compute zero-mean signals along x, then get norms for normalization. '''
+        field = field - field.mean(1, keepdims=True) # mu_x=0
+        field_std = np.sqrt((field**2).mean(1, keepdims=True))
+        field /= np.where(field_std == 0, 1, field_std) # sigma_x=0 & avoid division by zero
+        return field # normalized field
+    f1 = x_normalize_spatial_field(f1)
+    f2 = x_normalize_spatial_field(f2)
+    cc_fft = np.fft.rfft(f1, axis=1).conj() * np.fft.rfft(f2, axis=1) # cross-correlation in Fourier space
+    return np.fft.irfft(cc_fft.mean((0,2,3)))/f1.shape[1] # average over y & z, then normalize by Nx to get analog of Pearson's R (range in [-1,1])
+
+MSE = lambda pred, true: float(np.mean((np.asarray(pred) - np.asarray(true))**2))
+
+def xcor_metrics(pred_xcor, true_xcor):
+    return pd.Series({'xcor_mse': MSE(pred_xcor, true_xcor), 'xcor_peak_magnitude_delta': pred_xcor.max()-true_xcor.max(),
+                      'xcor_peak_loc_delta': pred_xcor.argmax()-true_xcor.argmax()}, dtype='float32')
+
+def glue_and_print_metrics(metrics: pd.Series, postfix=''):
+    for name in metrics.index:
+        glue_and_print(f'{name}{postfix}', metrics[name])
+
+# NOTE: peaks indicate "template matches", strength of match is given by peak amplitude
+# The rest of the signal is still useful for MSE but not necessary to aggregate
+def cross_correlation_comparison(pred_flow, real_channel_flow, title='', plot=True):
+    ''' This code assumes you have 2 numpy arrays loaded in memory:
+    pred_samples with shape, (3,Nx,Ny,Nz,times)
+    real_channel_flow with shape, (3,Nx,Ny,Nz,times)
+    returns: the MSE between the xcor of the pred and true'''
+    assert tuple(pred_flow.shape)==tuple(real_channel_flow.shape)
+
+    pred_xcor = self_xcor(pred_flow)
+    true_xcor = self_xcor(real_channel_flow)
+    metrics = xcor_metrics(pred_xcor, true_xcor)
+    if plot:
+        plt.plot(true_xcor,label='true')
+        plt.plot(pred_xcor,label='model')
+        plt.axvline(np.argmax(pred_xcor), color='orange', linestyle='--', label='model peak')
+        plt.axvline(np.argmax(true_xcor), color='blue', linestyle='--', label='true peak')
+        plt.legend()
+        plt.title('Flow Cross-Correlation: '+title)
+        plt.show()
+        print('MSE between xcor of pred and true:', metrics['xcor_mse'])
+    return metrics
+
+def cross_correlation_comparison_cumulative(flow_thru_index=-1, n_xcor_steps=25, beta=0.15, should_plot=True):
+    ''' n_xcor_steps = 25 should work with the time strides we've tested: 4, 8, and 16
+        beta is the weight for the previous metrics vs the new metrics for EMA '''
+    plot_interval = n_xcor_steps//5
+
+    assert sim.flow_thru[flow_thru_index].shape[-1] == real_channel_flow.shape[-1]
+    metrics_cum = None # bias-corrected EMA requires direct assignment for the first iteration
+    end_steps = np.linspace(0, real_channel_flow.shape[-1], num=n_xcor_steps+1, dtype=int)[1:]
+    for i, end_step in enumerate(end_steps):
+        i+=1 # 1-based indexing
+        should_plot_i = should_plot and (i % plot_interval == 0 or i==n_xcor_steps)
+        metrics_i = cross_correlation_comparison(sim.flow_thru[flow_thru_index][...,:end_step],
+                    real_channel_flow[...,:end_step], plot=should_plot_i,
+                    title=f'$T_0$ vs $T_0+{i/n_xcor_steps}$')
+        if metrics_cum is None: metrics_cum = metrics_i.copy()
+        else: metrics_cum = beta*metrics_cum + (1-beta)*metrics_i
+        if should_plot_i:
+            print(f'{end_step=}')
+            print('='*75)
+    return pd.concat([metrics_cum.add_suffix('_cum'), metrics_i.add_suffix('_last')])
+
+#########################################################
+# Flow Statistics & Diagnostics
+#########################################################
+
+'''
+This code assumes you have 2 numpy arrays loaded in memory:
+    pred_samples with shape, (samples,3,Nx,Ny,Nz,times) (from 1 to 2 flow through times, it can be any flow through time though)
+    real_channel_flow with shape, (3,Nx,Ny,Nz,times)
+'''
+
+def E(u):
+    uh = np.fft.rfftn(u,axes=[0,2])
+    return np.sum(np.abs(uh)**2,axis=-1)
+def npmap(f,a):
+    return np.array(list(map(f,a)))
+def E1d(Lx,Ly,Lz,epsilon_multiplier,nk,u):
+    '''
+    arguments:
+        Lx,Ly,Lz: domain lengths
+        epsilon_multiplier: for width of ring to project to point
+        nk: number of points along radius to project on to
+        u: input function
+    output:
+        energy spectrum from u. First axis is the energy spectrum. Second is y coordinate
+    '''
+    nx,ny,nz = u.shape[0:-1]
+    kx = np.fft.fftfreq(nx,d=Lx/nx)
+    kz = np.fft.rfftfreq(nz,d=Lz/nz)
+    dk = np.sqrt(kx[1]**2 + kz[1]**2)
+    epsilon = epsilon_multiplier*dk
+    Kxz = np.stack(np.meshgrid(kx,kz,indexing='ij'),axis=-1)
+    K = np.sqrt(Kxz[...,0]**2 + Kxz[...,1]**2)
+    k = np.linspace(0,min(np.max(kx),np.max(kz)),nk)
+    Eu = E(u)
+
+    return k,2.*np.transpose(npmap(
+        lambda j:npmap(
+            lambda ki:np.sum(Eu[:,j][np.abs(K-ki)<epsilon]),
+            k),
+        np.arange(ny)))
+
+#real_channel_flow.shape==(3,Nx,Ny,Nz,times)
+#pred_samples.shape==(samples,3,Nx,Ny,Nz,times)
+def plot_1dDiagnostics(pred_samples,real_channel_flow, should_plot=True): # takes ~200ms
+    assert pred_samples.shape[1:]==real_channel_flow.shape, f'{pred_samples.shape[1:]=}, {real_channel_flow.shape=}'
+    CI_coef = 1.96 # 95% CI
+    metrics = {} # all 1d metrics
+
+    stride = np.array([103,26,77])/real_channel_flow.shape[1:4] # approximate the stride of the flow
+    epsilon_multiplier = 1.0*np.mean(stride)
+
+    with warnings.catch_warnings(): # Safely ignore DoF warning (for np.std with only MAP/MLE sample)
+        warnings.filterwarnings("ignore", message=".*degrees of freedom is <= 0.*")
+
+        # Dwyer: I fixed this so it doesn't depend on the number of timesteps (-1 is the last timestep)
+        k,EE = E1d(8*np.pi,2.,4*np.pi,epsilon_multiplier=epsilon_multiplier,
+                   nk=30,u=torch.swapaxes(real_channel_flow,4,0)[-1])
+        Es = []
+        for samp in pred_samples: # Dwyer: I fixed this so it doesn't depend on the number of samples
+            zzz1 = np.moveaxis(np.asarray(samp[...,-1]),0,-1)
+            k,EE1 = E1d(8*np.pi,2.,4*np.pi,epsilon_multiplier=epsilon_multiplier,nk=30,u=zzz1)
+            Es.append(EE1)
+        Es=np.array(Es)
+
+        trim = 2 # we are trimming the first two because they contain so much energy that they distort the plots
+        y_index = real_channel_flow.shape[2]//2 # Dwyer: should be the midpoint b/c it avoids the walls
+        Es_y = Es[:,trim:,...,y_index]
+        print(f'{Es_y.shape=}')
+        mu = Es_y.mean(0)
+        std = Es_y.std(0)
+        k,EE = k[trim:],EE[trim:,y_index]
+        metrics['mse_log_energy_spectrum'] = np.mean([MSE(np.log(Es_i), np.log(EE)) for Es_i in Es_y])
+        if should_plot:
+            y = np.loadtxt('y.txt') # Dwyer: we need to interpolate this to the number of y points in the flow
+            y = np.interp(np.linspace(0,1,real_channel_flow.shape[2]), np.linspace(0,1,len(y)), y) # interp(x, xp, fp)
+            fig,ax = plt.subplots(1,4,figsize=(8,2),sharex='col',sharey='col')
+            ax[0].loglog(k,EE,'C1') # NOTE: C1 & C2 are colors
+            ax[0].loglog(k,mu,'--k')
+            ax[0].fill_between(k,mu-CI_coef*std,mu+CI_coef*std)
+            ax[0].loglog(k,3e4*k**(-5./3.),'C2')
+            #ax[0].set_xscale('linear')
+            #ax[0].set_ylim(2e3,5e4)
+            ax[0].set_ylabel(r'$E(\kappa)$')
+            ax[0].set_xlabel('$\kappa$')
+            #ax[0].title.set_text('Energy Spectrum')
+
+        xz_index = 10 # Dwyer: why 10? <-- apparently arbitrary?
+        res = pred_samples[:,:,xz_index,:,xz_index,-1].mean(1)
+        mu = res.mean(0)
+        std = res.std(0)
+        true_u1 = real_channel_flow[:,xz_index,:,xz_index,-1].mean(0)
+        metrics['mse_bulk_velocity'] = np.mean([MSE(res_i, true_u1) for res_i in res])
+        if should_plot:
+            ax[1].plot(y,true_u1,'C1')
+            ax[1].plot(y,mu,'--k')
+            ax[1].fill_between(y,mu-CI_coef*std,mu+CI_coef*std)
+            ax[1].set_ylabel('$u_{1}$')
+            ax[1].set_xlabel('$y$')
+            #ax[1].title.set_text('Bulk Velocity')
+
+        res = np.sqrt(pred_samples[:,:,xz_index,:,xz_index,-1].var(1))
+        mu = res.mean(0)
+        std = res.std(0)
+        true_urms = np.sqrt(real_channel_flow[:,xz_index,:,xz_index,-1].var(0))
+        metrics['mse_rms'] = np.mean([MSE(res_i, true_urms) for res_i in res])
+        if should_plot:
+            ax[2].plot(y,true_urms,'C1')
+            ax[2].plot(y,mu,'--k')
+            ax[2].fill_between(y,mu-CI_coef*std,mu+CI_coef*std)
+            ax[2].set_ylabel('$u_{rms}$')
+            ax[2].set_xlabel('$y$')
+            #ax[2].title.set_text('RMS')
+
+        true_xcor = self_xcor(real_channel_flow)
+        pred_xcor = [self_xcor(sample) for sample in pred_samples]
+        p_xcor_mu = np.mean(pred_xcor,0)
+        p_xcor_std = np.std(pred_xcor,0)
+        xcor_metrics_ = sum(xcor_metrics(p_xcor_i, true_xcor) for p_xcor_i in pred_xcor)/len(pred_xcor)
+        metrics = pd.concat([pd.Series(metrics), xcor_metrics_])
+        if should_plot:
+            ax[3].plot(pred_xcor[0],'--k', label='model')
+            for i in range(1,len(pred_xcor)):
+                ax[3].plot(pred_xcor[i],'--k')
+            ax[3].plot(p_xcor_mu,'r',label='mu')
+            ax[3].plot(true_xcor,'C1',label='true')
+            #ax[3].fill_between(np.arange(len(p_xcor_mu)), p_xcor_mu-CI_coef*p_xcor_std, p_xcor_mu+CI_coef*p_xcor_std)
+            #ax[3].title.set_text('Xcor')
+            plt.legend(fontsize='xx-small', loc='best')
+            ax[3].set_xlabel('$x/\Delta x$')
+            ax[3].set_ylabel('$u(0) \star u(T)$')
+            fig.tight_layout()
+
+            print('='*75)
+            plt.show()
+            print(metrics)
+            print('='*75, flush=True)
+    return metrics
