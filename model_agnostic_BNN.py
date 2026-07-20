@@ -117,7 +117,7 @@ class _BayesianParameterization(nn.Module):
 
         # Update KL loss based on mu_params & sigma_params
         self._kl_loss = kl_div(mu_params, sigma_params, self.prior_mu, self.prior_sigma)
-        
+
         if self._sigma_coefficient!=1.0: # apply sampled sigma scaling (possibly turning it off)
             assert not self.training, 'sigma scaling is not allowed during training!'
             sigma_params = sigma_params*self._sigma_coefficient
@@ -192,7 +192,7 @@ def clear_cache():
     while gc.collect(): pass
     torch.cuda.empty_cache()
 
-try: from tqdm import tqdm
+try: from tqdm.auto import tqdm
 except ImportError: tqdm = lambda x: x
 
 # Adapted to stack aleatoric moments

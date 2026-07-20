@@ -2,6 +2,8 @@ import torch
 import numpy as np
 import pytorch_lightning as L
 import matplotlib.pyplot as plt
+import warnings
+from tqdm.auto import tqdm
 
 import scrapbook as sb
 def glue_and_print(key, value):
@@ -10,7 +12,6 @@ def glue_and_print(key, value):
     print(f'{key}={value}')
     sb.glue(key, value)
 
-from utils import *
 import JHTDB_sim_op
 from JHTDB_sim_op import POU_NetSimulator, PPOU_NetSimulator
 
@@ -185,7 +186,7 @@ class CharacteristicTimeMSEModel:
         self.u0_MSE = torch.vmap(torch.mean)((field_tensor.moveaxis(-1, 0)-self.u0)**2)
 
         MSEs = [] # MSEs[i] is the MSE of the u0 from time i to i+window_size
-        from tqdm import tqdm
+        from tqdm.auto import tqdm
         for i in tqdm(range(field_tensor.shape[-1]-window_size+1)):
             u0 = field_tensor[...,i]
             time_window = field_tensor.moveaxis(-1, 0)[i:i+window_size]
@@ -351,7 +352,7 @@ def plot_1dDiagnostics(pred_samples,real_channel_flow, should_plot=True): # take
     metrics = {} # all 1d metrics
 
     stride = np.array([103,26,77])/real_channel_flow.shape[1:4] # approximate the stride of the flow
-    epsilon_multiplier = 1.0*np.mean(stride)
+    epsilon_multiplier = 1.0*np.mean(stride) # 1 was the default for the original dataset size
 
     with warnings.catch_warnings(): # Safely ignore DoF warning (for np.std with only MAP/MLE sample)
         warnings.filterwarnings("ignore", message=".*degrees of freedom is <= 0.*")
@@ -368,12 +369,11 @@ def plot_1dDiagnostics(pred_samples,real_channel_flow, should_plot=True): # take
 
         trim = 2 # we are trimming the first two because they contain so much energy that they distort the plots
         y_index = real_channel_flow.shape[2]//2 # Dwyer: should be the midpoint b/c it avoids the walls
-        Es_y = Es[:,trim:,...,y_index]
-        print(f'{Es_y.shape=}')
+        Es_y = Es[:,trim:,...,y_index] # NOTE: tested on 7/20/26 that len(Es.shape)==3 which would make the "..." redundant...
         mu = Es_y.mean(0)
         std = Es_y.std(0)
         k,EE = k[trim:],EE[trim:,y_index]
-        metrics['mse_log_energy_spectrum'] = np.mean([MSE(np.log(Es_i), np.log(EE)) for Es_i in Es_y])
+        metrics['mse_log_energy_spectrum'] = MSE(np.log(Es_y), np.log(EE))
         if should_plot:
             y = np.loadtxt('y.txt') # Dwyer: we need to interpolate this to the number of y points in the flow
             y = np.interp(np.linspace(0,1,real_channel_flow.shape[2]), np.linspace(0,1,len(y)), y) # interp(x, xp, fp)
@@ -393,7 +393,7 @@ def plot_1dDiagnostics(pred_samples,real_channel_flow, should_plot=True): # take
         mu = res.mean(0)
         std = res.std(0)
         true_u1 = real_channel_flow[:,xz_index,:,xz_index,-1].mean(0)
-        metrics['mse_bulk_velocity'] = np.mean([MSE(res_i, true_u1) for res_i in res])
+        metrics['mse_bulk_velocity'] = MSE(res, true_u1)
         if should_plot:
             ax[1].plot(y,true_u1,'C1')
             ax[1].plot(y,mu,'--k')
@@ -406,7 +406,7 @@ def plot_1dDiagnostics(pred_samples,real_channel_flow, should_plot=True): # take
         mu = res.mean(0)
         std = res.std(0)
         true_urms = np.sqrt(real_channel_flow[:,xz_index,:,xz_index,-1].var(0))
-        metrics['mse_rms'] = np.mean([MSE(res_i, true_urms) for res_i in res])
+        metrics['mse_rms'] = MSE(res, true_urms)
         if should_plot:
             ax[2].plot(y,true_urms,'C1')
             ax[2].plot(y,mu,'--k')
@@ -437,5 +437,4 @@ def plot_1dDiagnostics(pred_samples,real_channel_flow, should_plot=True): # take
             print('='*75)
             plt.show()
             print(metrics)
-            print('='*75, flush=True)
     return metrics
