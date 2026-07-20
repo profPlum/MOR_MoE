@@ -280,7 +280,8 @@ def cross_correlation_comparison(pred_flow, real_channel_flow, title='', plot=Tr
         print('MSE between xcor of pred and true:', metrics['xcor_mse'])
     return metrics
 
-def cross_correlation_comparison_cumulative(flow_thru_index=-1, n_xcor_steps=25, beta=0.15, should_plot=True):
+def cross_correlation_comparison_cumulative(sim, real_channel_flow, flow_thru_index=-1,
+                                            n_xcor_steps=25, beta=0.15, should_plot=True):
     ''' n_xcor_steps = 25 should work with the time strides we've tested: 4, 8, and 16
         beta is the weight for the previous metrics vs the new metrics for EMA '''
     plot_interval = n_xcor_steps//5
