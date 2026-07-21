@@ -346,7 +346,7 @@ def E1d(Lx,Ly,Lz,epsilon_multiplier,nk,u):
 
 #real_channel_flow.shape==(3,Nx,Ny,Nz,times)
 #pred_samples.shape==(samples,3,Nx,Ny,Nz,times)
-def plot_1dDiagnostics(pred_samples,real_channel_flow, should_plot=True): # takes ~200ms
+def plot_1dDiagnostics(pred_samples, real_channel_flow, should_plot=True): # takes ~200ms
     assert pred_samples.shape[1:]==real_channel_flow.shape, f'{pred_samples.shape[1:]=}, {real_channel_flow.shape=}'
     CI_coef = 1.96 # 95% CI
     metrics = {} # all 1d metrics
@@ -388,6 +388,7 @@ def plot_1dDiagnostics(pred_samples,real_channel_flow, should_plot=True): # take
             ax[0].set_xlabel('$\kappa$')
             #ax[0].title.set_text('Energy Spectrum')
 
+        # TODO: replace xz_index with : then average over x and z
         xz_index = 10 # Dwyer: why 10? <-- apparently arbitrary?
         res = pred_samples[:,:,xz_index,:,xz_index,-1].mean(1)
         mu = res.mean(0)
