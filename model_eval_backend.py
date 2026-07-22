@@ -107,7 +107,7 @@ class SimulationFlowThroughSequence:
         new.full = self.full[...,standardize(start):standardize(stop)]
         return new
 
-    def get_samples(self, flow_thru_index=-1): return self[flow_thru_index][None]
+    def get_samples(self, flow_thru_index=-1, sparse=False): return self[flow_thru_index][None]
 
     def make_4d_sim_fig(self, vel_comp_idx:int|str='X', prefix='',
                         num_z=6, vel_component_names = ['X','Y','Z'], show=True):
@@ -166,11 +166,12 @@ class UQSimulationFlowThroughSequence(SimulationFlowThroughSequence):
         if self.sample_moments: new.sample_moments = self.sample_moments.slice_flow_thru(start, stop)
         return new
 
-    def get_samples(self, flow_thru_index=-1, use_MAP=False):
+    def get_samples(self, flow_thru_index=-1, use_MAP=False, sparse=False):
         ''' sample from sim.uq.sample_moments or return MAP prediction in compatible shape '''
         if self.uq and not use_MAP: # self.uq.sample_moments is mu, self.uq.sample_moments.uq is sigma
             pred_samples = [self.uq.sample_moments.flow_thru[flow_thru_index],
                             self.uq.sample_moments.uq.flow_thru[flow_thru_index]]
+            if sparse: pred_samples = [moment[...,(0,-1)] for moment in pred_samples]
             return torch.distributions.Normal(*pred_samples).sample()
         else: return super().get_samples(flow_thru_index)
 
@@ -347,7 +348,10 @@ def E1d(Lx,Ly,Lz,epsilon_multiplier,nk,u):
 #real_channel_flow.shape==(3,Nx,Ny,Nz,times)
 #pred_samples.shape==(samples,3,Nx,Ny,Nz,times)
 def plot_1dDiagnostics(pred_samples, real_channel_flow, should_plot=True): # takes ~200ms
-    assert pred_samples.shape[1:]==real_channel_flow.shape, f'{pred_samples.shape[1:]=}, {real_channel_flow.shape=}'
+    assert pred_samples.shape[1:-1]==real_channel_flow.shape[:-1] and \
+        pred_samples.shape[-1] in {real_channel_flow.shape[-1], 2}, \
+        f'invalid shapes: {pred_samples.shape[1:]=}, {real_channel_flow.shape=}'
+
     CI_coef = 1.96 # 95% CI
     metrics = {} # all 1d metrics
 
@@ -437,5 +441,6 @@ def plot_1dDiagnostics(pred_samples, real_channel_flow, should_plot=True): # tak
 
             print('='*75)
             plt.show()
+            plt.close()
             print(metrics)
     return metrics
