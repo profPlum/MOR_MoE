@@ -347,7 +347,9 @@ def E1d(Lx,Ly,Lz,epsilon_multiplier,nk,u):
 
 #real_channel_flow.shape==(3,Nx,Ny,Nz,times)
 #pred_samples.shape==(samples,3,Nx,Ny,Nz,times)
-def plot_1dDiagnostics(pred_samples, real_channel_flow, should_plot=True): # takes ~200ms
+def plot_1dDiagnostics(pred_samples, real_channel_flow, k_trim=2, should_plot=True, reduce_y_line=False): # takes ~200ms
+    ''' reduce_y_line: if True, then the y-line is reduced by averaging over x and z dimensions else the y-line is chosen arbitrarily '''
+    ''' k_trim: trim the first k_trim points from the energy spectrum (to prevent them from dominating) '''
     assert pred_samples.shape[1:-1]==real_channel_flow.shape[:-1] and \
         pred_samples.shape[-1] in {real_channel_flow.shape[-1], 2}, \
         f'invalid shapes: {pred_samples.shape[1:]=}, {real_channel_flow.shape=}'
@@ -371,33 +373,41 @@ def plot_1dDiagnostics(pred_samples, real_channel_flow, should_plot=True): # tak
             Es.append(EE1)
         Es=np.array(Es)
 
-        trim = 2 # we are trimming the first two because they contain so much energy that they distort the plots
+        # we are trimming the k_trim because they contain so much energy that they distort the plots
         y_index = real_channel_flow.shape[2]//2 # Dwyer: should be the midpoint b/c it avoids the walls
-        Es_y = Es[:,trim:,...,y_index] # NOTE: tested on 7/20/26 that len(Es.shape)==3 which would make the "..." redundant...
+        Es_y = Es[:,k_trim:,...,y_index] # NOTE: tested on 7/20/26 that len(Es.shape)==3 which would make the "..." redundant...
         mu = Es_y.mean(0)
         std = Es_y.std(0)
-        k,EE = k[trim:],EE[trim:,y_index]
+        k,EE = k[k_trim:],EE[k_trim:,y_index]
         metrics['mse_log_energy_spectrum'] = MSE(np.log(Es_y), np.log(EE))
         if should_plot:
             y = np.loadtxt('y.txt') # Dwyer: we need to interpolate this to the number of y points in the flow
             y = np.interp(np.linspace(0,1,real_channel_flow.shape[2]), np.linspace(0,1,len(y)), y) # interp(x, xp, fp)
             fig,ax = plt.subplots(1,4,figsize=(8,2),sharex='col',sharey='col')
-            ax[0].loglog(k,EE,'C1') # NOTE: C1 & C2 are colors
-            ax[0].loglog(k,mu,'--k')
+            ax[0].plot(k,EE,'C1') # NOTE: C1 & C2 are colors
+            ax[0].plot(k,mu,'--k')
             ax[0].fill_between(k,mu-CI_coef*std,mu+CI_coef*std)
-            ax[0].loglog(k,3e4*k**(-5./3.),'C2')
-            #ax[0].set_xscale('linear')
+            ax[0].plot(k,3e4*k**(-5./3.),'C2')
+            ax[0].set_xscale('log')
+            ax[0].set_yscale('log')
             #ax[0].set_ylim(2e3,5e4)
             ax[0].set_ylabel(r'$E(\kappa)$')
             ax[0].set_xlabel('$\kappa$')
             #ax[0].title.set_text('Energy Spectrum')
 
-        # TODO: replace xz_index with : then average over x and z
-        xz_index = 10 # Dwyer: why 10? <-- apparently arbitrary?
-        res = pred_samples[:,:,xz_index,:,xz_index,-1].mean(1)
+        # TODO: should probably not reduce channels at all for the MSE metric (just for plotting)
+        # TODO: should probably take the L2 norm over channels instead of mean (to measure vel-vec length)
+        # TODO: replace xz_index with : then take mean over x and z
+
+        # get_y_line: get the y-line of the array (by reducing x and z dimensions)
+        if reduce_y_line: get_y_line = lambda arr: arr[...,-1].mean(axis=(-3,-1))
+        else: get_y_line = lambda arr, xz_index = 10: arr[...,xz_index,:,xz_index,-1] # Dwyer: why 10? <-- apparently arbitrary?
+        pred_samples_y_line = get_y_line(pred_samples)
+        real_channel_flow_y_line = get_y_line(real_channel_flow)
+        res = pred_samples_y_line.mean(1) # mean over channels
         mu = res.mean(0)
         std = res.std(0)
-        true_u1 = real_channel_flow[:,xz_index,:,xz_index,-1].mean(0)
+        true_u1 = real_channel_flow_y_line.mean(0) # mean over channels
         metrics['mse_bulk_velocity'] = MSE(res, true_u1)
         if should_plot:
             ax[1].plot(y,true_u1,'C1')
@@ -407,10 +417,10 @@ def plot_1dDiagnostics(pred_samples, real_channel_flow, should_plot=True): # tak
             ax[1].set_xlabel('$y$')
             #ax[1].title.set_text('Bulk Velocity')
 
-        res = np.sqrt(pred_samples[:,:,xz_index,:,xz_index,-1].var(1))
+        res = np.sqrt(pred_samples_y_line.var(1))
         mu = res.mean(0)
         std = res.std(0)
-        true_urms = np.sqrt(real_channel_flow[:,xz_index,:,xz_index,-1].var(0))
+        true_urms = np.sqrt(real_channel_flow_y_line.var(0))
         metrics['mse_rms'] = MSE(res, true_urms)
         if should_plot:
             ax[2].plot(y,true_urms,'C1')
