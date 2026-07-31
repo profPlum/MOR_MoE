@@ -337,8 +337,8 @@ def E1d(u, epsilon_multiplier=1.0, nk=30, Lx=8*np.pi, Lz=4*np.pi): # & Ly=2
         return np.asarray(list(map(f,a)))
 
     nx,ny,nz = u.shape[0:-1]
-    kx = np.fft.fftfreq(nx,d=Lx/nx)
-    kz = np.fft.rfftfreq(nz,d=Lz/nz)
+    kx = np.fft.fftfreq(nx,d=Lx/nx)  * 2 * np.pi # 2 * np.pi "converts to angular wavenumbers"?
+    kz = np.fft.rfftfreq(nz,d=Lz/nz)  * 2 * np.pi # ^ But not sure if we need it or not...
     dk = np.sqrt(kx[1]**2 + kz[1]**2)
     epsilon = epsilon_multiplier*dk
     Kxz = np.stack(np.meshgrid(kx,kz,indexing='ij'),axis=-1)
