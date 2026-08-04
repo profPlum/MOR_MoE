@@ -442,12 +442,13 @@ def calibrate_epsilon_multiplier(flow, epsilon_multipliers=np.linspace(0.25, 16,
 #real_channel_flow.shape==(3,Nx,Ny,Nz,times)
 #pred_samples.shape==(samples,3,Nx,Ny,Nz,times)
 def plot_1dDiagnostics(pred_samples, real_channel_flow, k_trim=2, epsilon_multiplier=1.0,
-                       should_plot=True, reduce_y_line=False, **kwd_args): # takes ~200ms
-    ''' reduce_y_line: if True, then the y-line is reduced by averaging over x and z dimensions else the y-line is chosen arbitrarily
+                       should_plot=True, aggregate_xz=False, **kwd_args): # takes ~200ms
+    ''' aggregate_xz: if True, then the y-line is reduced by averaging over x and z dimensions else the y-line is chosen arbitrarily
         k_trim: trim the first k_trim points from the energy spectrum (to prevent them from dominating)
         epsilon_multiplier: multiplier for the epsilon radius of the energy spectrum (to prevent aliasing)
         **kwd_args: additional arguments for E1d() '''
-    assert pred_samples.shape[1:-1]==real_channel_flow.shape[:-1] and \
+    assert len(pred_samples.shape)==len(real_channel_flow.shape)+1==6 and \
+        pred_samples.shape[1:-1]==real_channel_flow.shape[:-1] and \
         pred_samples.shape[-1] in {real_channel_flow.shape[-1], 2}, \
         f'invalid shapes: {pred_samples.shape[1:]=}, {real_channel_flow.shape=}'
 
@@ -471,8 +472,6 @@ def plot_1dDiagnostics(pred_samples, real_channel_flow, k_trim=2, epsilon_multip
         k,EE = k[k_trim:],EE[k_trim:,y_index]
         metrics['mse_log_energy_spectrum'] = MSE(np.log(Es_y), np.log(EE))
         if should_plot:
-            y = np.loadtxt('y.txt') # Dwyer: we need to interpolate this to the number of y points in the flow
-            y = np.interp(np.linspace(0,1,real_channel_flow.shape[2]), np.linspace(0,1,len(y)), y) # interp(x, xp, fp)
             fig,ax = plt.subplots(1,4,figsize=(8,2),sharex='col',sharey='col')
             ax[0].plot(k,EE,'C1') # NOTE: C1 & C2 are colors
             ax[0].plot(k,mu,'--k')
@@ -485,21 +484,20 @@ def plot_1dDiagnostics(pred_samples, real_channel_flow, k_trim=2, epsilon_multip
             ax[0].set_xlabel('$\kappa$')
             #ax[0].title.set_text('Energy Spectrum')
 
-        # TODO: should probably not reduce channels at all for the MSE metric (just for plotting)
-        # TODO: should probably take the L2 norm over channels instead of mean (to measure vel-vec length)
-        # TODO: replace xz_index with : then take mean over x and z
-
         # get_y_line: get the y-line of the array (by reducing x and z dimensions)
-        if reduce_y_line: get_y_line = lambda arr: arr[...,-1].mean(axis=(-3,-1))
-        else: get_y_line = lambda arr, xz_index = 10: arr[...,xz_index,:,xz_index,-1] # Dwyer: why 10? <-- apparently arbitrary?
+        xz_index = 10 # Dwyer: why 10? <-- apparently arbitrary?
+        if aggregate_xz: get_y_line = lambda arr: arr[...,-1].mean(axis=(-3,-1))
+        else: get_y_line = lambda arr: arr[...,xz_index,:,xz_index,-1]
         pred_samples_y_line = get_y_line(pred_samples)
         real_channel_flow_y_line = get_y_line(real_channel_flow)
-        res = pred_samples_y_line.mean(1) # mean over channels
+        res = pred_samples_y_line[:, 0] #.mean(1) # take X component from channels
         mu = res.mean(0)
         std = res.std(0)
-        true_u1 = real_channel_flow_y_line.mean(0) # mean over channels
+        true_u1 = real_channel_flow_y_line[0] #.mean(0) # take X component from channels
         metrics['mse_bulk_velocity'] = MSE(res, true_u1)
         if should_plot:
+            y = np.loadtxt('y.txt') # Dwyer: we need to interpolate this to the number of y points in the flow
+            y = np.interp(np.linspace(0,1,real_channel_flow.shape[2]), np.linspace(0,1,len(y)), y) # interp(x, xp, fp)
             ax[1].plot(y,true_u1,'C1')
             ax[1].plot(y,mu,'--k')
             ax[1].fill_between(y,mu-CI_coef*std,mu+CI_coef*std)
@@ -507,10 +505,15 @@ def plot_1dDiagnostics(pred_samples, real_channel_flow, k_trim=2, epsilon_multip
             ax[1].set_xlabel('$y$')
             #ax[1].title.set_text('Bulk Velocity')
 
-        res = np.sqrt(pred_samples_y_line.var(1))
+        #real_channel_flow.shape==(3,Nx,Ny,Nz,times)
+        #pred_samples.shape==(samples,3,Nx,Ny,Nz,times)
+        # get_rms verified to match Ravi's instructions: 8/6/26
+        if aggregate_xz: get_rms = lambda arr: torch.as_tensor(arr[...,-1]).var(axis=(-3,-1), correction=0).sum(axis=-2)**0.5
+        else: get_rms = lambda arr: torch.as_tensor(arr[...,-1]).var(axis=-3, correction=0)[...,xz_index].sum(axis=-2)**0.5
+        res = get_rms(pred_samples)
+        true_urms = get_rms(real_channel_flow)
         mu = res.mean(0)
         std = res.std(0)
-        true_urms = np.sqrt(real_channel_flow_y_line.var(0))
         metrics['mse_rms'] = MSE(res, true_urms)
         if should_plot:
             ax[2].plot(y,true_urms,'C1')
@@ -523,7 +526,7 @@ def plot_1dDiagnostics(pred_samples, real_channel_flow, k_trim=2, epsilon_multip
         true_xcor = self_xcor(real_channel_flow)
         pred_xcor = [self_xcor(sample) for sample in pred_samples]
         p_xcor_mu = np.mean(pred_xcor,0)
-        p_xcor_std = np.std(pred_xcor,0)
+        #p_xcor_std = np.std(pred_xcor,0)
         xcor_metrics_ = sum(xcor_metrics(p_xcor_i, true_xcor) for p_xcor_i in pred_xcor)/len(pred_xcor)
         metrics = pd.concat([pd.Series(metrics), xcor_metrics_])
         if should_plot:
