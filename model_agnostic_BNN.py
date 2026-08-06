@@ -302,13 +302,13 @@ class PredSamplingWrapper: # TODO: support get_BNN_pred_mixture
 
     def forward(self, x_inputs, **kwd_args):
         if self._n_samples>1:
-            if self._MAP_sample_first: # make MAP prediction before tqdm progress bar
-                with SigmaCoefficient(0.0):
-                    mu_MAP, sigma_MAP = super().forward(x_inputs, **kwd_args)
             sampling_fn = get_BNN_pred_moments if self._moments else get_BNN_pred_distribution
             mu, sigma = sampling_fn(super().forward, x_inputs, n_samples=self._n_samples,
                                     verbose=self._verbose, **kwd_args)
             if self._MAP_sample_first: # add MAP prediction to the beginning of the stack
+                print('getting MAP prediction...', flush=True)
+                with SigmaCoefficient(0.0):
+                    mu_MAP, sigma_MAP = super().forward(x_inputs, **kwd_args)
                 mu = torch.cat([mu_MAP[None], mu], dim=0)
                 sigma = torch.cat([sigma_MAP[None], sigma], dim=0)
         else: mu, sigma = super().forward(x_inputs, **kwd_args)
