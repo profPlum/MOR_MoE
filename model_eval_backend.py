@@ -339,10 +339,10 @@ def E1d(u, epsilon_multiplier=1.0, nk=30, Lx=8*np.pi, Lz=4*np.pi): # & Ly=2
     nx,ny,nz = u.shape[0:-1]
     kx = np.fft.fftfreq(nx,d=Lx/nx)  * 2 * np.pi # 2 * np.pi "converts to angular wavenumbers"?
     kz = np.fft.rfftfreq(nz,d=Lz/nz)  * 2 * np.pi # ^ But not sure if we need it or not...
-    dk = np.sqrt(kx[1]**2 + kz[1]**2)
-    epsilon = epsilon_multiplier*dk
+    dk = np.sqrt(kx[1]**2 + kz[1]**2) # spacing between k-points
+    epsilon = epsilon_multiplier*dk # tolerance
     Kxz = np.stack(np.meshgrid(kx,kz,indexing='ij'),axis=-1)
-    K = np.sqrt(Kxz[...,0]**2 + Kxz[...,1]**2)
+    K = np.sqrt(Kxz[...,0]**2 + Kxz[...,1]**2) # "distance" of k-points from origin in k-space of xz plane
     k = np.linspace(0,min(np.max(kx),np.max(kz)),nk)
     Eu = E(u)
 
@@ -352,6 +352,7 @@ def E1d(u, epsilon_multiplier=1.0, nk=30, Lx=8*np.pi, Lz=4*np.pi): # & Ly=2
             k),
         np.arange(ny)))
 
+# verified to work: 8/7/26
 def get_last_TS_energy_spectra(flow_samples, **kwd_args):
     '''
     meant to be an intuitive wrapper for E1d that works for both single and multiple flow samples
@@ -366,11 +367,12 @@ def get_last_TS_energy_spectra(flow_samples, **kwd_args):
             last_TS = samp[..., -1]
             k,EE1 = E1d(last_TS, **kwd_args)
             Es.append(EE1)
-        Es=np.asarray(Es if len(Es)>1 else Es[0])
+        Es=np.asarray(Es)
         return k,Es
     except ValueError as e:
         assert 'expected (channels=3,Nx,Ny,Nz)' in str(e), 'Got unexpected ValueError: '+str(e)
-        return get_last_TS_energy_spectra([flow_samples], **kwd_args)
+        k,Es = get_last_TS_energy_spectra([flow_samples], **kwd_args)
+        return k,Es[0] # remove the added dimension from the single sample case
 
 #########################################################
 # AI-generated epsilon multiplier calibration code
@@ -378,7 +380,7 @@ def get_last_TS_energy_spectra(flow_samples, **kwd_args):
 
 def _plot1d_epsilon_scale(spatial_shape):
     ''' Same resolution scaling as plot_1dDiagnostics (1.0 was for the original grid). '''
-    return float(np.mean(np.array([103, 26, 77]) / np.asarray(spatial_shape)))
+    return 1.0 #float(np.mean(np.array([103, 26, 77]) / np.asarray(spatial_shape)))
 
 # TODO: try more windows (e.g. 25)
 def energy_spectrum_windowed_cv(flow, epsilon_multiplier=1.0, n_windows=10, k_trim=5, **e1d_kwargs):
@@ -455,8 +457,8 @@ def plot_1dDiagnostics(pred_samples, real_channel_flow, k_trim=2, epsilon_multip
     CI_coef = 1.96 # 95% CI
     metrics = {} # all 1d metrics
 
-    stride = np.array([103,26,77])/real_channel_flow.shape[1:4] # approximate the stride of the flow
-    epsilon_multiplier *= np.mean(stride) # 1 was the default for the original dataset size
+    #stride = np.array([103,26,77])/real_channel_flow.shape[1:4] # approximate the stride of the flow
+    #epsilon_multiplier *= np.mean(stride) # 1 was the default for the original dataset size
 
     with warnings.catch_warnings(): # Safely ignore DoF warning (for np.std with only MAP/MLE sample)
         warnings.filterwarnings("ignore", message=".*degrees of freedom is <= 0.*")
@@ -547,3 +549,32 @@ def plot_1dDiagnostics(pred_samples, real_channel_flow, k_trim=2, epsilon_multip
             plt.close()
             print(metrics)
     return metrics
+
+def convolve_flow_stats(sim, real_channel_flow, flow_thrus_to_skip=5, flow_thru_multiplier=5, stride=2, use_MAP=False, **kwd_args):
+    '''
+    Should be able to generalize the important parts of: full cross-convolution, 1 FTT convolution, and MAP xcor metrics (we can drop EMA feature).
+    flow_thru_to_skip: 5 for recommended padding by Ravi
+    flow_thru_multiplier: x5 more flow thrus (20% size) corresponds to about 50% xcor in real data, as recommended by Ravi
+    stride: time-stride of "convolution" for the flow-through indices (default is 2 for the original dataset size)
+    use_MAP: If True, then the metrics are computed for the MAP of the model's predicted flow.
+    If False, then the metrics are computed for the MAP of the model's predicted flow.
+    **kwd_args: additional arguments for plot_1dDiagnostics
+    '''
+    real_channel_flow_seq = SimulationFlowThroughSequence(real_channel_flow)
+    extra_valid_flow_thrus = sim.slice_flow_thru(flow_thrus_to_skip)
+
+    with SimulationFlowThroughSequence.flow_through_multiplier(flow_thru_multiplier):
+        sim_flow_thru_indices = extra_valid_flow_thrus.continuous_index_range(stride=stride)
+        real_flow_thru_indices = real_channel_flow_seq.continuous_index_range(stride=stride)
+        i, metrics = 0, []
+        for sim_flow_thru_index in tqdm(sim_flow_thru_indices):
+            pred_samples = extra_valid_flow_thrus.get_samples(sim_flow_thru_index, use_MAP=use_MAP, sparse=True)
+            for real_flow_thru_index in real_flow_thru_indices:
+                should_plot = i%(len(sim_flow_thru_indices)*len(real_flow_thru_indices)//10)==0
+                metrics_i = plot_1dDiagnostics(pred_samples, # create temp variable to reference metric names for df columns outside
+                    real_channel_flow_seq[real_flow_thru_index], should_plot=should_plot, **kwd_args)
+                metrics.append(tuple(metrics_i.to_list())) # more efficient
+                i += 1
+    metrics = pd.DataFrame(metrics, columns=metrics_i.index) # more efficient
+    display(metrics.describe()) # show distribution of metrics
+    return metrics.mean(axis=0)
