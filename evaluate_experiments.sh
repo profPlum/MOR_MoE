@@ -10,7 +10,7 @@ evaluate_experiment() {
     # they are somtimes moved here as post-processing step so we erase the old version
 }
 
-ls ./lightning_logs/. | \tail -n +2 | cat -n # ls and enumermate
+\ls -lthr ./lightning_logs/. | \tail -n +2 | cat -n # ls and enumermate
 echo how many should we skip \(default=0\)?
 read SKIP
 echo how many should be evaluated?
