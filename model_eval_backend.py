@@ -322,35 +322,34 @@ def E1d(u, epsilon_multiplier=1.0, nk=30, Lx=8*np.pi, Lz=4*np.pi): # & Ly=2
         epsilon_multiplier: for width of ring to project to point
         nk: number of points along radius to project on to
         Lx,Lz: domain lengths (default values are for the original dataset size)
-    output: energy spectrum from u. E1d.shape==[k, y]:
-        First axis is the energy spectrum. Second is y coordinate
+    output:
+        k_radii: shape=(nk,) the radii of the rings for k-bins (in k-space)
+        energy_spectra: shape=(nk, Ny) the energy spectra for each y-coordinate
     '''
     if len(u.shape)!=4 or u.shape[0]!=3:
         raise ValueError(f'expected (channels=3,Nx,Ny,Nz), got {u.shape}')
-    assert tuple(u.shape)==(3, 70, 17, 52) # TODO: delete me
     u = np.moveaxis(np.asarray(u), 0, -1) # original code requires: u.shape==(Nx,Ny,Nz,3)
 
     def E(u): # energy in Fourier space (2D)
         uh = np.fft.rfftn(u,axes=[0,2])
-        return np.sum(np.abs(uh)**2,axis=-1)
-    def npmap(f,a): # map function over array
-        return np.asarray(list(map(f,a)))
+        return np.sum(np.abs(uh)**2,axis=-1) # shape=(Nx,Ny,Nz)
 
     nx,ny,nz = u.shape[0:-1]
     kx = np.fft.fftfreq(nx,d=Lx/nx) * 2 * np.pi # 2 * np.pi "converts to angular wavenumbers"?
     kz = np.fft.rfftfreq(nz,d=Lz/nz) * 2 * np.pi # ^ But not sure if we need it or not...
     dk = np.sqrt(kx[1]**2 + kz[1]**2) # spacing between k-points
     epsilon = epsilon_multiplier*dk # tolerance
-    Kxz = np.stack(np.meshgrid(kx,kz,indexing='ij'),axis=-1)
-    K = np.sqrt(Kxz[...,0]**2 + Kxz[...,1]**2) # "distance" of k-points from origin in k-space of xz plane
-    k = np.linspace(0,min(np.max(kx),np.max(kz)),nk)
-    Eu = E(u)
+    Kxz = np.stack(np.meshgrid(kx,kz,indexing='ij'),axis=-1) # Kxz.shape=(Nx,Nz,2)
+    K_dist = np.sqrt(Kxz[...,0]**2 + Kxz[...,1]**2) # "distance" of k-points from origin in k-space of xz plane
+    k_radii = np.linspace(0,min(np.max(kx),np.max(kz)),nk) # k_radii.shape=(nk,), K_dist.shape=(Nx,Nz)
+    Eu = E(u) # Eu.shape=(Nx,Ny,Nz)
 
-    return k,2.*np.transpose(npmap(
-        lambda j:npmap(
-            lambda ki:np.sum(Eu[:,j][np.abs(K-ki)<epsilon]),
-            k),
-        np.arange(ny)))
+    # K_dist: add k_radii dimension, k_radii: add x & y dimensions
+    shell_masks = np.abs(K_dist[None] - k_radii[:, None, None]) < epsilon # shell_masks.shape=(nk, Nx, Nz)
+    energy_spectra = 2. * np.einsum('xyz,kxz->ky', Eu, shell_masks) # energy_spectra.shape=(nk, Ny)
+    # NOTE: einsum multiplication applies shell masks, and summation reduces spatial dimensions (x & z)
+
+    return k_radii, energy_spectra # k_radii of the rings/bins, energy_spectra of the flow at each ring/bin
 
 # verified to work: 8/7/26
 def get_last_TS_energy_spectra(flow_samples, **kwd_args):
