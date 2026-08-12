@@ -337,8 +337,8 @@ def E1d(u, epsilon_multiplier=1.0, nk=30, Lx=8*np.pi, Lz=4*np.pi): # & Ly=2
         return np.asarray(list(map(f,a)))
 
     nx,ny,nz = u.shape[0:-1]
-    kx = np.fft.fftfreq(nx,d=Lx/nx)  * 2 * np.pi # 2 * np.pi "converts to angular wavenumbers"?
-    kz = np.fft.rfftfreq(nz,d=Lz/nz)  * 2 * np.pi # ^ But not sure if we need it or not...
+    kx = np.fft.fftfreq(nx,d=Lx/nx) * 2 * np.pi # 2 * np.pi "converts to angular wavenumbers"?
+    kz = np.fft.rfftfreq(nz,d=Lz/nz) * 2 * np.pi # ^ But not sure if we need it or not...
     dk = np.sqrt(kx[1]**2 + kz[1]**2) # spacing between k-points
     epsilon = epsilon_multiplier*dk # tolerance
     Kxz = np.stack(np.meshgrid(kx,kz,indexing='ij'),axis=-1)
@@ -472,6 +472,8 @@ def plot_1dDiagnostics(pred_samples, real_channel_flow, k_trim=2, epsilon_multip
         mu = Es_y.mean(0)
         std = Es_y.std(0)
         k,EE = k[k_trim:],EE[k_trim:,y_index]
+        # kolgomorov scaling line: y = -5/3*np.log(k) -> y = -3/5*np.log(k)
+        # kolgomorov scaled MSE: MSE(1/np.log(k)*np.log(Es_y), 1/np.log(k)*np.log(EE))
         metrics['mse_log_energy_spectrum'] = MSE(np.log(Es_y), np.log(EE))
         if should_plot:
             fig,ax = plt.subplots(1,4,figsize=(8,2),sharex='col',sharey='col')
