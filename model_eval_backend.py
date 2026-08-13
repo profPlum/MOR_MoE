@@ -315,13 +315,15 @@ This code assumes you have 2 numpy arrays loaded in memory:
     real_channel_flow with shape, (3,Nx,Ny,Nz,times)
 '''
 
-def E1d(u, epsilon_multiplier=1.0, nk=30, overlapping=False, plot_shells=False,
+def E1d(u, epsilon_multiplier=1.0, nk=30, strict_partition=True, plot_rings=False,
         Lx=8*np.pi, Lz=4*np.pi): # & Ly=2
     '''
     arguments:
         u: input function, u.shape==(channels=3,Nx,Ny,Nz)
         epsilon_multiplier: for width of ring to project to point
         nk: number of points along radius to project on to
+        strict_partition: if True, then the rings are strictly separated (no overlap)
+        plot_rings: if True, then the rings are plotted for diagnostics
         Lx,Lz: domain lengths (default values are for the original dataset size)
     output:
         k_radii: shape=(nk,) the radii of the rings for k-bins (in k-space)
@@ -335,6 +337,7 @@ def E1d(u, epsilon_multiplier=1.0, nk=30, overlapping=False, plot_shells=False,
         uh = np.fft.rfftn(u,axes=[0,2])
         return np.sum(np.abs(uh)**2,axis=-1) # shape=(Nx,Ny,Nz)
 
+    ## Old scaling for epsilon_multiplier probably misguided...
     #stride = np.array([103,26,77])/u.shape[0:-1] # approximate the stride of the flow
     #epsilon_multiplier *= np.mean(stride) # 1 was the default for the original dataset size
 
@@ -346,19 +349,19 @@ def E1d(u, epsilon_multiplier=1.0, nk=30, overlapping=False, plot_shells=False,
     k_radii = np.linspace(0,min(np.max(kx),np.max(kz)),nk) # k_radii.shape=(nk,), K_dist.shape=(Nx,Nz)
     Eu = E(u) # Eu.shape=(Nx,Ny,Nz)
 
-    if overlapping:
-        dk = np.sqrt(kx[1]**2 + kz[1]**2) # spacing between k-points
-        epsilon = epsilon_multiplier*dk # tolerance
-    else:
+    if strict_partition:
         dk = k_radii[1] - k_radii[0] # spacing between k-points
         epsilon = dk/2 # tolerance
+    else: # allow overlap & use epsilon_multiplier to scale ring thickness
+        dk = np.sqrt(kx[1]**2 + kz[1]**2) # spacing between k-points
+        epsilon = epsilon_multiplier*dk # tolerance
 
     # K_dist: add k_radii dimension, k_radii: add x & y dimensions
-    shell_masks = np.abs(K_dist[None] - k_radii[:, None, None]) < epsilon # shell_masks.shape=(nk, Nx, Nz)
-    energy_spectra = 2. * np.einsum('xyz,kxz->ky', Eu, shell_masks) # energy_spectra.shape=(nk, Ny), x2 for symmetry
-    # NOTE: einsum multiplication applies shell masks, and summation reduces spatial dimensions (x & z)
+    ring_masks = np.abs(K_dist[None] - k_radii[:, None, None]) < epsilon # ring_masks.shape=(nk, Nx, Nz)
+    energy_spectra = 2. * np.einsum('xyz,kxz->ky', Eu, ring_masks) # energy_spectra.shape=(nk, Ny), x2 for symmetry
+    # NOTE: einsum multiplication applies ring masks, and summation reduces spatial dimensions (x & z)
 
-    if plot_shells:
+    if plot_rings: # can be used for calibration of epsilon_multiplier & diagnostics of the partition
         def show_im(im, title):
             plt.imshow(im)
             plt.xlabel('x')
@@ -367,9 +370,9 @@ def E1d(u, epsilon_multiplier=1.0, nk=30, overlapping=False, plot_shells=False,
             plt.title(title)
             plt.show()
         for i in range(nk):
-            show_im(shell_masks[i], f'shell_mask_{i}')
-        show_im(np.logical_or.reduce(shell_masks, axis=0), 'shell_mask coverage')
-        show_im(np.sum(shell_masks, axis=0)>1, 'overlap mask')
+            show_im(ring_masks[i], f'ring_mask_{i}')
+        show_im(np.logical_or.reduce(ring_masks, axis=0), 'ring_mask coverage')
+        show_im(np.sum(ring_masks, axis=0)>1, 'ring overlap mask')
 
     return k_radii, energy_spectra # k_radii of the rings/bins, energy_spectra of the flow at each ring/bin
 
