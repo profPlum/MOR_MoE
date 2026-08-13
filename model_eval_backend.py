@@ -335,6 +335,9 @@ def E1d(u, epsilon_multiplier=1.0, nk=30, overlapping=False, plot_shells=False,
         uh = np.fft.rfftn(u,axes=[0,2])
         return np.sum(np.abs(uh)**2,axis=-1) # shape=(Nx,Ny,Nz)
 
+    #stride = np.array([103,26,77])/u.shape[0:-1] # approximate the stride of the flow
+    #epsilon_multiplier *= np.mean(stride) # 1 was the default for the original dataset size
+
     nx,ny,nz = u.shape[0:-1]
     kx = np.fft.fftfreq(nx,d=Lx/nx) * 2 * np.pi # 2 * np.pi "converts to angular wavenumbers"?
     kz = np.fft.rfftfreq(nz,d=Lz/nz) * 2 * np.pi # ^ But not sure if we need it or not...
@@ -392,80 +395,14 @@ def get_last_TS_energy_spectra(flow_samples, **kwd_args):
         k,Es = get_last_TS_energy_spectra([flow_samples], **kwd_args)
         return k,Es[0] # remove the added dimension from the single sample case
 
-#########################################################
-# AI-generated epsilon multiplier calibration code
-#########################################################
-
-def _plot1d_epsilon_scale(spatial_shape):
-    ''' Same resolution scaling as plot_1dDiagnostics (1.0 was for the original grid). '''
-    return 1.0 #float(np.mean(np.array([103, 26, 77]) / np.asarray(spatial_shape)))
-
-# TODO: try more windows (e.g. 25)
-def energy_spectrum_windowed_cv(flow, epsilon_multiplier=1.0, n_windows=10, k_trim=5, **e1d_kwargs):
-    ''' Split one flow-through into n_windows over time; CV = std/mean of E(κ) across windows.
-        CV is averaged over κ-bins with index >= k_trim (Ravi's "κ>=5" = skip first 5 bins).
-        Returns (k, Es, cv, mean_cv) with Es.shape==(n_windows, nk) at midplane y. '''
-    flow = np.asarray(flow)
-    assert flow.ndim == 5 and flow.shape[0] == 3, f'expected (3,Nx,Ny,Nz,T), got {flow.shape}'
-
-    # TODO: delete maybe? I'm just keeping it for now to see how far off the original default was
-    eps = epsilon_multiplier * _plot1d_epsilon_scale(flow.shape[1:4])
-    y_index = flow.shape[2] // 2
-    seq = SimulationFlowThroughSequence(flow) #.slice_flow_thru(-1) # get the last flow-through only
-    assert len(seq) == 1
-    with SimulationFlowThroughSequence.flow_through_multiplier(n_windows):
-        assert len(seq) == n_windows, f'expected {n_windows} windows, got {len(seq)} (check n_steps divisible by n_windows)'
-        k, Es = get_last_TS_energy_spectra(seq, epsilon_multiplier=eps, **e1d_kwargs)
-        Es = Es[..., y_index]
-    mu = Es.mean(0)
-    cv = Es.std(0, ddof=1) / np.maximum(mu, 1e-30) # CV = std/mean, & np.maximum avoids division by zero
-    assert k_trim < len(cv), 'k_trim must be less than the number of κ-bins'
-    return cv[k>=k_trim]
-
-def calibrate_epsilon_multiplier(flow, epsilon_multipliers=np.linspace(0.25, 16, 50), n_windows=10, k_trim=5,
-                                 cv_target=0.05, use_max_cv=True, should_plot=True, **e1d_kwargs):
-    ''' Calibrate epsilon_multiplier so [mean|max](std/mean of E) over temporal windows ≤ cv_target
-        for κ-bins with index >= k_trim (Ravi: try for <5% on κ>=5).
-        flow: one prediction (or real) flow-through, shape (3,Nx,Ny,Nz,T).
-        Returns (recommended_epsilon_multiplier, summary DataFrame). '''
-    rows = []
-    for eps in tqdm(np.asarray(epsilon_multipliers, dtype=float), desc='calibrate ε'):
-        cv = energy_spectrum_windowed_cv(flow, eps, n_windows, k_trim=k_trim, **e1d_kwargs)
-        rows.append({'epsilon_multiplier': eps, 'mean_cv': cv.mean(), 'max_cv': cv.max()})
-    df = pd.DataFrame(rows)
-    thresholded_cv = 'max_cv' if use_max_cv else 'mean_cv'
-    ok = df[df[thresholded_cv] <= cv_target]
-    # smallest ε that meets the target (least shell smoothing among stable choices)
-    if len(ok): recommended = float(ok['epsilon_multiplier'].iloc[0])
-    else:
-        # NOTE: should be the same as just giving the highest epsilon_multiplier tested
-        recommended = float(df.loc[df[thresholded_cv].idxmin(), 'epsilon_multiplier'])
-        print(f'warning: no ε reached {thresholded_cv}≤{cv_target}; using lowest-CV ε={recommended}')
-    print(df.head().to_string(index=False))
-    print(f'recommended epsilon_multiplier={recommended} (target {thresholded_cv}≤{cv_target} for κ≥{k_trim})')
-    if should_plot:
-        fig, ax = plt.subplots(1, 1, figsize=(4, 2.5))
-        ax.plot(df['epsilon_multiplier'], df[thresholded_cv], 'o-')
-        ax.axhline(cv_target, color='C1', ls='--', label=f'target={cv_target}')
-        ax.axvline(recommended, color='k', ls=':', label=f'rec={recommended:g}')
-        #ax.set_xscale('log')
-        ax.set_xlabel('epsilon_multiplier')
-        ax.set_ylabel(rf'{thresholded_cv} of $E(\kappa)$ $\forall\kappa\geq{k_trim}$')
-        ax.legend(fontsize='x-small')
-        fig.tight_layout()
-        plt.show()
-        plt.close()
-    return recommended, df
-
-#########################################################
-
 #real_channel_flow.shape==(3,Nx,Ny,Nz,times)
 #pred_samples.shape==(samples,3,Nx,Ny,Nz,times)
-def plot_1dDiagnostics(pred_samples, real_channel_flow, k_trim=2, epsilon_multiplier=1.0,
+def plot_1dDiagnostics(pred_samples, real_channel_flow, k_trim=2,
                        should_plot=True, aggregate_xz=False, **kwd_args): # takes ~200ms
     ''' aggregate_xz: if True, then the y-line is reduced by averaging over x and z dimensions else the y-line is chosen arbitrarily
         k_trim: trim the first k_trim points from the energy spectrum (to prevent them from dominating)
-        epsilon_multiplier: multiplier for the epsilon radius of the energy spectrum (to prevent aliasing)
+        should_plot: if True, then the plots are shown (otherwise just compute metrics)
+        aggregate_xz: if True, then the y-line is reduced by averaging over x and z dimensions else the y-line is chosen arbitrarily
         **kwd_args: additional arguments for E1d() '''
     assert len(pred_samples.shape)==len(real_channel_flow.shape)+1==6 and \
         pred_samples.shape[1:-1]==real_channel_flow.shape[:-1] and \
@@ -475,14 +412,11 @@ def plot_1dDiagnostics(pred_samples, real_channel_flow, k_trim=2, epsilon_multip
     CI_coef = 1.96 # 95% CI
     metrics = {} # all 1d metrics
 
-    #stride = np.array([103,26,77])/real_channel_flow.shape[1:4] # approximate the stride of the flow
-    #epsilon_multiplier *= np.mean(stride) # 1 was the default for the original dataset size
-
     with warnings.catch_warnings(): # Safely ignore DoF warning (for np.std with only MAP/MLE sample)
         warnings.filterwarnings("ignore", message=".*degrees of freedom is <= 0.*")
 
-        k,EE = get_last_TS_energy_spectra(real_channel_flow, epsilon_multiplier=epsilon_multiplier, **kwd_args)
-        k,Es = get_last_TS_energy_spectra(pred_samples, epsilon_multiplier=epsilon_multiplier, **kwd_args)
+        k,EE = get_last_TS_energy_spectra(real_channel_flow, **kwd_args)
+        k,Es = get_last_TS_energy_spectra(pred_samples, **kwd_args)
 
         # we are trimming the k_trim because they contain so much energy that they distort the plots
         y_index = real_channel_flow.shape[2]//2 # Dwyer: should be the midpoint b/c it avoids the walls
