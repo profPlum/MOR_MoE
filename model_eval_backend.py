@@ -315,7 +315,8 @@ This code assumes you have 2 numpy arrays loaded in memory:
     real_channel_flow with shape, (3,Nx,Ny,Nz,times)
 '''
 
-def E1d(u, epsilon_multiplier=1.0, nk=30, Lx=8*np.pi, Lz=4*np.pi): # & Ly=2
+def E1d(u, epsilon_multiplier=1.0, nk=30, overlapping=False, plot_shells=False,
+        Lx=8*np.pi, Lz=4*np.pi): # & Ly=2
     '''
     arguments:
         u: input function, u.shape==(channels=3,Nx,Ny,Nz)
@@ -337,17 +338,35 @@ def E1d(u, epsilon_multiplier=1.0, nk=30, Lx=8*np.pi, Lz=4*np.pi): # & Ly=2
     nx,ny,nz = u.shape[0:-1]
     kx = np.fft.fftfreq(nx,d=Lx/nx) * 2 * np.pi # 2 * np.pi "converts to angular wavenumbers"?
     kz = np.fft.rfftfreq(nz,d=Lz/nz) * 2 * np.pi # ^ But not sure if we need it or not...
-    dk = np.sqrt(kx[1]**2 + kz[1]**2) # spacing between k-points
-    epsilon = epsilon_multiplier*dk # tolerance
     Kxz = np.stack(np.meshgrid(kx,kz,indexing='ij'),axis=-1) # Kxz.shape=(Nx,Nz,2)
     K_dist = np.sqrt(Kxz[...,0]**2 + Kxz[...,1]**2) # "distance" of k-points from origin in k-space of xz plane
     k_radii = np.linspace(0,min(np.max(kx),np.max(kz)),nk) # k_radii.shape=(nk,), K_dist.shape=(Nx,Nz)
     Eu = E(u) # Eu.shape=(Nx,Ny,Nz)
 
+    if overlapping:
+        dk = np.sqrt(kx[1]**2 + kz[1]**2) # spacing between k-points
+        epsilon = epsilon_multiplier*dk # tolerance
+    else:
+        dk = k_radii[1] - k_radii[0] # spacing between k-points
+        epsilon = dk/2 # tolerance
+
     # K_dist: add k_radii dimension, k_radii: add x & y dimensions
     shell_masks = np.abs(K_dist[None] - k_radii[:, None, None]) < epsilon # shell_masks.shape=(nk, Nx, Nz)
-    energy_spectra = 2. * np.einsum('xyz,kxz->ky', Eu, shell_masks) # energy_spectra.shape=(nk, Ny)
+    energy_spectra = 2. * np.einsum('xyz,kxz->ky', Eu, shell_masks) # energy_spectra.shape=(nk, Ny), x2 for symmetry
     # NOTE: einsum multiplication applies shell masks, and summation reduces spatial dimensions (x & z)
+
+    if plot_shells:
+        def show_im(im, title):
+            plt.imshow(im)
+            plt.xlabel('x')
+            plt.ylabel('z')
+            plt.colorbar()
+            plt.title(title)
+            plt.show()
+        for i in range(nk):
+            show_im(shell_masks[i], f'shell_mask_{i}')
+        show_im(np.logical_or.reduce(shell_masks, axis=0), 'shell_mask coverage')
+        show_im(np.sum(shell_masks, axis=0)>1, 'overlap mask')
 
     return k_radii, energy_spectra # k_radii of the rings/bins, energy_spectra of the flow at each ring/bin
 
@@ -482,7 +501,7 @@ def plot_1dDiagnostics(pred_samples, real_channel_flow, k_trim=2, epsilon_multip
             ax[0].plot(k,3e4*k**(-5./3.),'C2')
             ax[0].set_xscale('log')
             ax[0].set_yscale('log')
-            #ax[0].set_ylim(2e3,5e4)
+            ax[0].set_xlim(0,10)
             ax[0].set_ylabel(r'$E(\kappa)$')
             ax[0].set_xlabel('$\kappa$')
             #ax[0].title.set_text('Energy Spectrum')
