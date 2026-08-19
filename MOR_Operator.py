@@ -110,12 +110,12 @@ class MOR_Operator(BasicLightningRegressor):
         kwd_args['hidden_channels'] = hidden_channels # make h(x) hidden_channels=MOR_Operator.hidden_channels
 
         ndims = {'ndims': kwd_args['ndims']} if 'ndims' in kwd_args else {} # always pass ndims, NOTE: kwd_args inside lambda not the same as outside
-        ProjLayer = lambda *args, **kwd_args: CNN(*args, n_layers=2, **ndims, **kwd_args)
-        self.layers = nn.ModuleList([MOR_Layer(in_channels, hidden_channels, num_h_layers=2, norm_groups=0, **kwd_args)] +
-            [MOR_Layer(hidden_channels, hidden_channels, num_h_layers=1, norm_groups=hidden_norm_groups, input_activation=True, **kwd_args) for i in range(n_layers-1)] +
-            [ProjLayer(hidden_channels, out_channels, out_norm_groups=out_norm_groups, input_activation=True)]) # this is like having an extra h(x) at the end
+        ProjLayer = lambda *args, **kwd_args: CNN(*args, n_layers=2, hidden_channels=hidden_channels, **ndims, **kwd_args)
+        self.layers = nn.ModuleList([ProjLayer(in_channels, hidden_channels)] +
+            [MOR_Layer(hidden_channels, hidden_channels, num_h_layers=1, norm_groups=hidden_norm_groups, input_activation=True, **kwd_args) for _ in range(n_layers-2)] +
+            [ProjLayer(hidden_channels, out_channels, out_norm_groups=out_norm_groups, input_activation=True)])
     def forward(self, X):
-        X = self.layers[0](X)
+        X = self.layers[0](X) # lifting layer
         for layer in self.layers[1:-1]:
-            X=(layer(X)+X)/2 # skip connections
-        return self.layers[-1](X)
+            X=layer(X)+X # skip connections
+        return self.layers[-1](X) # projection layer
