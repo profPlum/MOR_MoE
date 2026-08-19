@@ -33,7 +33,7 @@ class LightningSequential(BasicLightningRegressor):
     def forward(self, X):
         X = self.layers[0](X)
         for layer in self.layers[1:-1]:
-            if self.skip_connections: X=(layer(X)+X)/2
+            if self.skip_connections: X=layer(X)+X
             else: X=layer(X)
         return self.layers[-1](X)
 
@@ -42,7 +42,8 @@ ToggleableGroupNorm = lambda num_groups, in_channels: (nn.GroupNorm(num_groups, 
 
 def CNN(in_size=1, out_size=1, k_size=1, ndims=2, n_layers=4, hidden_channels=32, activation=nn.SiLU,
         skip_connections=False, hidden_norm_groups=1, out_norm_groups=0, output_activation=False, input_activation=False):
-    ''' set hidden_norm_groups=0 or out_norm_groups=0 to disable the group norm there '''
+    ''' set hidden_norm_groups=0 or out_norm_groups=0 to disable the group norm there,
+    NOTE: hidden_norm_groups is ignored if skip_connections is False '''
     assert n_layers>=1
     assert ndims in [1,2,3]
     ConvLayer = [nn.Conv1d, nn.Conv2d, nn.Conv3d][ndims-1]
@@ -56,7 +57,7 @@ def CNN(in_size=1, out_size=1, k_size=1, ndims=2, n_layers=4, hidden_channels=32
         layers = [CNN_layer(in_size, out_size, input_activation, use_norm_layer=False)]
     else:
         layers = [CNN_layer(in_size,hidden_channels,input_activation, use_norm_layer=False)] + \
-                 [CNN_layer(hidden_channels,hidden_channels) for i in range(n_layers-2)] + \
+                 [CNN_layer(hidden_channels,hidden_channels) for _ in range(n_layers-2)] + \
                  [CNN_layer(hidden_channels,out_size)]
     if output_activation: layers[-1].append(activation()) # add output activation
     layers[-1].append(ToggleableGroupNorm(out_norm_groups, out_size))
