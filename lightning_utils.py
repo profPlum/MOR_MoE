@@ -40,8 +40,9 @@ class LightningSequential(BasicLightningRegressor):
 # GroupNorm but you can specify num_groups=0 to disable it
 ToggleableGroupNorm = lambda num_groups, in_channels: (nn.GroupNorm(num_groups, in_channels) if num_groups>0 else nn.Identity())
 
+# GOTCHA: these defaults are relatively fragile, make sure to double check "usage contracts" before changing the interface.
 def CNN(in_size=1, out_size=1, k_size=1, ndims=2, n_layers=4, hidden_channels=32, activation=nn.SiLU,
-        skip_connections=False, hidden_norm_groups=1, out_norm_groups=0, output_activation=False, input_activation=False):
+        skip_connections=False, hidden_norm_groups=1, out_norm_groups=0, output_activation=False, input_activation=False, **kwd_args):
     ''' set hidden_norm_groups=0 or out_norm_groups=0 to disable the group norm there,
     NOTE: hidden_norm_groups is ignored if skip_connections is False '''
     assert n_layers>=1
@@ -50,7 +51,8 @@ def CNN(in_size=1, out_size=1, k_size=1, ndims=2, n_layers=4, hidden_channels=32
 
     # automatically use settings & apply activation
     CNN_layer = lambda in_size, out_size, activation=activation, use_norm_layer=skip_connections: \
-        nn.Sequential(*([ToggleableGroupNorm(hidden_norm_groups, in_size)]*use_norm_layer+[activation(), ConvLayer(in_size, out_size, k_size, padding='same')]))
+        nn.Sequential(*([ToggleableGroupNorm(hidden_norm_groups, in_size)]*use_norm_layer+
+                        [activation(), ConvLayer(in_size, out_size, k_size, padding='same', **kwd_args)]))
 
     input_activation=activation if input_activation else nn.Identity # choose input activation
     if n_layers==1: # special case, just 1 linear "projection" layer
