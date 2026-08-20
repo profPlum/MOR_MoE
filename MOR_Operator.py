@@ -27,46 +27,47 @@ def make_rfft_corner_slices(img1_shape, img2_shape, fft_dims=None, rfft=True, ve
     if verbose: print(f'{valid_corner_slices=}')
     return itertools.product(*valid_corner_slices) # cartesian product gives all corners
 
-class MOR_Layer(L.LightningModule):
-    """ A single Nd MOR operator layer. """
-    def __init__(self, in_channels=1, out_channels=1, k_modes=32, ndims=2, num_h_layers=1, norm_groups=1, dropout=0.0, **kwd_args):
+class FNO_Layer(L.LightningModule):
+    """ A single Nd FNO operator layer. """
+    def __init__(self, in_channels=1, out_channels=1, k_modes=32, ndims=2, norm_groups=1,
+                 dropout=0.0, activation=nn.SiLU):
         ''' pass norm_groups=0 to disable group norm or >1 for better group norm '''
         super().__init__()
         vars(self).update(locals()); del self.self
 
-        # why is this a function?
         if type(k_modes) is int:
                 k_modes = ndims*[k_modes]
-        def make_g(in_channels, out_channels):
+        def make_g(in_channels, out_channels): # why is this a function?
             g_shape = [in_channels, out_channels]+k_modes[:ndims-1] + [k_modes[-1]//2+1, 2]
             scale = (2.0/in_channels)**0.5 # similar to kaiming initializaiton
             param = torch.randn(*g_shape)*scale
             return nn.Parameter(param)
 
-        # Define the weights in the Fourier domain (complex values)
-        mlp_channels = [in_channels]*2
-        g_channels = [in_channels, out_channels]
-        #if mlp_second: mlp_channels, g_channels = g_channels, mlp_channels
-
         self.norm_layer = ToggleableGroupNorm(norm_groups, in_channels)
 
-        self.g_mode_params = make_g(*g_channels)
-        self.h_mlp=CNN(*mlp_channels, k_size=1, n_layers=num_h_layers, ndims=ndims, output_activation=True, **kwd_args)
-
+        ConvLayer = [nn.Conv1d, nn.Conv2d, nn.Conv3d][ndims-1]
         dropout_layer = [nn.Dropout1d, nn.Dropout2d, nn.Dropout3d][ndims-1]
+
+        # Define the weights in the Fourier domain (complex values)
+        g_channels = [in_channels, out_channels]
+        self.g_mode_params = make_g(*g_channels)
+        self.Wx_conv=ConvLayer(*g_channels, k_size=1, bias=False)
         self.dropout = dropout_layer(dropout) if dropout > 0 else lambda x: x
+        self.activation = activation()
 
     def forward(self, u):
         u = torch.as_tensor(u, device=self.device)
         assert len(u.shape)==2+self.ndims # +1 for batch, +1 for channels
         # u.shape==[batch, in_channels, x, y, ...]
 
-        # use the norm layer if it's here
-        u = self.norm_layer(u)
+        u = self.norm_layer(u) # use the norm layer if it's here
+        u = self.activation(u) # apply nonlinearity
+        u = self.dropout(u) # dropout after nonlinearity because not all activations map 0 to 0
 
-        # Apply point-wise MLP nonlinearity h(u)
-        u = self.h_mlp(u)
+        # This is the FNO merge step: G(u) + Wx(u)
+        return self._learned_fourier_transform_g(u) + self.Wx_conv(u)
 
+    def _learned_fourier_transform_g(self, u):
         # Apply Fourier transform (last ndims need to be spatial!)
         # should FFT the last self.ndims modes, also we pad (if needed) to make low-pass work
         fft_dims = list(range(-self.ndims, 0))
@@ -75,7 +76,7 @@ class MOR_Layer(L.LightningModule):
         g = torch.view_as_complex(self.g_mode_params) # Convert to complex dtype (makes shape "correct")
         g_padded_shape = list(g.shape[:-self.ndims])+list(u_fft.shape[-self.ndims:]) # fuse shapes
 
-        # insert G into "G_padded" s.t. it applies a low pass filter
+        # idea is: insert G into "G_padded" s.t. it applies a low pass filter, in practice: use optimized algorithms
         # & Apply learned weights in the Fourier domain (einsum does channel reduction)
         if tuple(g.shape)==tuple(g_padded_shape):
             g_padded=g # special optimization to juice out an extra time-step: just one einsum
@@ -97,25 +98,26 @@ class MOR_Layer(L.LightningModule):
         # should IFFT the last self.ndims modes, also crop/pad to original shape
 
         assert u_ifft.shape[-self.ndims:]==u.shape[-self.ndims:]
+        return u_ifft
 
-        return self.dropout(u_ifft)
-
-class MOR_Operator(BasicLightningRegressor):
+class FNO(BasicLightningRegressor):
     """
     Essentially a stack of MORLayer-Nd layers + skip connections.
     Skip-connections are important to overcome the low-pass bottleneck!
     """
     def __init__(self, in_channels=1, out_channels=1, hidden_channels=32, n_layers=4, hidden_norm_groups=1, out_norm_groups=1, **kwd_args):
         super().__init__()
-        kwd_args['hidden_channels'] = hidden_channels # make h(x) hidden_channels=MOR_Operator.hidden_channels
+        assert n_layers>=3
 
         ndims = {'ndims': kwd_args['ndims']} if 'ndims' in kwd_args else {} # always pass ndims, NOTE: kwd_args inside lambda not the same as outside
         ProjLayer = lambda *args, **kwd_args: CNN(*args, n_layers=2, hidden_channels=hidden_channels, **ndims, **kwd_args)
         self.layers = nn.ModuleList([ProjLayer(in_channels, hidden_channels)] +
-            [MOR_Layer(hidden_channels, hidden_channels, num_h_layers=1, norm_groups=hidden_norm_groups, input_activation=True, **kwd_args) for _ in range(n_layers-2)] +
+            [FNO_Layer(hidden_channels, hidden_channels, norm_groups=hidden_norm_groups, **kwd_args) for _ in range(n_layers-2)] +
             [ProjLayer(hidden_channels, out_channels, out_norm_groups=out_norm_groups, input_activation=True)])
     def forward(self, X):
         X = self.layers[0](X) # lifting layer
         for layer in self.layers[1:-1]:
             X=layer(X)+X # skip connections
         return self.layers[-1](X) # projection layer
+
+MOR_Operator = FNO # alias for backwards compatibility
