@@ -114,10 +114,13 @@ class FNO(BasicLightningRegressor):
         self.layers = nn.ModuleList([ProjLayer(in_channels, hidden_channels)] +
             [FNO_Layer(hidden_channels, hidden_channels, norm_groups=hidden_norm_groups, **kwd_args) for _ in range(n_layers-2)] +
             [ProjLayer(hidden_channels, out_channels, out_norm_groups=out_norm_groups, input_activation=True)])
+
+        self.final_skip_normalization = ToggleableGroupNorm(hidden_norm_groups, hidden_channels)
     def forward(self, X):
         X = self.layers[0](X) # lifting layer
         for layer in self.layers[1:-1]:
             X=layer(X)+X # skip connections
+        X = self.final_skip_normalization(X) # final skip connection normalization (there are no more skip blocks to do it)
         return self.layers[-1](X) # projection layer
 
 MOR_Operator = FNO # alias for backwards compatibility
