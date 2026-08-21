@@ -1,5 +1,5 @@
 # these settings relpace mixture of experts with one big expert
-export N_LAYERS=6 # number of expert layers, default_params = 1*proj_layer + 3*full_layer, full_layer >> proj_layer so we double that = 1*proj_layer + 6*full_layer ~= 7 layers
+export N_LAYERS=7 # number of expert layers, default_params = 2*proj_layer + 3*full_layer, full_layer >> proj_layer so we double that = 2*proj_layer + 6*full_layer ~= 8 layers
 export N_FILTERS=36 # (default=32) + 4 to correct for not doubling projection layers
 export N_EXPERTS=1 # number of experts specifying one implies not even the zero expert (or gating network) is used (i.e. disable mixture of experts
 export BATCH_SIZE=2 # other configs assume default is 2 so lets make it explicit
