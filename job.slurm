@@ -83,7 +83,7 @@ export STRIDE=1 # e.g. 1.5 or a crazy list [1.5,1.3,1.8] for smaller experiments
 export TIME_CHUNKING=10 # 10 is default now b/c we can fit it in GH200s
 export BATCH_SIZE=2 # GH200 can handle batch_size=2! (it has > x2 the memory of A100)
 export FAST_DATALOADERS=0 # warning: they can cause OOMs for production jobs!
-export N_LAYERS=4 # number of expert layers
+export N_LAYERS=5 # number of expert layers
 export N_FILTERS=32 # number of hidden channels
 export N_EXPERTS=3 # number of experts
 export MAKE_K_SIZE_PROPORTIONAL=1 # whether to rescale K dims to be proportional to the field size (only works when K_MODES or CNN_FILTER_SIZE is given as an integer)
