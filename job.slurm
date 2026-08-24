@@ -103,7 +103,7 @@ export WNO3D_LEVEL=1 # wavelet decomposition level (default 2, higher = more det
 #export N_FILTERS=36
 
 ## IU-FNO experts? # small K_MODES and BATCH needed to fit in GPU memory
-#export USE_IUFNO_EXPERTS=1 CNN_FILTER_SIZE=3 N_EXPERTS=1 N_LAYERS=4 OUT_NORM_GROUPS=0 HIDDEN_NORM_GROUPS=0 GRID_INPUTS=0  K_MODES=29 N_FILTERS=33 BATCH_SIZE=1
+#export USE_IUFNO_EXPERTS=1 CNN_FILTER_SIZE=3 N_EXPERTS=1 N_LAYERS=4 OUT_NORM_GROUPS=0 HIDDEN_NORM_GROUPS=0 GRID_INPUTS=0 K_MODES=58 N_FILTERS=33 BATCH_SIZE=1
 
 ## load experiment settings
 #source experiment_configs/control.sh
