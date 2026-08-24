@@ -51,7 +51,7 @@ class FNO_Layer(L.LightningModule):
         # Define the weights in the Fourier domain (complex values)
         g_channels = [in_channels, out_channels]
         self.g_mode_params = make_g(*g_channels)
-        self.Wx_conv=ConvLayer(*g_channels, k_size=1, bias=False)
+        self.Wx_conv=ConvLayer(*g_channels, kernel_size=1, bias=False)
         self.dropout = dropout_layer(dropout) if dropout > 0 else lambda x: x
         self.activation = activation()
 
