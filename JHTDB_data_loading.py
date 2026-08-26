@@ -66,6 +66,45 @@ class JHTDB_Channel(torch.utils.data.Dataset):
         base_blocks = num_files // (self.time_chunking * self.time_stride)  # full blocks only
         return base_blocks * self.time_stride  # one sample per offset per block
 
+    def __getitem__(self, index): # Verified to work: 8/25/26
+        if index < 0 or index >= len(self):
+            raise IndexError(f'Index {index} is out of range for dataset of length {len(self)}')
+
+        files = []
+        velocity_fields = []
+        start_index, end_index = self._split_file_index_range
+
+        # NOTE: for overlapping chunks, you'd use range(index, index+self.time_chunking*self.time_stride, self.time_stride)
+        for i in range(index, index+self.time_chunking*self.time_stride, self.time_stride):
+            i+=1 + start_index  # 1-based indexing + start index to skip split files
+            assert i <= end_index, f'File index: {i} is above maximum {end_index}'
+            try: files.append(h5py.File(f'{self.path}/channel_t={i}.h5', 'r')) # keep open for stacking
+            except OSError as e:
+                if 'unable to open' in str(e).lower():
+                    raise OSError(f'Unable to open file: "{self.path}/channel_t={i}.h5"')
+                else: raise
+            velocity_fields.append(files[-1][f'Velocity_{i:04}']) # :04 zero pads to 4 digits
+        velocity_fields = torch.as_tensor(np.stack(velocity_fields).T) # reverse dimensions order [T,Z,Y,X,C] --> [C,X,Y,Z,T]
+        velocity_fields = self._pool(velocity_fields.moveaxis(-1,0)).moveaxis(0,-1) # time dimension is (temporarily) treated as batch dimension
+        velocity_fields = velocity_fields.float() # make sure to use single precision! (after pooling) because double is too expensive!!
+
+        # IC_0.shape=[C,X,Y,Z] e.g. torch.Size([3, 103, 26, 77])
+        # Sol_0.shape=[C,X,Y,Z,T] e.g. torch.Size([3, 103, 26, 77, 9])
+        return velocity_fields[...,0], velocity_fields[...,1:] # X=IC, Y=sol
+
+# Verified to work: 8/23/24
+class JHTDB_ChannelBaseline(JHTDB_Channel):
+    ''' Dataset for the JHTDB autoregressive problem *without* data augmentation. '''
+
+    def __len__(self): # Verified to work: 8/25/26
+        # NOTE: for overlapping chunks, you'd use num_files - ((self.time_chunking - 1) * self.time_stride)
+        # GOTCHA: it might be better to apply the data augmentation randomly rather than changing the length (for VI consistency);
+        # that being said, it wouldn't really work with dataset preloading, and I'm not sure how it would interact with existing offseting.
+        start_index, end_index = self._split_file_index_range
+        num_files = end_index - start_index
+        base_blocks = num_files // (self.time_chunking * self.time_stride)  # full blocks only
+        return base_blocks * self.time_stride  # one sample per offset per block
+
     # Time stride verified to work: 11/18/25
     def __getitem__(self, index):
         if index < 0 or index >= len(self):
@@ -74,11 +113,15 @@ class JHTDB_Channel(torch.utils.data.Dataset):
         files = []
         velocity_fields = []
         start_index, end_index = self._split_file_index_range
+        offset = index % self.time_stride
+        index = index // self.time_stride
 
-        # Verified to work: 3/6/26
+        # # for hypothetical future data augmentation: randomly offset the time steps
+        # random_offset = torch.randint(0, self.time_chunking*self.time_stride, (1,)).item()
+
         # NOTE: for overlapping chunks, you'd use range(index, index+self.time_chunking*self.time_stride, self.time_stride)
-        for i in range(index, index+self.time_chunking*self.time_stride, self.time_stride):
-            i+=1 + start_index  # 1-based indexing + start index to skip split files
+        for i in range(index*self.time_chunking*self.time_stride, (index+1)*self.time_chunking*self.time_stride, self.time_stride):
+            i+=1 + offset + start_index # 1-based indexing + offset to utilize all data with time stride + start index to skip split files
             assert i <= end_index, f'File index: {i} is above maximum {end_index}'
             try: files.append(h5py.File(f'{self.path}/channel_t={i}.h5', 'r')) # keep open for stacking
             except OSError as e:
