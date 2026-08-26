@@ -22,7 +22,7 @@ class JHTDB_Channel(torch.utils.data.Dataset):
         self._pool = lambda x: torch.nn.functional.interpolate(x, scale_factor=scale_factor, mode='area')
         # comparable to torch.nn.AvgPool3d(stride) but supports fractional stride
 
-        self._split_start_proportion = 0
+        self._split_start_proportion = 0 # inclusive 0=start of dataset
         self._split_end_proportion = 1.0 # exclusive 1.0=length of dataset
 
     @property
@@ -47,24 +47,30 @@ class JHTDB_Channel(torch.utils.data.Dataset):
         return start_dataset, end_dataset
 
     @property
-    def _split_file_index_range(self) -> tuple[int, int]:
+    def _split_file_index_range(self) -> tuple[int, int]: # inclusive start, exclusive end (like range)
         start_index = int(self._total_files * self._split_start_proportion)
         end_index = int(self._total_files * self._split_end_proportion)
         return start_index, end_index
 
-    def __len__(self): # Verified to work: 3/6/26
+    def __len__(self): # Verified to work: 8/26/26
         # NOTE: for overlapping chunks, you'd use num_files - ((self.time_chunking - 1) * self.time_stride)
         start_index, end_index = self._split_file_index_range
         num_files = end_index - start_index
-        return num_files - ((self.time_chunking - 1) * self.time_stride)
+        return max(0, num_files - ((self.time_chunking - 1) * self.time_stride))
+        # F = ((self.time_chunking - 1) * self.time_stride) + 1 := files required for one chunk
+        # L = num_files - F + 1 := files remaining after first chunk is removed (+1's cancel out)
 
     @property
     def bayesian_dataset_length(self):
         ''' dataset length that corrects for data augmentation '''
         start_index, end_index = self._split_file_index_range
         num_files = end_index - start_index
-        base_blocks = num_files // (self.time_chunking * self.time_stride)  # full blocks only
-        return base_blocks * self.time_stride  # one sample per offset per block
+        full_block = self.time_chunking * self.time_stride # includes trailing stride space
+        n_blocks, remainder = divmod(num_files, full_block)
+        # since we are considering the remainder (which uses stride space),
+        # we can use the same logic as for len with overlapping chunks
+        extra = max(0, remainder - (self.time_chunking - 1) * self.time_stride)
+        return n_blocks * self.time_stride + extra
 
     def __getitem__(self, index): # Verified to work: 8/25/26
         if index < 0 or index >= len(self):
@@ -92,18 +98,12 @@ class JHTDB_Channel(torch.utils.data.Dataset):
         # Sol_0.shape=[C,X,Y,Z,T] e.g. torch.Size([3, 103, 26, 77, 9])
         return velocity_fields[...,0], velocity_fields[...,1:] # X=IC, Y=sol
 
-# Verified to work: 8/23/24
+# Verified to work: 8/26/26
 class JHTDB_ChannelBaseline(JHTDB_Channel):
     ''' Dataset for the JHTDB autoregressive problem *without* data augmentation. '''
 
-    def __len__(self): # Verified to work: 8/25/26
-        # NOTE: for overlapping chunks, you'd use num_files - ((self.time_chunking - 1) * self.time_stride)
-        # GOTCHA: it might be better to apply the data augmentation randomly rather than changing the length (for VI consistency);
-        # that being said, it wouldn't really work with dataset preloading, and I'm not sure how it would interact with existing offseting.
-        start_index, end_index = self._split_file_index_range
-        num_files = end_index - start_index
-        base_blocks = num_files // (self.time_chunking * self.time_stride)  # full blocks only
-        return base_blocks * self.time_stride  # one sample per offset per block
+    def __len__(self): # Verified to work: 8/26/26
+        return self.bayesian_dataset_length
 
     # Time stride verified to work: 11/18/25
     def __getitem__(self, index):
@@ -113,8 +113,7 @@ class JHTDB_ChannelBaseline(JHTDB_Channel):
         files = []
         velocity_fields = []
         start_index, end_index = self._split_file_index_range
-        offset = index % self.time_stride
-        index = index // self.time_stride
+        index, offset = divmod(index, self.time_stride)
 
         # # for hypothetical future data augmentation: randomly offset the time steps
         # random_offset = torch.randint(0, self.time_chunking*self.time_stride, (1,)).item()
