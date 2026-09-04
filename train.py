@@ -23,6 +23,7 @@ gradient_clip_val=float(os.environ.get('GRAD_CLIP', 50)) # grad clip adjusted ba
 make_optim=eval(f"torch.optim.{os.environ.get('OPTIM', 'Adam')}")
 ckpt_path=os.environ.get('CKPT_PATH', None)
 
+use_IUFNO_dataset=bool(int(os.environ.get('USE_IUFNO_DATASET', False))) # whether to use the IUFNO dataset
 use_proportional_k_size=bool(int(os.environ.get('MAKE_K_SIZE_PROPORTIONAL', False))) # if K_MODES or CNN_FILTER_SIZE is given as a integer will create a list where each dimension is proportional to the field size
 use_PDE_solver=bool(int(os.environ.get('USE_PDE_SOLVER', True))) # whether to use the PDE solver
 use_manual_advection=bool(int(os.environ.get('USE_MANUAL_ADVECTION', False))) # whether to use the manual advection term
@@ -90,7 +91,7 @@ from MOR_Operator import MOR_Operator
 from lightning_utils import *
 from POU_net import FieldGatingNet, EqualizedFieldGatingNet
 from JHTDB_sim_op import PPOU_NetSimulator, POU_NetSimulator
-from JHTDB_data_loading import JHTDBDataModule
+from JHTDB_data_loading import JHTDBDataModule, IUFNO_Channel
 import model_agnostic_BNN
 import utils
 
@@ -123,12 +124,16 @@ def proportional_allocation(scalar_allocation, proportional_to_size, int_cast=Tr
 
 if __name__=='__main__':
     # setup data module
-    dm = JHTDBDataModule(dataset_path='data/turbulence_output',
-                         batch_size=batch_size,
-                         time_chunking=time_chunking,
-                         stride=stride,
-                         time_stride=time_stride,
-                         fast_dataloaders=use_fast_dataloaders)
+    dm_kwd_args = dict(batch_size=batch_size, time_chunking=time_chunking, stride=stride,
+                       time_stride=time_stride, fast_dataloaders=use_fast_dataloaders)
+    if use_IUFNO_dataset:
+        assert not use_PDE_solver, "PDE solver is not realistic for IUFNO dataset"
+        dm_kwd_args.update(dataset_path='IUFNO-CHL/data_chl_re180/data_mave.npy',
+                           dataset_type=IUFNO_Channel, long_horizon=100,
+                           train_proportion=20/21)
+    else:
+        dm_kwd_args['dataset_path'] = 'data/turbulence_output'
+    dm = JHTDBDataModule(**dm_kwd_args)
 
     # derive field size from data module
     field_size = dm.field_size
@@ -190,6 +195,8 @@ if __name__=='__main__':
     simulator_kwd_args = {'nx': field_size[0], 'ny': field_size[1], 'nz': field_size[2], 'dt': 0.0065*time_stride,
                           'use_PDE_solver': use_PDE_solver, 'anisotropic_filter': anisotropic_filter, 'disable_filter': disable_filter,
                           'dealias_before_quadratic': dealias_before_quadratic, 'apply_pde_filter_bottleneck': apply_pde_filter_bottleneck}
+    if use_IUFNO_dataset: # 4π × 2 × 4π/3 with ∆T=1.0 (but realistically ∆T is too big for PDE solver)
+        simulator_kwd_args.update(Lx=4*np.pi, Ly=2.0, Lz=4*np.pi/3, dt=1.0*time_stride, nu=1/4200) # NOTE: for Re=590, nu=1/16800
     if use_manual_advection: simulator_kwd_args['u_b'] = dm.u_b
     if use_VI: simulator_kwd_args['propagate_uq'] = VI_propagate_UQ
 
@@ -215,7 +222,7 @@ if __name__=='__main__':
     logger = WandbLogger(project="MOR_MoE", name=job_name, version=version)
     logger.experiment.config.update({'grad_clip': gradient_clip_val, 'use_VI': use_VI, 'VI_counts_timestride_gap_data': VI_counts_timestride_gap_data,
                                      'use_manual_advection': use_manual_advection, 'dealias_before_quadratic': dealias_before_quadratic,
-                                     'apply_pde_filter_bottleneck': apply_pde_filter_bottleneck})
+                                     'apply_pde_filter_bottleneck': apply_pde_filter_bottleneck, 'use_IUFNO_dataset': use_IUFNO_dataset})
 
     # Weight-only sharded checkpoints are needed to avoid OOM problem caused by large model size
     model_checkpoint_callback=L.callbacks.ModelCheckpoint(f"lightning_logs/{job_name}/{version}", save_weights_only=True, save_last=False,
