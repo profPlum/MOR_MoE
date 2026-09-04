@@ -78,6 +78,7 @@ export VI=1 # use VI or not (in bash binary booleans have the best support for b
 export VI_PRIOR_SIGMA=0.2 # approximately reflects the values of sigma at initialization
 export VI_COUNTS_TIMESTRIDE_GAP_DATA=1 # whether to count the gap data between timestrides in the dataset size for VI
 export VI_PROPAGATE_UQ=1 # whether to propagate uncertainty through the LES model across timesteps (as additional input channels)
+export USE_IUFNO_DATASET=0 # 1 = IUFNO Re=180 npy (20/21 group split) instead of JHTDB
 export TIME_STRIDE=4 # must be integer-valued
 export STRIDE=1 # e.g. 1.5 or a crazy list [1.5,1.3,1.8] for smaller experiments
 export TIME_CHUNKING=10 # 10 is default now b/c we can fit it in GH200s
