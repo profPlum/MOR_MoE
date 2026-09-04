@@ -1,3 +1,5 @@
+from __future__ import annotations
+import os
 import torch
 import h5py
 import numpy as np
@@ -85,6 +87,62 @@ class JHTDB_Channel(torch.utils.data.Dataset):
         # Sol_0.shape=[C,X,Y,Z,T] e.g. torch.Size([3, 103, 26, 77, 9])
         return velocity_fields[...,0], velocity_fields[...,1:] # X=IC, Y=sol
 
+## vor=vorticity
+## Dwyer: 21x400x32x33x16x4 (groups, time, x, y, z, channels)
+## channel flow variables are: u,v,w and p.
+## -------------------------------------------------
+#vor_data = np.load('./IUFNO-CHL/data_chl_re180/data_mave.npy')
+#vor_data = vor_data[...,0:3]
+#vor_data = vor_data[0:20,...]
+##-------------------------------------------------
+# NOTE: not possible to directly reuse JHTDB_Channel because group boundaries are discontinuous
+class IUFNO_Channel(JHTDB_Channel):
+    '''IUFNO channel flow. Returns (IC, future frames) like JHTDB_Channel.'''
+    def __init__(self, path:str, time_chunking=5, stride:int|list|tuple=1, time_stride:int=1):
+        super().__init__(path, time_chunking, stride, time_stride)
+        self._data = np.load(path, mmap_mode='r')[..., :3]  # [G,T,X,Y,Z,C=uvw]
+
+        try: # Y-profile mean for adding back to fluctuations
+            ave = np.load(os.path.join(os.path.dirname(self.path), 'data_ave.npy'))[0, ..., :3] # [T=1,X=1,Y,Z=1,C=uvw]: drop group
+            self.mean_field = torch.as_tensor(ave).permute(4, 1, 2, 3, 0).float()  # [C,X=1,Y,Z=1,T=1]
+        except FileNotFoundError:
+            self.mean_field = 0
+
+    @property
+    def n_groups(self) -> int:
+        return self._data.shape[0]
+
+    @property
+    def _split_group_index_range(self) -> tuple[int, int]:
+        return int(self.n_groups * self._split_start_proportion + 0.5), \
+            int(self.n_groups * self._split_end_proportion + 0.5)
+
+    @property
+    def _samples_per_group(self) -> int:
+        n_times = self._data.shape[1] # 400
+        base_blocks, remainder = divmod(n_times, self.time_chunking * self.time_stride)
+        extra = max(0, remainder - (self.time_chunking - 1) * self.time_stride)
+        return base_blocks * self.time_stride + extra
+
+    def __len__(self):
+        start, end = self._split_group_index_range
+        return (end - start) * self._samples_per_group
+
+    def __getitem__(self, index):
+        if index < 0 or index >= len(self):
+            raise IndexError(f'Index {index} is out of range for dataset of length {len(self)}')
+
+        group_index, local_index = divmod(index, self._samples_per_group)
+        group_index += self._split_group_index_range[0] # start
+        block, offset = divmod(local_index, self.time_stride) # time stride multiplies the number of chunks per block
+        t0 = block * self.time_chunking * self.time_stride + offset
+        t1 = t0 + self.time_chunking * self.time_stride # consistent with JHTDB_Channel: `(index+1)*self.time_chunking*self.time_stride` ends at next block boundary
+        chunk = np.array(self._data[group_index, t0:t1:self.time_stride])  # [T,X,Y,Z,C], copy off mmap
+        fields = torch.as_tensor(chunk).permute(4, 1, 2, 3, 0)  # [C,X,Y,Z,T]
+        fields = fields + self.mean_field # add y-profile mean back (broadcast over X,Z,T)
+        fields = self._pool(fields.moveaxis(-1, 0)).moveaxis(0, -1).float()
+        return fields[..., 0], fields[..., 1:]
+
 # preserves random state (verified to work: 9/24/25)
 def preload_dataset(dataset):
     if isinstance(dataset, torch.utils.data.TensorDataset):
@@ -101,7 +159,9 @@ def preload_dataset(dataset):
 
 class JHTDBDataModule(L.LightningDataModule):
     def __init__(self, dataset_path: str, batch_size: int, time_chunking: int, time_stride: int=1,
-                 stride: int|list|tuple=1, long_horizon: int=400, train_proportion: float=0.8, fast_dataloaders: bool=False):
+                 stride: int|list|tuple=1, long_horizon: int=400, train_proportion: float=0.8,
+                 dataset_type: type[JHTDB_Channel|IUFNO_Channel] = JHTDB_Channel,
+                 preload_datasets: bool=True, fast_dataloaders: bool=False):
         assert 0 < train_proportion < 1, 'train_proportion must be between 0 and 1'
         super().__init__()
         self.save_hyperparameters()
@@ -113,7 +173,7 @@ class JHTDBDataModule(L.LightningDataModule):
 
     @property
     def _fast_dataloader_kwd_args(self): # Optional faster dataloaders (uses more memory)
-        return {'num_workers': 1, 'persistent_workers': True} if self.fast_dataloaders else {}
+        return {'num_workers': 1, 'persistent_workers': True} if self.fast_dataloaders else {} # TODO: adjust for IUFNO_Channel?
 
     def setup(self, stage: str='fit'):
         ''' if stage=='peek': do not preload the dataset,
@@ -121,8 +181,8 @@ class JHTDBDataModule(L.LightningDataModule):
         since it doesn't cost anything '''
 
         # Build datasets mirroring the main() logic
-        self.dataset = JHTDB_Channel(self.dataset_path, time_chunking=self.time_chunking, stride=self.stride, time_stride=self.time_stride)
-        dataset_long_horizon = JHTDB_Channel(self.dataset_path, time_chunking=self.long_horizon, stride=self.stride, time_stride=self.time_stride)
+        self.dataset = self.dataset_type(self.dataset_path, time_chunking=self.time_chunking, stride=self.stride, time_stride=self.time_stride)
+        dataset_long_horizon = self.dataset_type(self.dataset_path, time_chunking=self.long_horizon, stride=self.stride, time_stride=self.time_stride)
         if len(self.dataset)<self.batch_size: raise ValueError(f'Dataset files missing! {self.dataset_path=}')
 
         # this splitting is necessary because we need to split on the file level, not the coarse time chunk level
@@ -136,7 +196,7 @@ class JHTDBDataModule(L.LightningDataModule):
             print(f'{len(self.val_long_horizon_dataset)=}')
         assert min(len(self.dataset), len(self.train_dataset), len(self.val_dataset), len(self.val_long_horizon_dataset))>0, f'Empty datasets! {self.dataset_path=}'
 
-        if stage!='peek': # preload the datasets
+        if stage!='peek' and self.preload_datasets: # preload the datasets
             self.val_long_horizon_dataset = preload_dataset(self.val_long_horizon_dataset)
             self.train_dataset = preload_dataset(self.train_dataset)
             self.val_dataset = preload_dataset(self.val_dataset)
@@ -178,11 +238,14 @@ class JHTDBDataModule(L.LightningDataModule):
             print('loading from cache!')
             return torch.load(cache_path)
 
-        dataset = JHTDB_Channel(self.dataset_path, time_chunking=1, stride=self.stride)
+        dataset = self.dataset_type(self.dataset_path, time_chunking=1, stride=self.stride)
+        if isinstance(dataset, IUFNO_Channel):
+            dataset = dataset.split((dataset.n_groups-1)/dataset.n_groups)[1] # keep only the last group
         dataset = torch.utils.data.Subset(dataset, range(0,len(dataset),time_stride))
         data_loader = torch.utils.data.DataLoader(dataset, batch_size=1, num_workers=8)
 
         full_field = torch.stack([x.squeeze() for x, _ in data_loader], axis=-1)
         print(f'{full_field.shape=}, {full_field.device=}')
-        torch.save(full_field, cache_path)
+        if self.preload_datasets and os.path.isdir(os.path.dirname(cache_path)):
+            torch.save(full_field, cache_path)
         return full_field
