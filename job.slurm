@@ -9,7 +9,7 @@
 #SBATCH --time=1-00:00:00                    # Maximum runtime (HH:MM:SS) (48 hours for WNO-600-epochs)
 #SBATCH --partition=ghx4                     # Partition name
 #SBATCH --account=beoi-dtai-gh
-#SBATCH --job-name=Everything_TS=4
+#SBATCH --job-name=MLE_TS=4_E=0.5_IUFNO_dataset
 
 # Not going to work anymore b/c we would need to save the entire checkpoint which causes OOM...
 # ##SBATCH --signal=SIGUSR1@90
@@ -54,7 +54,7 @@ MLE_GRAD_CLIP=8.944e-2 # old/original value
 
 # (VI+TRIG) 1550 epochs takes 20 hours (with 4 GH200s, measured 4/2/25)
 # Everything 1600 epochs takes 33 hours (with 4 GH200s, measured 9/23/25)
-export MAX_EPOCHS=1600 # MUST BE ACCURATELY ADJUSTED based on estimated epochs (this ensures that OneCycle is properly calibrated)
+export MAX_EPOCHS=800 # MUST BE ACCURATELY ADJUSTED based on estimated epochs (this ensures that OneCycle is properly calibrated)
 export LR=$VI_LR # this is 4x higher than theory suggests (it is only possible b/c grad clip)
 export GRAD_CLIP=50 # it is best to keep this value, it will automatically be adjusted based on number of recursive timesteps & batch_size
 export WEIGHT_DECAY=0.0 # 0.01 is AdamW default
@@ -62,7 +62,7 @@ export OPTIM='AdamW' # RAdam is better for resuming, otherwise use Adam
 export RLoP=0 # Reduce Learning-rate on Plateu, can be useful for resuming (but otherwise keep it off!). Also bash booleans are binary
 export ONE_CYCLE=$((! RLoP)) # OneCycle warmup & decay lr schedule. Really important for scaling to multiple GPUs!
 export THREE_PHASE=0 # faster decay in one cycle, usually not needed
-export USE_PDE_SOLVER=1 # whether to use the PDE solver
+export USE_PDE_SOLVER=0 # whether to use the PDE solver
 export USE_MANUAL_ADVECTION=0 # whether to use manual advection/forcing term in PDE solver
 export ANISOTROPIC_FILTER=0 # whether to use anisotropic filtering in PDE solver
 export DISABLE_FILTER=0 # whether to disable filtering in PDE solver (overrides ANISOTROPIC_FILTER)
@@ -74,11 +74,11 @@ export USE_NORMALIZED_MOE=1 # importance normalization gives better expert utili
 export OUT_NORM_GROUPS=1 # whether to use output normalization (you should!)
 export HIDDEN_NORM_GROUPS=1 # whether to use hidden normalization (you should!)
 export DROPOUT=0.0 # maybe this makes VI redundant?
-export VI=1 # use VI or not (in bash binary booleans have the best support for boolean logic)
+export VI=0 # use VI or not (in bash binary booleans have the best support for boolean logic)
 export VI_PRIOR_SIGMA=0.2 # approximately reflects the values of sigma at initialization
 export VI_COUNTS_TIMESTRIDE_GAP_DATA=1 # whether to count the gap data between timestrides in the dataset size for VI
 export VI_PROPAGATE_UQ=1 # whether to propagate uncertainty through the LES model across timesteps (as additional input channels)
-export USE_IUFNO_DATASET=0 # 1 = IUFNO Re=180 npy (20/21 group split) instead of JHTDB
+export USE_IUFNO_DATASET=1 # 1 = IUFNO Re=180 npy (20/21 group split) instead of JHTDB
 export TIME_STRIDE=4 # must be integer-valued
 export STRIDE=1 # e.g. 1.5 or a crazy list [1.5,1.3,1.8] for smaller experiments
 export TIME_CHUNKING=10 # 10 is default now b/c we can fit it in GH200s
@@ -117,7 +117,8 @@ source experiment_configs/everything.sh # NO-OP b/c everything is already the de
 #source experiment_configs/WNO+LN.sh # runs for *800* epochs on 64x16x64
 
 # optional modifiers; first one is 'small' jobs that fit on one GPU (incompatible with WNO striding)
-[[ "$STRIDE" != '[1.609,1.625,1.203]' ]] && { export BATCH_SIZE=$((BATCH_SIZE*4)) STRIDE=1.47 FAST_DATALOADERS=1; } # simulate 4 nodes, S=1.47 for 68 GB mem target & near 88% utilization
+#[[ "$STRIDE" != '[1.609,1.625,1.203]' ]] && { export BATCH_SIZE=$((BATCH_SIZE*4)) STRIDE=1.47 FAST_DATALOADERS=1; } # simulate 4 nodes, S=1.47 for 68 GB mem target & near 88% utilization
+export BATCH_SIZE=$((BATCH_SIZE*4)) FAST_DATALOADERS=1
 #export HIDDEN_NORM_GROUPS=1
 #export OUT_NORM_GROUPS=1
 #export SEED=$RANDOM # random behavior (but consistent splitting)
