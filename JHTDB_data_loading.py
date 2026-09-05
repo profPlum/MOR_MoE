@@ -173,7 +173,7 @@ class JHTDBDataModule(L.LightningDataModule):
 
     @property
     def _fast_dataloader_kwd_args(self): # Optional faster dataloaders (uses more memory)
-        return {'num_workers': 1, 'persistent_workers': True} if self.fast_dataloaders else {} # TODO: adjust for IUFNO_Channel?
+        return {'num_workers': 1 if self.preload_datasets else 8, 'persistent_workers': self.preload_datasets} if self.fast_dataloaders else {}
 
     def setup(self, stage: str='fit'):
         ''' if stage=='peek': do not preload the dataset,
