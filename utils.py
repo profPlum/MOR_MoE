@@ -54,10 +54,6 @@ profile_it.num=0
 # the simpler ways... now deprecated for consistent/recorded scaling
 np_normalize = lambda array: (array-array.mean())/array.std()
 
-class StopExecution(Exception):
-    def _render_traceback_(self):
-        return []
-
 def clear_cache():
     import torch, gc
     while gc.collect(): pass
