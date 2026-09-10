@@ -316,7 +316,7 @@ This code assumes you have 2 numpy arrays loaded in memory:
 '''
 
 def E1d(u, epsilon_multiplier=1.0, nk=30, strict_partition=True, plot_rings=False,
-        Lx=8*np.pi, Lz=4*np.pi): # & Ly=2
+        Lx=8*np.pi, Lz=3*np.pi): # & Ly=2
     '''
     arguments:
         u: input function, u.shape==(channels=3,Nx,Ny,Nz)
