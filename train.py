@@ -136,7 +136,8 @@ if __name__=='__main__':
     dm = JHTDBDataModule(**dm_kwd_args)
 
     # derive field size from data module
-    field_size = dm.field_size
+    md = dm.meta_data()
+    field_size = md.field_size
     if k_modes is None: # default=max (potentially adjusted for stride)
         k_modes=field_size # e.g. [103,26,77]
         assert len(k_modes)==3
@@ -191,12 +192,10 @@ if __name__=='__main__':
     else: optional_kwd_args['k_modes']=k_modes # assuming MOR_Operator expert
     if dropout > 0: optional_kwd_args['dropout']=dropout # right now only supported for MOR_Operator
 
-    # NOTE: we need to update field size based on the stride
-    simulator_kwd_args = {'nx': field_size[0], 'ny': field_size[1], 'nz': field_size[2], 'dt': 0.0065*time_stride,
-                          'use_PDE_solver': use_PDE_solver, 'anisotropic_filter': anisotropic_filter, 'disable_filter': disable_filter,
-                          'dealias_before_quadratic': dealias_before_quadratic, 'apply_pde_filter_bottleneck': apply_pde_filter_bottleneck}
-    if use_IUFNO_dataset: # 4π × 2 × 4π/3 with ∆T=1.0 (but realistically ∆T is too big for PDE solver)
-        simulator_kwd_args.update(Lx=4*np.pi, Ly=2.0, Lz=4*np.pi/3, dt=1.0*time_stride, nu=1/4200) # NOTE: for Re=590, nu=1/16800
+    simulator_kwd_args = {'nx': md.nx, 'ny': md.ny, 'nz': md.nz, 'Lx': md.Lx, 'Ly': md.Ly, 'Lz': md.Lz,
+                          'dt': md.dt, 'nu': md.nu, 'use_PDE_solver': use_PDE_solver, 'anisotropic_filter': anisotropic_filter,
+                          'disable_filter': disable_filter, 'dealias_before_quadratic': dealias_before_quadratic,
+                          'apply_pde_filter_bottleneck': apply_pde_filter_bottleneck}
     if use_manual_advection: simulator_kwd_args['u_b'] = dm.u_b
     if use_VI: simulator_kwd_args['propagate_uq'] = VI_propagate_UQ
 

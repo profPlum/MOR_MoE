@@ -5,6 +5,42 @@ import h5py
 import numpy as np
 from glob import glob
 import pytorch_lightning as L
+from copy import copy
+from typing import Any
+_get_strided_length = lambda length, stride: (length-1)//stride+1 # -1 for last TS, +1 for first TS
+
+class DatasetMetaData:
+    def __init__(self, Lx: float, Ly: float, Lz: float, nu: float, dt: float, n_steps_per_flow_through_native: int):
+        vars(self).update(locals()); del self.self # save configuration args settings
+
+    def __getattr__(self, name: str) -> Any:
+        try: super().__getattr__(name)
+        except AttributeError:
+            if 'nx' in vars(self): raise # already adapted to stride
+            else: raise AttributeError(f'{name} is not a valid attribute of {type(self).__name__} (you may need to call self.adapt_to_stride(dataset) to finish construction).')
+
+    def adapt_to_stride(self, dataset: JHTDB_Channel|IUFNO_Channel) -> DatasetMetaData:
+        ''' Adds fields: time_stride, n_steps_per_flow_through, field_size, nx, ny, nz extracted from the dataset object.'''
+        new = copy(self)
+        new.time_stride = dataset.time_stride
+        new.dt *= dataset.time_stride
+        new.n_steps_per_flow_through = _get_strided_length(self.n_steps_per_flow_through_native, dataset.time_stride)
+        IC_0, _ = dataset[0]
+        new.field_size = tuple(IC_0.shape[1:])
+        new.nx, new.ny, new.nz = new.field_size
+        return new
+
+    def with_eval_time_stride(self, eval_time_stride: int) -> DatasetMetaData:
+        assert eval_time_stride % self.time_stride == 0, f'{eval_time_stride=} must be a multiple of {self.time_stride=}'
+        extra_time_stride = eval_time_stride // self.time_stride
+        new = copy(self)
+        new.dt *= extra_time_stride
+        new.n_steps_per_flow_through = _get_strided_length(self.n_steps_per_flow_through, extra_time_stride)
+        new.time_stride = eval_time_stride
+        if eval_time_stride > max(1, round(0.2 * self.n_steps_per_flow_through_native)):
+            import warnings
+            warnings.warn(f'{eval_time_stride=} cannot resolve 0.2 FTT ({0.2 * self.n_steps_per_flow_through_native} unstrided steps)')
+        return new
 
 # Verified to work: 8/23/24
 class JHTDB_Channel(torch.utils.data.Dataset):
@@ -12,10 +48,12 @@ class JHTDB_Channel(torch.utils.data.Dataset):
     Dataset for the JHTDB autoregressive problem... It is not possible to make
     this predict everything at once because that would make the dataset size=1.
     '''
+    _metadata = DatasetMetaData(Lx=8*np.pi, Ly=2.0, Lz=3*np.pi, nu=5e-5, dt=0.0065, n_steps_per_flow_through_native=4000)
+
     def __init__(self, path:str, time_chunking=5, stride:int|list|tuple=1, time_stride:int=1):
         self.path=path
         self.time_chunking=time_chunking
-        self.time_stride=time_stride
+        self._time_stride=time_stride # ready-only
         assert type(time_stride) is int
         if type(stride) in [int,float]: stride=[stride]*3
         else: assert len(stride)==3 # we will not pool time because it breaks PDE timestep & stability and pytorch cannot do it easily
@@ -25,6 +63,11 @@ class JHTDB_Channel(torch.utils.data.Dataset):
 
         self._split_start_proportion = 0
         self._split_end_proportion = 1.0 # exclusive 1.0=length of dataset
+
+        self.dataset_meta_data = type(self)._metadata.adapt_to_stride(self)
+
+    @property
+    def time_stride(self): return self._time_stride
 
     def split(self, proportion: float):
         assert 0 <= proportion <= 1, 'proportion must be between 0 and 1'
@@ -98,15 +141,18 @@ class JHTDB_Channel(torch.utils.data.Dataset):
 # NOTE: not possible to directly reuse JHTDB_Channel because group boundaries are discontinuous
 class IUFNO_Channel(JHTDB_Channel):
     '''IUFNO channel flow. Returns (IC, future frames) like JHTDB_Channel.'''
+    _metadata = DatasetMetaData(Lx=4*np.pi, Ly=2.0, Lz=4*np.pi/3, nu=1/4200, dt=1.0, n_steps_per_flow_through_native=19)
+
     def __init__(self, path:str, time_chunking=5, stride:int|list|tuple=1, time_stride:int=1):
-        super().__init__(path, time_chunking, stride, time_stride)
         self._data = np.load(path, mmap_mode='r')[..., :3]  # [G,T,X,Y,Z,C=uvw]
 
         try: # Y-profile mean for adding back to fluctuations
-            ave = np.load(os.path.join(os.path.dirname(self.path), 'data_ave.npy'))[0, ..., :3] # [T=1,X=1,Y,Z=1,C=uvw]: drop group
+            ave = np.load(os.path.join(os.path.dirname(path), 'data_ave.npy'))[0, ..., :3] # [T=1,X=1,Y,Z=1,C=uvw]: drop group
             self.mean_field = torch.as_tensor(ave).permute(4, 1, 2, 3, 0).float()  # [C,X=1,Y,Z=1,T=1]
         except FileNotFoundError:
             self.mean_field = 0
+
+        super().__init__(path, time_chunking, stride, time_stride)
 
     @property
     def n_groups(self) -> int:
@@ -222,6 +268,11 @@ class JHTDBDataModule(L.LightningDataModule):
         field_size = list(IC_0.shape[1:])
         print(f'{field_size=}')
         return field_size
+
+    def meta_data(self, eval_time_stride: int | None = None) -> DatasetMetaData:
+        md = self.dataset.dataset_meta_data
+        if eval_time_stride is None: return md
+        return md.with_eval_time_stride(eval_time_stride)
 
     @property
     def u_b(self):
