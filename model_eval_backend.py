@@ -92,9 +92,6 @@ class SimulationFlowThroughSequence:
         assert self.meta_data is not None, 'meta_data must be specified'
         self.full = sim_data # raw simulation data
 
-    @property # for legacy and clarity
-    def flow_thru(self): return self
-
     def __getitem__(self, index):
         if not -len(self) <= index <= len(self)-1: raise IndexError(f'index {index} out of bounds for flow through sequence of length {len(self)}')
         if index < 0: index += len(self) # standardize to positive indexing, e.g. -1 -> len(self)-1
@@ -129,7 +126,7 @@ class SimulationFlowThroughSequence:
         if show: fig.show()
         return fig
 
-    def convolve_flow_stats(self, real_flow_seq, flow_thrus_to_skip=5, flow_thru_multiplier=5, stride=2, use_MAP=False, **kwd_args):
+    def convolve_flow_stats(self, real_flow_seq, flow_thrus_to_skip=5, flow_thru_multiplier=1, stride=2, use_MAP=False, **kwd_args):
         '''
         Should be able to generalize the important parts of: full cross-convolution, 1 FTT convolution, and MAP xcor metrics (we can drop EMA feature).
         Depends on plot_1dDiagnostics defined at the bottom of the file.
@@ -206,8 +203,8 @@ class UQSimulationFlowThroughSequence(SimulationFlowThroughSequence):
     def get_samples(self, flow_thru_index=-1, use_MAP=False, sparse=False):
         ''' sample from sim.uq.sample_moments or return MAP prediction in compatible shape '''
         if self.uq and not use_MAP: # self.uq.sample_moments is mu, self.uq.sample_moments.uq is sigma
-            pred_samples = [self.uq.sample_moments.flow_thru[flow_thru_index],
-                            self.uq.sample_moments.uq.flow_thru[flow_thru_index]]
+            pred_samples = [self.uq.sample_moments[flow_thru_index],
+                            self.uq.sample_moments.uq[flow_thru_index]]
             if sparse: pred_samples = [moment[...,(0,-1)] for moment in pred_samples]
             return torch.distributions.Normal(*pred_samples).sample()
         else: return super().get_samples(flow_thru_index)
@@ -319,19 +316,19 @@ def cross_correlation_comparison(pred_flow, real_channel_flow, title='', plot=Tr
         print('MSE between xcor of pred and true:', metrics['xcor_mse'])
     return metrics
 
-def cross_correlation_comparison_cumulative(sim, real_channel_flow, flow_thru_index=-1,
+def cross_correlation_comparison_cumulative(sim_flow_seq, real_channel_flow, flow_thru_index=-1,
                                             n_xcor_steps=25, beta=0.15, should_plot=True):
     ''' n_xcor_steps = 25 should work with the time strides we've tested: 4, 8, and 16
         beta is the weight for the previous metrics vs the new metrics for EMA '''
     plot_interval = n_xcor_steps//5
 
-    assert sim.flow_thru[flow_thru_index].shape[-1] == real_channel_flow.shape[-1]
+    assert sim_flow_seq[flow_thru_index].shape[-1] == real_channel_flow.shape[-1]
     metrics_cum: pd.Series = None # bias-corrected EMA requires direct assignment for the first iteration
     end_steps = np.linspace(0, real_channel_flow.shape[-1], num=n_xcor_steps+1, dtype=int)[1:]
     for i, end_step in enumerate(end_steps):
         i+=1 # 1-based indexing
         should_plot_i = should_plot and (i % plot_interval == 0 or i==n_xcor_steps)
-        metrics_i = cross_correlation_comparison(sim.flow_thru[flow_thru_index][...,:end_step],
+        metrics_i = cross_correlation_comparison(sim_flow_seq[flow_thru_index][...,:end_step],
                     real_channel_flow[...,:end_step], plot=should_plot_i,
                     title=f'$T_0$ vs $T_0+{i/n_xcor_steps}$')
         if metrics_cum is None: metrics_cum = metrics_i.copy()
