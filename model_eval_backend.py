@@ -5,6 +5,7 @@ import pytorch_lightning as L
 import matplotlib.pyplot as plt
 import warnings
 from tqdm.auto import tqdm
+from JHTDB_data_loading import DatasetMetaData
 
 import scrapbook as sb
 def glue_and_print(key, value):
@@ -54,20 +55,26 @@ def load_model(path, device='cuda', **kwd_args):
     return model
 
 import contextlib
+from copy import copy
 class SimulationFlowThroughSequence:
     ''' Data structure for indexing shifted simulation flow throughs '''
-    n_steps_per_flow_thru: int = None # type: ignore
+    meta_data: DatasetMetaData = None # type: ignore
+
+    @property
+    def n_steps_per_flow_thru(self):
+        return SimulationFlowThroughSequence.meta_data.n_steps_per_flow_through
 
     @staticmethod
     @contextlib.contextmanager
     def flow_through_multiplier(n_flow_through_times_multiplier: int):
         cls = SimulationFlowThroughSequence # shorthand, but a static method none the less
-        assert cls.n_steps_per_flow_thru % n_flow_through_times_multiplier == 0, f'{cls.n_steps_per_flow_thru=}, {n_flow_through_times_multiplier=}'
+        old = cls.meta_data.n_steps_per_flow_through
         try:
-            cls.n_steps_per_flow_thru //= n_flow_through_times_multiplier
+            cls.meta_data.n_steps_per_flow_through = old // n_flow_through_times_multiplier
+            assert cls.meta_data.n_steps_per_flow_through >= 2, f'{cls.meta_data.n_steps_per_flow_through=}, {old=}, {n_flow_through_times_multiplier=}'
             yield
         finally: # cleanup
-            cls.n_steps_per_flow_thru *= n_flow_through_times_multiplier
+            cls.meta_data.n_steps_per_flow_through = old
 
     # Verified to work: 7/16/26
     def continuous_index_range(self, length=None, stride=2):
@@ -80,8 +87,7 @@ class SimulationFlowThroughSequence:
     def from_output(cls, sim_data): return cls(sim_data)
 
     def __init__(self, sim_data):
-        assert type(self.n_steps_per_flow_thru) is int, 'cls.n_steps_per_flow_thru must be specified'
-        assert sim_data.shape[-1] % self.n_steps_per_flow_thru == 0, f'{sim_data.shape[-1]=}, {self.n_steps_per_flow_thru=}'
+        assert SimulationFlowThroughSequence.meta_data is not None, 'meta_data must be specified'
         self.full = sim_data # raw simulation data
 
     @property # for legacy and clarity
@@ -99,7 +105,6 @@ class SimulationFlowThroughSequence:
     # verified to work: 7/17/26
     def slice_flow_thru(self, start: int|None, stop: int|None=None):
         ''' start inclusive, stop exclusive like python slicing '''
-        from copy import copy
         new = copy(self)
         def standardize(x):
             if x is None: return None
@@ -116,12 +121,41 @@ class SimulationFlowThroughSequence:
         from grid_figures import GridFigure
         fig = GridFigure(f'{prefix}3d Channel Flow: {vel_component_names[vel_comp_idx]} Velocity')
         sim_data = self.full.cpu()
-        viz_time_stride = 4000//self.n_steps_per_flow_thru
         for z in np.linspace(0, sim_data.shape[-2]-1, num=num_z, dtype=int):
-            fig.add_3d_row(sim_data[vel_comp_idx,:,:,z], f'{z=}', x_title_func=lambda t: f't={t*viz_time_stride}',
+            fig.add_3d_row(sim_data[vel_comp_idx,:,:,z], f'{z=}', x_title_func=lambda t: f't={t*self.meta_data.time_stride}',
                         img_getter=lambda array_3d, t: array_3d[:,:,t].T)
         if show: fig.show()
         return fig
+
+    def convolve_flow_stats(self, real_channel_flow, flow_thrus_to_skip=5, flow_thru_multiplier=5, stride=2, use_MAP=False, **kwd_args):
+        '''
+        Should be able to generalize the important parts of: full cross-convolution, 1 FTT convolution, and MAP xcor metrics (we can drop EMA feature).
+        Depends on plot_1dDiagnostics defined at the bottom of the file.
+        flow_thrus_to_skip: 5 for recommended padding by Ravi
+        flow_thru_multiplier: total artificial flow throughs = flow_thru_multiplier * (number of real flow throughs)
+        stride: time-stride of "convolution" for the flow-through indices (default is 2 for the original dataset size)
+        use_MAP: If True, then the metrics are computed for the MAP of the model's predicted flow.
+        **kwd_args: additional arguments for plot_1dDiagnostics
+        '''
+
+        real_channel_flow_seq = SimulationFlowThroughSequence(real_channel_flow)
+        extra_valid_flow_thrus = self.slice_flow_thru(flow_thrus_to_skip)
+
+        with SimulationFlowThroughSequence.flow_through_multiplier(flow_thru_multiplier):
+            sim_flow_thru_indices = extra_valid_flow_thrus.continuous_index_range(stride=stride)
+            real_flow_thru_indices = real_channel_flow_seq.continuous_index_range(stride=stride)
+            i, metrics = 0, []
+            for sim_flow_thru_index in tqdm(sim_flow_thru_indices):
+                pred_samples = extra_valid_flow_thrus.get_samples(sim_flow_thru_index, use_MAP=use_MAP, sparse=True)
+                for real_flow_thru_index in real_flow_thru_indices:
+                    should_plot = i%(len(sim_flow_thru_indices)*len(real_flow_thru_indices)//10)==0
+                    metrics_i = plot_1dDiagnostics(pred_samples, # create temp variable to reference metric names for df columns outside
+                        real_channel_flow_seq[real_flow_thru_index], should_plot=should_plot, meta_data=self.meta_data, **kwd_args)
+                    metrics.append(tuple(metrics_i.to_list())) # more efficient
+                    i += 1
+        metrics = pd.DataFrame(metrics, columns=metrics_i.index) # more efficient
+        display(metrics.describe()) # show distribution of metrics
+        return metrics.mean(axis=0)
 
 class UQSimulationFlowThroughSequence(SimulationFlowThroughSequence):
     ''' Adds self.uq (with derived E_{y~N(mu, sigma)}[|y_tilde - y|] for MAP prediction)
@@ -315,16 +349,15 @@ This code assumes you have 2 numpy arrays loaded in memory:
     real_channel_flow with shape, (3,Nx,Ny,Nz,times)
 '''
 
-def E1d(u, epsilon_multiplier=1.0, nk=30, strict_partition=True, plot_rings=False,
-        Lx=8*np.pi, Lz=3*np.pi): # & Ly=2
+def E1d(u, meta_data, epsilon_multiplier=1.0, nk=30, strict_partition=True, plot_rings=False):
     '''
     arguments:
         u: input function, u.shape==(channels=3,Nx,Ny,Nz)
+        meta_data: DatasetMetaData (Lx, Lz for physical k-space rings)
         epsilon_multiplier: for width of ring to project to point
         nk: number of points along radius to project on to
         strict_partition: if True, then the rings are strictly separated (no overlap)
         plot_rings: if True, then the rings are plotted for diagnostics
-        Lx,Lz: domain lengths (default values are for the original dataset size)
     output:
         k_radii: shape=(nk,) the radii of the rings for k-bins (in k-space)
         energy_spectra: shape=(nk, Ny) the energy spectra for each y-coordinate
@@ -332,6 +365,7 @@ def E1d(u, epsilon_multiplier=1.0, nk=30, strict_partition=True, plot_rings=Fals
     if len(u.shape)!=4 or u.shape[0]!=3:
         raise ValueError(f'expected (channels=3,Nx,Ny,Nz), got {u.shape}')
     u = np.moveaxis(np.asarray(u), 0, -1) # original code requires: u.shape==(Nx,Ny,Nz,3)
+    Lx, Lz = meta_data.Lx, meta_data.Lz
 
     def E(u): # energy in Fourier space (2D)
         uh = np.fft.rfftn(u,axes=[0,2])
@@ -401,12 +435,13 @@ def get_last_TS_energy_spectra(flow_samples, **kwd_args):
 #real_channel_flow.shape==(3,Nx,Ny,Nz,times)
 #pred_samples.shape==(samples,3,Nx,Ny,Nz,times)
 def plot_1dDiagnostics(pred_samples, real_channel_flow, k_trim=2,
-                       should_plot=True, aggregate_xz=False, **kwd_args): # takes ~200ms
+                       should_plot=True, aggregate_xz=False, meta_data=None, **kwd_args): # takes ~200ms
     ''' aggregate_xz: if True, then the y-line is reduced by averaging over x and z dimensions else the y-line is chosen arbitrarily
         k_trim: trim the first k_trim points from the energy spectrum (to prevent them from dominating)
         should_plot: if True, then the plots are shown (otherwise just compute metrics)
-        aggregate_xz: if True, then the y-line is reduced by averaging over x and z dimensions else the y-line is chosen arbitrarily
+        meta_data: DatasetMetaData passed to E1d (defaults to SimulationFlowThroughSequence.meta_data)
         **kwd_args: additional arguments for E1d() '''
+    if meta_data is None: meta_data = SimulationFlowThroughSequence.meta_data
     assert len(pred_samples.shape)==len(real_channel_flow.shape)+1==6 and \
         pred_samples.shape[1:-1]==real_channel_flow.shape[:-1] and \
         pred_samples.shape[-1] in {real_channel_flow.shape[-1], 2}, \
@@ -418,8 +453,8 @@ def plot_1dDiagnostics(pred_samples, real_channel_flow, k_trim=2,
     with warnings.catch_warnings(): # Safely ignore DoF warning (for np.std with only MAP/MLE sample)
         warnings.filterwarnings("ignore", message=".*degrees of freedom is <= 0.*")
 
-        k,EE = get_last_TS_energy_spectra(real_channel_flow, **kwd_args)
-        k,Es = get_last_TS_energy_spectra(pred_samples, **kwd_args)
+        k,EE = get_last_TS_energy_spectra(real_channel_flow, meta_data=meta_data, **kwd_args)
+        k,Es = get_last_TS_energy_spectra(pred_samples, meta_data=meta_data, **kwd_args)
 
         # we are trimming the k_trim because they contain so much energy that they distort the plots
         y_index = real_channel_flow.shape[2]//2 # Dwyer: should be the midpoint b/c it avoids the walls
@@ -508,32 +543,3 @@ def plot_1dDiagnostics(pred_samples, real_channel_flow, k_trim=2,
             plt.close()
             print(metrics)
     return metrics
-
-def convolve_flow_stats(sim, real_channel_flow, flow_thrus_to_skip=5, flow_thru_multiplier=5, stride=2, use_MAP=False, **kwd_args):
-    '''
-    Should be able to generalize the important parts of: full cross-convolution, 1 FTT convolution, and MAP xcor metrics (we can drop EMA feature).
-    flow_thru_to_skip: 5 for recommended padding by Ravi
-    flow_thru_multiplier: x5 more flow thrus (20% size) corresponds to about 50% xcor in real data, as recommended by Ravi
-    stride: time-stride of "convolution" for the flow-through indices (default is 2 for the original dataset size)
-    use_MAP: If True, then the metrics are computed for the MAP of the model's predicted flow.
-    If False, then the metrics are computed for the MAP of the model's predicted flow.
-    **kwd_args: additional arguments for plot_1dDiagnostics
-    '''
-    real_channel_flow_seq = SimulationFlowThroughSequence(real_channel_flow)
-    extra_valid_flow_thrus = sim.slice_flow_thru(flow_thrus_to_skip)
-
-    with SimulationFlowThroughSequence.flow_through_multiplier(flow_thru_multiplier):
-        sim_flow_thru_indices = extra_valid_flow_thrus.continuous_index_range(stride=stride)
-        real_flow_thru_indices = real_channel_flow_seq.continuous_index_range(stride=stride)
-        i, metrics = 0, []
-        for sim_flow_thru_index in tqdm(sim_flow_thru_indices):
-            pred_samples = extra_valid_flow_thrus.get_samples(sim_flow_thru_index, use_MAP=use_MAP, sparse=True)
-            for real_flow_thru_index in real_flow_thru_indices:
-                should_plot = i%(len(sim_flow_thru_indices)*len(real_flow_thru_indices)//10)==0
-                metrics_i = plot_1dDiagnostics(pred_samples, # create temp variable to reference metric names for df columns outside
-                    real_channel_flow_seq[real_flow_thru_index], should_plot=should_plot, **kwd_args)
-                metrics.append(tuple(metrics_i.to_list())) # more efficient
-                i += 1
-    metrics = pd.DataFrame(metrics, columns=metrics_i.index) # more efficient
-    display(metrics.describe()) # show distribution of metrics
-    return metrics.mean(axis=0)
