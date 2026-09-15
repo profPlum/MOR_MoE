@@ -59,22 +59,23 @@ from copy import copy
 class SimulationFlowThroughSequence:
     ''' Data structure for indexing shifted simulation flow throughs '''
     meta_data: DatasetMetaData = None # type: ignore
+    _flow_through_multiplier: int = 1
 
     @property
     def n_steps_per_flow_thru(self):
-        return SimulationFlowThroughSequence.meta_data.n_steps_per_flow_through
+        n_steps = self.meta_data.n_steps_per_flow_through // SimulationFlowThroughSequence._flow_through_multiplier
+        assert n_steps >= 2, f'{n_steps=}, {self.meta_data.n_steps_per_flow_through=}, {SimulationFlowThroughSequence._flow_through_multiplier=}'
+        return n_steps
 
     @staticmethod
     @contextlib.contextmanager
-    def flow_through_multiplier(n_flow_through_times_multiplier: int):
-        cls = SimulationFlowThroughSequence # shorthand, but a static method none the less
-        old = cls.meta_data.n_steps_per_flow_through
+    def flow_through_multiplier(multiplier: int):
+        old = SimulationFlowThroughSequence._flow_through_multiplier
         try:
-            cls.meta_data.n_steps_per_flow_through = old // n_flow_through_times_multiplier
-            assert cls.meta_data.n_steps_per_flow_through >= 2, f'{cls.meta_data.n_steps_per_flow_through=}, {old=}, {n_flow_through_times_multiplier=}'
+            SimulationFlowThroughSequence._flow_through_multiplier = multiplier
             yield
         finally: # cleanup
-            cls.meta_data.n_steps_per_flow_through = old
+            SimulationFlowThroughSequence._flow_through_multiplier = old
 
     # Verified to work: 7/16/26
     def continuous_index_range(self, length=None, stride=2):
@@ -86,8 +87,9 @@ class SimulationFlowThroughSequence:
     @classmethod
     def from_output(cls, sim_data): return cls(sim_data)
 
-    def __init__(self, sim_data):
-        assert SimulationFlowThroughSequence.meta_data is not None, 'meta_data must be specified'
+    def __init__(self, sim_data, meta_data=None):
+        if meta_data: self.meta_data = copy(meta_data)
+        assert self.meta_data is not None, 'meta_data must be specified'
         self.full = sim_data # raw simulation data
 
     @property # for legacy and clarity
@@ -127,10 +129,11 @@ class SimulationFlowThroughSequence:
         if show: fig.show()
         return fig
 
-    def convolve_flow_stats(self, real_channel_flow, flow_thrus_to_skip=5, flow_thru_multiplier=5, stride=2, use_MAP=False, **kwd_args):
+    def convolve_flow_stats(self, real_flow_seq, flow_thrus_to_skip=5, flow_thru_multiplier=5, stride=2, use_MAP=False, **kwd_args):
         '''
         Should be able to generalize the important parts of: full cross-convolution, 1 FTT convolution, and MAP xcor metrics (we can drop EMA feature).
         Depends on plot_1dDiagnostics defined at the bottom of the file.
+        real_flow_seq: SimulationFlowThroughSequence of DNS
         flow_thrus_to_skip: 5 for recommended padding by Ravi
         flow_thru_multiplier: total artificial flow throughs = flow_thru_multiplier * (number of real flow throughs)
         stride: time-stride of "convolution" for the flow-through indices (default is 2 for the original dataset size)
@@ -138,19 +141,18 @@ class SimulationFlowThroughSequence:
         **kwd_args: additional arguments for plot_1dDiagnostics
         '''
 
-        real_channel_flow_seq = SimulationFlowThroughSequence(real_channel_flow)
         extra_valid_flow_thrus = self.slice_flow_thru(flow_thrus_to_skip)
 
         with SimulationFlowThroughSequence.flow_through_multiplier(flow_thru_multiplier):
             sim_flow_thru_indices = extra_valid_flow_thrus.continuous_index_range(stride=stride)
-            real_flow_thru_indices = real_channel_flow_seq.continuous_index_range(stride=stride)
+            real_flow_thru_indices = real_flow_seq.continuous_index_range(stride=stride)
             i, metrics = 0, []
             for sim_flow_thru_index in tqdm(sim_flow_thru_indices):
                 pred_samples = extra_valid_flow_thrus.get_samples(sim_flow_thru_index, use_MAP=use_MAP, sparse=True)
                 for real_flow_thru_index in real_flow_thru_indices:
                     should_plot = i%(len(sim_flow_thru_indices)*len(real_flow_thru_indices)//10)==0
                     metrics_i = plot_1dDiagnostics(pred_samples, # create temp variable to reference metric names for df columns outside
-                        real_channel_flow_seq[real_flow_thru_index], should_plot=should_plot, meta_data=self.meta_data, **kwd_args)
+                        real_flow_seq[real_flow_thru_index], should_plot=should_plot, meta_data=self.meta_data, **kwd_args)
                     metrics.append(tuple(metrics_i.to_list())) # more efficient
                     i += 1
         metrics = pd.DataFrame(metrics, columns=metrics_i.index) # more efficient
