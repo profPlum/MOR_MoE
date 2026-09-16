@@ -192,10 +192,10 @@ if __name__=='__main__':
     else: optional_kwd_args['k_modes']=k_modes # assuming MOR_Operator expert
     if dropout > 0: optional_kwd_args['dropout']=dropout # right now only supported for MOR_Operator
 
-    simulator_kwd_args = {'nx': md.nx, 'ny': md.ny, 'nz': md.nz, 'Lx': md.Lx, 'Ly': md.Ly, 'Lz': md.Lz,
-                          'dt': md.dt, 'nu': md.nu, 'use_PDE_solver': use_PDE_solver, 'anisotropic_filter': anisotropic_filter,
-                          'disable_filter': disable_filter, 'dealias_before_quadratic': dealias_before_quadratic,
-                          'apply_pde_filter_bottleneck': apply_pde_filter_bottleneck}
+    simulator_kwd_args = md.simulator_kwd_args | dict(
+        use_PDE_solver=use_PDE_solver, anisotropic_filter=anisotropic_filter,
+        disable_filter=disable_filter, dealias_before_quadratic=dealias_before_quadratic,
+        apply_pde_filter_bottleneck=apply_pde_filter_bottleneck)
     if use_manual_advection: simulator_kwd_args['u_b'] = dm.u_b
     if use_VI: simulator_kwd_args['propagate_uq'] = VI_propagate_UQ
 

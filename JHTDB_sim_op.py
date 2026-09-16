@@ -136,9 +136,8 @@ class _Sim(L.LightningModule):
 
     @classmethod # construct a Sim object from a JHTDBDataModule
     def from_JHTDB_data_module(cls, data_module: JHTDBDataModule, use_manual_advection=False, **kwd_args):
-        """Build Sim from data module. nx,ny,nz,dt are taken from the module; all kwd_args are forwarded to the constructor."""
-        field_size = data_module.field_size
-        merged = {'nx': field_size[0], 'ny': field_size[1], 'nz': field_size[2], 'dt': 0.0065*data_module.time_stride, **kwd_args}
+        """Build Sim from data module. All kwd_args are forwarded to the constructor."""
+        merged = data_module.meta_data().simulator_kwd_args | kwd_args
         if use_manual_advection: merged['u_b'] = data_module.u_b
         return cls(**merged)
 

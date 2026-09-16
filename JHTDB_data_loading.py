@@ -42,6 +42,16 @@ class DatasetMetaData:
             warnings.warn(f'{eval_time_stride=} cannot resolve 0.2 FTT ({0.2 * self.n_steps_per_flow_through_native} unstrided steps)')
         return new
 
+    def __repr__(self):
+        items = [f'{k}={v}' for k, v in sorted(vars(self).items()) if not k.startswith('_')]
+        return f'{type(self).__name__}({", ".join(items)})'
+
+    @property
+    def simulator_kwd_args(self): # while its true this couples with the _Sim constructor, it's still a useful meta-data operation & simpler legacy option
+        ''' Physics kwargs for _Sim. Requires adapt_to_stride (nx, ny, nz). Solver flags stay with the caller.
+            construction example: `_Sim(**DatasetMetaData.simulator_kwd_args, **other_simulator_flags)`'''
+        return dict(nx=self.nx, ny=self.ny, nz=self.nz, Lx=self.Lx, Ly=self.Ly, Lz=self.Lz, dt=self.dt, nu=self.nu)
+
 # Verified to work: 8/23/24
 class JHTDB_Channel(torch.utils.data.Dataset):
     '''
