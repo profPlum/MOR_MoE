@@ -379,7 +379,9 @@ def E1d(u, meta_data, epsilon_multiplier=1.0, nk=30, strict_partition=True, plot
     kz = np.fft.rfftfreq(nz,d=Lz/nz) * 2 * np.pi # ^ But not sure if we need it or not...
     Kxz = np.stack(np.meshgrid(kx,kz,indexing='ij'),axis=-1) # Kxz.shape=(Nx,Nz,2)
     K_dist = np.sqrt(Kxz[...,0]**2 + Kxz[...,1]**2) # "distance" of k-points from origin in k-space of xz plane
-    k_radii = np.linspace(0,min(np.max(kx),np.max(kz)),nk) # k_radii.shape=(nk,), K_dist.shape=(Nx,Nz)
+    kmax = min(np.max(kx), np.max(kz)) # Inscribed circle (corner |k|>kmax have no full ring)
+    nk = min(nk, 1 + int(kmax / min(kx[1], kz[1]) + 1e-9)) # one ring per fine-axis step along kmax (∆kx=kx[1], ∆kz=kz[1])
+    k_radii = np.linspace(0, kmax, nk) # k_radii.shape=(nk,), K_dist.shape=(Nx,Nz)
     Eu = E(u) # Eu.shape=(Nx,Ny,Nz)
 
     if strict_partition:
@@ -463,6 +465,7 @@ def plot_1dDiagnostics(pred_samples, real_channel_flow, k_trim=2,
         k,EE = k[k_trim:],EE[k_trim:,y_index]
         # kolgomorov scaling line: y = -5/3*np.log(k) -> y = -3/5*np.log(k)
         # kolgomorov scaled MSE: MSE(1/np.log(k)*np.log(Es_y), 1/np.log(k)*np.log(EE))
+        assert np.all(EE > 0) and np.all(Es_y > 0), 'empty k-rings should have been dropped in E1d'
         metrics['mse_log_energy_spectrum'] = MSE(np.log(Es_y), np.log(EE))
         if should_plot:
             fig,ax = plt.subplots(1,4,figsize=(8,2),sharex='col',sharey='col')
