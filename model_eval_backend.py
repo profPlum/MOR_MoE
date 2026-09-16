@@ -147,7 +147,7 @@ class SimulationFlowThroughSequence:
             for sim_flow_thru_index in tqdm(sim_flow_thru_indices):
                 pred_samples = extra_valid_flow_thrus.get_samples(sim_flow_thru_index, use_MAP=use_MAP, sparse=True)
                 for real_flow_thru_index in real_flow_thru_indices:
-                    should_plot = i%(len(sim_flow_thru_indices)*len(real_flow_thru_indices)//10)==0
+                    should_plot = i % max(1, len(sim_flow_thru_indices)*len(real_flow_thru_indices)//10) == 0
                     metrics_i = plot_1dDiagnostics(pred_samples, # create temp variable to reference metric names for df columns outside
                         real_flow_seq[real_flow_thru_index], should_plot=should_plot, meta_data=self.meta_data, **kwd_args)
                     metrics.append(tuple(metrics_i.to_list())) # more efficient
@@ -320,9 +320,9 @@ def cross_correlation_comparison_cumulative(sim_flow_seq, real_channel_flow, flo
                                             n_xcor_steps=25, beta=0.15, should_plot=True):
     ''' n_xcor_steps = 25 should work with the time strides we've tested: 4, 8, and 16
         beta is the weight for the previous metrics vs the new metrics for EMA '''
-    plot_interval = n_xcor_steps//5
-
     assert sim_flow_seq[flow_thru_index].shape[-1] == real_channel_flow.shape[-1]
+    n_xcor_steps = min(n_xcor_steps, real_channel_flow.shape[-1])
+    plot_interval = max(1, n_xcor_steps//5)
     metrics_cum: pd.Series = None # bias-corrected EMA requires direct assignment for the first iteration
     end_steps = np.linspace(0, real_channel_flow.shape[-1], num=n_xcor_steps+1, dtype=int)[1:]
     for i, end_step in enumerate(end_steps):
