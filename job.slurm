@@ -9,7 +9,7 @@
 #SBATCH --time=1-00:00:00                    # Maximum runtime (HH:MM:SS) (48 hours for WNO-600-epochs)
 #SBATCH --partition=ghx4                     # Partition name
 #SBATCH --account=beoi-dtai-gh
-#SBATCH --job-name=MLE_TS=4_E=0.5_IUFNO_dataset
+#SBATCH --job-name=MLE_E=0.5_IUFNO_dataset
 
 # Not going to work anymore b/c we would need to save the entire checkpoint which causes OOM...
 # ##SBATCH --signal=SIGUSR1@90
@@ -119,7 +119,7 @@ source experiment_configs/everything.sh # NO-OP b/c everything is already the de
 
 # optional modifiers; first one is 'small' jobs that fit on one GPU (incompatible with WNO striding)
 #[[ "$STRIDE" != '[1.609,1.625,1.203]' ]] && { export BATCH_SIZE=$((BATCH_SIZE*4)) STRIDE=1.47 FAST_DATALOADERS=1; } # simulate 4 nodes, S=1.47 for 68 GB mem target & near 88% utilization
-export BATCH_SIZE=$((BATCH_SIZE*4)) FAST_DATALOADERS=1
+export BATCH_SIZE=$((BATCH_SIZE*4)) FAST_DATALOADERS=1 TIME_STRIDE=1 # IUFNO's version of above downsizing (time_stride=1 because there are only 19 steps per flow through!)
 #export HIDDEN_NORM_GROUPS=1
 #export OUT_NORM_GROUPS=1
 #export SEED=$RANDOM # random behavior (but consistent splitting)
