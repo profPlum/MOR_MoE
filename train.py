@@ -156,7 +156,7 @@ if __name__=='__main__':
     scale_of_batch_data = num_nodes*num_gpus_per_node*batch_size*(time_chunking-1) # (includes time)
     print(f'b4 scaling: {lr=}, {gradient_clip_val=}')
     if scale_lr_and_clip:
-        lr *= scale_of_batch_data
+        lr *= scale_of_batch_data**0.5
         gradient_clip_val /= scale_of_batch_data**0.5
     print(f'after scaling: {lr=}, {gradient_clip_val=}')
     print(f'{scale_of_batch_data=}')

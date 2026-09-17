@@ -40,16 +40,17 @@ srun bash -c 'echo host: $SLURMD_NODENAME, rank: $PMI_RANK, slurm_proc_id: $SLUR
 echo srun nvidia-smi:
 srun --ntasks-per-node=1 nvidia-smi
 
-## Old values:
+## Old values (Broken Scaling):
 #STANDARD_LR=3.125e-5 # theoretically suggested by Adam default lr=0.001/32 s.t. 32 is default batch size
 #VI_LR=1.25e-4 # this is 4x higher than theory suggests (it is only possible b/c grad clip)
 #MLE_LR=2.5e-4 # this is 8x higher than theory suggests (it is only possible b/c grad clip + determinism)
 
 # GRAD_CLIP=(2.5e-3*sqrt(8))*sqrt((9-1)*20)=2.5e-3*16*sqrt(5)=8.944e-2
-# VI_LR=1.25e-4*20/(8*20)=1.25e-4/8=1.563e-5
+# VI_LR_0=1.25e-4*20/(8*20)=1.25e-4/8=1.563e-5 (legacy with linear lr scaling)
+# VI_LR_1=VI_LR_0*sqrt(B_SCALE)=VI_LR_0*sqrt(8*(10-1))=0.00013262 (current with sqrt lr scaling)
 # these new values recover the old defaults with new scaling rules
-VI_LR=1.563e-5
-MLE_LR=3.125e-5
+VI_LR=1.3262e-4 # legacy linear LR scaling used: 1.563e-5
+MLE_LR=2.6517e-4 # legacy linear LR scaling used: 3.125e-5
 MLE_GRAD_CLIP=8.944e-2 # old/original value
 
 # (VI+TRIG) 1550 epochs takes 20 hours (with 4 GH200s, measured 4/2/25)
