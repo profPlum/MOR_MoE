@@ -217,17 +217,17 @@ if __name__=='__main__':
                                      'use_manual_advection': use_manual_advection, 'dealias_before_quadratic': dealias_before_quadratic,
                                      'apply_pde_filter_bottleneck': apply_pde_filter_bottleneck})
 
-    # Weight-only sharded checkpoints are needed to avoid OOM problem caused by large model size
-    model_checkpoint_callback=L.callbacks.ModelCheckpoint(f"lightning_logs/{job_name}/{version}", save_weights_only=True, save_last=False,
-                                                          monitor='val_loss/dataloader_idx_0', auto_insert_metric_name=True) # monitor long-horizon loss
-    #model_checkpoint_callback=L.callbacks.ModelCheckpoint(f"lightning_logs/{job_name}/{version}", every_n_epochs=100) # simpler resumable checkpointing
+    ## Weight-only sharded checkpoints are needed to avoid OOM problem caused by large model size
+    #model_checkpoint_callback=L.callbacks.ModelCheckpoint(f"lightning_logs/{job_name}/{version}", save_weights_only=True, save_last=False,
+    #                                                      monitor='val_loss/dataloader_idx_0', auto_insert_metric_name=True) # monitor val loss
+    ##model_checkpoint_callback=L.callbacks.ModelCheckpoint(f"lightning_logs/{job_name}/{version}", every_n_epochs=100) # simpler resumable checkpointing
 
     # train model
     strategy = L.strategies.FSDPStrategy(state_dict_type='sharded') if num_nodes*num_gpus_per_node > 1 else 'auto' # sharded reduces peak memory usage but still allows resuming in full!
     trainer = L.Trainer(max_epochs=max_epochs, gradient_clip_val=gradient_clip_val, gradient_clip_algorithm='value',
                         accelerator='gpu', strategy=strategy, num_nodes=num_nodes, devices=num_gpus_per_node,
                         profiler='simple', logger=logger, plugins=[SLURMEnvironment()], log_every_n_steps=20,
-                        callbacks=[model_checkpoint_callback, MemMonitorCallback()])
+                        callbacks=[MemMonitorCallback()], enable_checkpointing=False)
 
     # long validation loader causes various problems with profiler & GPU utilization...
     trainer.fit(model, datamodule=dm)#, ckpt_path=ckpt_path)
