@@ -63,19 +63,18 @@ class SimulationFlowThroughSequence:
 
     @property
     def n_steps_per_flow_thru(self):
-        n_steps = self.meta_data.n_steps_per_flow_through // SimulationFlowThroughSequence._flow_through_multiplier
+        n_steps = int(self.meta_data.n_steps_per_flow_through // SimulationFlowThroughSequence._flow_through_multiplier)
         assert n_steps >= 2, f'{n_steps=}, {self.meta_data.n_steps_per_flow_through=}, {SimulationFlowThroughSequence._flow_through_multiplier=}'
         return n_steps
 
     @staticmethod
     @contextlib.contextmanager
-    def flow_through_multiplier(multiplier: int):
-        old = SimulationFlowThroughSequence._flow_through_multiplier
+    def flow_through_multiplier(multiplier: int|float):
         try:
             SimulationFlowThroughSequence._flow_through_multiplier = multiplier
             yield
         finally: # cleanup
-            SimulationFlowThroughSequence._flow_through_multiplier = old
+            SimulationFlowThroughSequence._flow_through_multiplier = 1
 
     # Verified to work: 7/16/26
     def continuous_index_range(self, length=None, stride=2):
