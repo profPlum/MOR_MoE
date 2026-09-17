@@ -38,7 +38,7 @@ class MOR_Layer(L.LightningModule):
         if type(k_modes) is int:
                 k_modes = ndims*[k_modes]
         def make_g(in_channels, out_channels):
-            g_shape = [in_channels, out_channels]+k_modes[:ndims-1] + [k_modes[-1]//2+1, 2]
+            g_shape = [in_channels, out_channels]+list(k_modes[:ndims-1]) + [k_modes[-1]//2+1, 2]
             scale = (2.0/in_channels)**0.5 # similar to kaiming initializaiton
             param = torch.randn(*g_shape)*scale
             return nn.Parameter(param)
