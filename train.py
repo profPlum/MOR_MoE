@@ -24,6 +24,7 @@ make_optim=eval(f"torch.optim.{os.environ.get('OPTIM', 'Adam')}")
 ckpt_path=os.environ.get('CKPT_PATH', None)
 
 use_IUFNO_dataset=bool(int(os.environ.get('USE_IUFNO_DATASET', False))) # whether to use the IUFNO dataset
+use_IUFNO_Re590=bool(int(os.environ.get('USE_IUFNO_RE590', False))) # Re590 vs Re180 when USE_IUFNO_DATASET=1
 use_proportional_k_size=bool(int(os.environ.get('MAKE_K_SIZE_PROPORTIONAL', False))) # if K_MODES or CNN_FILTER_SIZE is given as a integer will create a list where each dimension is proportional to the field size
 use_PDE_solver=bool(int(os.environ.get('USE_PDE_SOLVER', True))) # whether to use the PDE solver
 use_manual_advection=bool(int(os.environ.get('USE_MANUAL_ADVECTION', False))) # whether to use the manual advection term
@@ -128,16 +129,17 @@ if __name__=='__main__':
                        time_stride=time_stride, fast_dataloaders=use_fast_dataloaders)
     if use_IUFNO_dataset:
         assert not use_PDE_solver, "PDE solver is not realistic for IUFNO dataset"
-        dm_kwd_args.update(dataset_path='IUFNO-CHL/data_chl_re180/data_mave.npy',
-                           dataset_type=IUFNO_Channel, long_horizon=100,
-                           train_proportion=20/21)
+        iufno_dataset_path = 'data/data30_re590_64_65_32_real.npy' if use_IUFNO_Re590 else 'data/data_chl_re180/data_mave.npy'
+        n_groups = 30 if use_IUFNO_Re590 else 21
+        dm_kwd_args.update(dataset_path=iufno_dataset_path, dataset_type=IUFNO_Channel, long_horizon=100,
+                           train_proportion=(n_groups-1)/n_groups)
     else:
         dm_kwd_args['dataset_path'] = 'data/turbulence_output'
     dm = JHTDBDataModule(**dm_kwd_args)
 
     # derive field size from data module
     md = dm.meta_data()
-    field_size = md.field_size
+    field_size = dm.field_size
     if k_modes is None: # default=max (potentially adjusted for stride)
         k_modes=field_size # e.g. [103,26,77]
         assert len(k_modes)==3
@@ -221,7 +223,7 @@ if __name__=='__main__':
     logger = WandbLogger(project="MOR_MoE", name=job_name, version=version)
     logger.experiment.config.update({'grad_clip': gradient_clip_val, 'use_VI': use_VI, 'VI_counts_timestride_gap_data': VI_counts_timestride_gap_data,
                                      'use_manual_advection': use_manual_advection, 'dealias_before_quadratic': dealias_before_quadratic,
-                                     'apply_pde_filter_bottleneck': apply_pde_filter_bottleneck, 'use_IUFNO_dataset': use_IUFNO_dataset})
+                                     'apply_pde_filter_bottleneck': apply_pde_filter_bottleneck, 'use_IUFNO_Re590': use_IUFNO_Re590})
 
     ## Weight-only sharded checkpoints are needed to avoid OOM problem caused by large model size
     #model_checkpoint_callback=L.callbacks.ModelCheckpoint(f"lightning_logs/{job_name}/{version}", save_weights_only=True, save_last=False,

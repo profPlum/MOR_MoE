@@ -79,7 +79,8 @@ export VI=0 # use VI or not (in bash binary booleans have the best support for b
 export VI_PRIOR_SIGMA=0.2 # approximately reflects the values of sigma at initialization
 export VI_COUNTS_TIMESTRIDE_GAP_DATA=1 # whether to count the gap data between timestrides in the dataset size for VI
 export VI_PROPAGATE_UQ=1 # whether to propagate uncertainty through the LES model across timesteps (as additional input channels)
-export USE_IUFNO_DATASET=1 # 1 = IUFNO Re=180 npy (20/21 group split) instead of JHTDB
+export USE_IUFNO_DATASET=1 # 1 = IUFNO npy instead of JHTDB
+export USE_IUFNO_RE590=0 # 1 = /data2/data30_re590_64_65_32_real.npy (29/30 groups), 0 = Re180 data_mave (20/21)
 export TIME_STRIDE=4 # must be integer-valued
 export STRIDE=1 # e.g. 1.5 or a crazy list [1.5,1.3,1.8] for smaller experiments
 export TIME_CHUNKING=10 # 10 is default now b/c we can fit it in GH200s
@@ -117,9 +118,13 @@ source experiment_configs/everything.sh # NO-OP b/c everything is already the de
 #source experiment_configs/WNO.sh # runs for *800* epochs on 64x16x64
 #source experiment_configs/WNO+LN.sh # runs for *800* epochs on 64x16x64
 
-# optional modifiers; first one is 'small' jobs that fit on one GPU (incompatible with WNO striding)
-#[[ "$STRIDE" != '[1.609,1.625,1.203]' ]] && { export BATCH_SIZE=$((BATCH_SIZE*4)) STRIDE=1.47 FAST_DATALOADERS=1; } # simulate 4 nodes, S=1.47 for 68 GB mem target & near 88% utilization
-export BATCH_SIZE=$((BATCH_SIZE*4)) FAST_DATALOADERS=1 TIME_STRIDE=1 # IUFNO's version of above downsizing (time_stride=1 because there are only 19 steps per flow through!)
+# optional modifiers; first one is 'small' jobs that fit on one GPU
+if ((USE_IUFNO_DATASET)); then
+    BATCH_SIZE=$((BATCH_SIZE*4)) FAST_DATALOADERS=1 TIME_STRIDE=1 # IUFNO's version of JHTDB downsizing (time_stride=1 because there are only 19 steps per flow through!)
+    ((!USE_IUFNO_RE590)) && BATCH_SIZE=$((BATCH_SIZE*4)) # for Re 180 the resolution is very small and we need a very large batch size to utilize the full GPU
+else # (incompatible with WNO striding)
+    ((!USE_WNO3D_EXPERTS)) && { BATCH_SIZE=$((BATCH_SIZE*4)) STRIDE=1.47 FAST_DATALOADERS=1; } # simulate 4 nodes, S=1.47 for 68 GB mem target & near 88% utilization
+fi
 #export HIDDEN_NORM_GROUPS=1
 #export OUT_NORM_GROUPS=1
 #export SEED=$RANDOM # random behavior (but consistent splitting)
