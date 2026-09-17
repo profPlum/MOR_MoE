@@ -58,7 +58,7 @@ class JHTDB_Channel(torch.utils.data.Dataset):
     Dataset for the JHTDB autoregressive problem... It is not possible to make
     this predict everything at once because that would make the dataset size=1.
     '''
-    _metadata = DatasetMetaData(Lx=8*np.pi, Ly=2.0, Lz=3*np.pi, nu=5e-5, dt=0.0065, n_steps_per_flow_through_native=4000)
+    _default_meta_data = DatasetMetaData(Lx=8*np.pi, Ly=2.0, Lz=3*np.pi, nu=5e-5, dt=0.0065, n_steps_per_flow_through_native=4000)
 
     def __init__(self, path:str, time_chunking=5, stride:int|list|tuple=1, time_stride:int=1):
         self.path=path
@@ -74,7 +74,7 @@ class JHTDB_Channel(torch.utils.data.Dataset):
         self._split_start_proportion = 0
         self._split_end_proportion = 1.0 # exclusive 1.0=length of dataset
 
-        self.dataset_meta_data = type(self)._metadata.adapt_to_stride(self)
+        self.dataset_meta_data = self._default_meta_data.adapt_to_stride(self)
 
     @property
     def time_stride(self): return self._time_stride
@@ -151,7 +151,12 @@ class JHTDB_Channel(torch.utils.data.Dataset):
 # NOTE: not possible to directly reuse JHTDB_Channel because group boundaries are discontinuous
 class IUFNO_Channel(JHTDB_Channel):
     '''IUFNO channel flow. Returns (IC, future frames) like JHTDB_Channel.'''
-    _metadata = DatasetMetaData(Lx=4*np.pi, Ly=2.0, Lz=4*np.pi/3, nu=1/4200, dt=1.0, n_steps_per_flow_through_native=19)
+
+    @property
+    def _default_meta_data(self) -> DatasetMetaData:
+        if not ('re180' in self.path or 're590' in self.path): raise ValueError(f'{self.path=} is not a registered IUFNO dataset')
+        nu = 1/4200 if 're180' in self.path else 1/16800 # apparently this and resolution are the differences
+        return DatasetMetaData(Lx=4*np.pi, Ly=2.0, Lz=4*np.pi/3, nu=nu, dt=1.0, n_steps_per_flow_through_native=19)
 
     def __init__(self, path:str, time_chunking=5, stride:int|list|tuple=1, time_stride:int=1):
         self._data = np.load(path, mmap_mode='r')[..., :3]  # [G,T,X,Y,Z,C=uvw]
