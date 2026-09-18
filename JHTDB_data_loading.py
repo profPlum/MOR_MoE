@@ -157,6 +157,7 @@ class IUFNO_Channel(JHTDB_Channel):
         if not ('re180' in self.path or 're590' in self.path): raise ValueError(f'{self.path=} is not a registered IUFNO dataset')
         nu = 1/4200 if 're180' in self.path else 1/16800 # apparently this and resolution are the differences
         return DatasetMetaData(Lx=4*np.pi, Ly=2.0, Lz=4*np.pi/3, nu=nu, dt=1.0, n_steps_per_flow_through_native=19)
+        # NOTE: Technically 400/21.25=18.82352941 steps per flow through, and 21.25 flow throughs per (400 step) group (we rounded)
 
     def __init__(self, path:str, time_chunking=5, stride:int|list|tuple=1, time_stride:int=1):
         self._data = np.load(path, mmap_mode='r')[..., :3]  # [G,T,X,Y,Z,C=uvw]

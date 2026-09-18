@@ -10,5 +10,6 @@ lightning_logs
 notebook_runs
 archive
 data/turbulence_output
+data/data_chl_re180
 wandb
 logs
