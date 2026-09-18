@@ -121,9 +121,9 @@ source experiment_configs/everything.sh # NO-OP b/c everything is already the de
 # optional modifiers; first one is 'small' jobs that fit on one GPU
 if ((USE_IUFNO_DATASET)); then
     BATCH_SIZE=$((BATCH_SIZE*4)) FAST_DATALOADERS=1 TIME_STRIDE=1 # IUFNO's version of JHTDB downsizing (time_stride=1 because there are only 19 steps per flow through!)
-    ((!USE_IUFNO_RE590)) && BATCH_SIZE=$((BATCH_SIZE*4)) # for Re 180 the resolution is very small and we need a very large batch size to utilize the full GPU
+    ((!USE_IUFNO_RE590)) && BATCH_SIZE=$((BATCH_SIZE*8)) # for Re 180 the resolution is very small and we need a very large batch size to utilize the full GPU
 else # (incompatible with WNO striding)
-    ((!USE_WNO3D_EXPERTS)) && { BATCH_SIZE=$((BATCH_SIZE*4)) STRIDE=1.47 FAST_DATALOADERS=1; } # simulate 4 nodes, S=1.47 for 68 GB mem target & near 88% utilization
+    ((!USE_WNO3D_EXPERTS)) && { BATCH_SIZE=$((BATCH_SIZE*8)) STRIDE=1.47 FAST_DATALOADERS=1; } # simulate 8 nodes (trust scaling), S=1.47 (past) 68 GB mem target & now near 98% utilization
 fi
 #export HIDDEN_NORM_GROUPS=1
 #export OUT_NORM_GROUPS=1
