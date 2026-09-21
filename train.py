@@ -106,7 +106,8 @@ class MemMonitorCallback(L.Callback):
         print(f'SLURM_LOCALID={os.environ["SLURM_LOCALID"]}, GPU_Id={torch.cuda.current_device()}', flush=True)
 
 # for ablation study
-L.seed_everything(int(os.environ.get('SEED', 0)))
+seed = int(os.environ.get('SEED', 0))
+L.seed_everything(seed)
 
 def proportional_allocation(scalar_allocation, proportional_to_size, int_cast=True, cap_at_prop_size=False):
     """
@@ -223,7 +224,7 @@ if __name__=='__main__':
     logger = WandbLogger(project="MOR_MoE", name=job_name, version=version)
     logger.experiment.config.update({'grad_clip': gradient_clip_val, 'use_VI': use_VI, 'VI_counts_timestride_gap_data': VI_counts_timestride_gap_data,
                                      'use_manual_advection': use_manual_advection, 'dealias_before_quadratic': dealias_before_quadratic,
-                                     'apply_pde_filter_bottleneck': apply_pde_filter_bottleneck, 'use_IUFNO_Re590': use_IUFNO_Re590})
+                                     'apply_pde_filter_bottleneck': apply_pde_filter_bottleneck, 'use_IUFNO_Re590': use_IUFNO_Re590, 'seed': seed})
 
     ## Weight-only sharded checkpoints are needed to avoid OOM problem caused by large model size
     #model_checkpoint_callback=L.callbacks.ModelCheckpoint(f"lightning_logs/{job_name}/{version}", save_weights_only=True, save_last=False,
