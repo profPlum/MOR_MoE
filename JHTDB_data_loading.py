@@ -60,9 +60,10 @@ class JHTDB_Channel(torch.utils.data.Dataset):
     '''
     _default_meta_data = DatasetMetaData(Lx=8*np.pi, Ly=2.0, Lz=3*np.pi, nu=5e-5, dt=0.0065, n_steps_per_flow_through_native=4000)
 
-    def __init__(self, path:str, time_chunking=5, stride:int|list|tuple=1, time_stride:int=1):
+    def __init__(self, path:str, time_chunking=5, n_inputs=1, stride:int|list|tuple=1, time_stride:int=1):
         self.path=path
         self.time_chunking=time_chunking
+        self.n_inputs=n_inputs
         self._time_stride=time_stride # ready-only
         assert type(time_stride) is int
         if type(stride) in [int,float]: stride=[stride]*3
@@ -112,6 +113,19 @@ class JHTDB_Channel(torch.utils.data.Dataset):
         base_blocks = num_files // (self.time_chunking * self.time_stride)  # full blocks only
         return base_blocks * self.time_stride  # one sample per offset per block
 
+    # provide timechunk processing as private method for reuse in child classes
+    def _parse_raw_timechunk(self, velocity_fields: np.ndarray|torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        ''' returns (IC, sol), handles pooling and reshaping (given self.n_inputs) '''
+        # time dimension is (temporarily) treated as batch dimension
+        velocity_fields = self._pool(torch.as_tensor(velocity_fields).moveaxis(-1,0)).moveaxis(0,-1)
+        velocity_fields = velocity_fields.float() # make sure to use single precision! (after pooling) because double is too expensive!!
+
+        # IC_0.shape=[C,X,Y,Z] e.g. torch.Size([3, 103, 26, 77])
+        # Sol_0.shape=[C,X,Y,Z,T] e.g. torch.Size([3, 103, 26, 77, 9])
+        IC = velocity_fields[...,:self.n_inputs].moveaxis(-1,0)
+        IC = IC.reshape(-1, *IC.shape[2:])# verified same as: IC = torch.cat([IC_i for IC_i in IC], dim=0) (without copy)
+        return IC, velocity_fields[...,self.n_inputs:] # X=IC, Y=sol
+
     # Time stride verified to work: 11/18/25
     def __getitem__(self, index):
         if index < 0 or index >= len(self):
@@ -132,13 +146,8 @@ class JHTDB_Channel(torch.utils.data.Dataset):
                     raise OSError(f'Unable to open file: "{self.path}/channel_t={i}.h5"')
                 else: raise
             velocity_fields.append(files[-1][f'Velocity_{i:04}']) # :04 zero pads to 4 digits
-        velocity_fields = torch.as_tensor(np.stack(velocity_fields).T) # reverse dimensions order [T,Z,Y,X,C] --> [C,X,Y,Z,T]
-        velocity_fields = self._pool(velocity_fields.moveaxis(-1,0)).moveaxis(0,-1) # time dimension is (temporarily) treated as batch dimension
-        velocity_fields = velocity_fields.float() # make sure to use single precision! (after pooling) because double is too expensive!!
-
-        # IC_0.shape=[C,X,Y,Z] e.g. torch.Size([3, 103, 26, 77])
-        # Sol_0.shape=[C,X,Y,Z,T] e.g. torch.Size([3, 103, 26, 77, 9])
-        return velocity_fields[...,0], velocity_fields[...,1:] # X=IC, Y=sol
+        velocity_fields = np.stack(velocity_fields).T # reverse dimensions order [T,Z,Y,X,C] --> [C,X,Y,Z,T]
+        return self._parse_raw_timechunk(velocity_fields)
 
 ## vor=vorticity
 ## Dwyer: 21x400x32x33x16x4 (groups, time, x, y, z, channels)
@@ -159,7 +168,7 @@ class IUFNO_Channel(JHTDB_Channel):
         return DatasetMetaData(Lx=4*np.pi, Ly=2.0, Lz=4*np.pi/3, nu=nu, dt=1.0, n_steps_per_flow_through_native=19)
         # NOTE: Technically 400/21.25=18.82352941 steps per flow through, and 21.25 flow throughs per (400 step) group (we rounded)
 
-    def __init__(self, path:str, time_chunking=5, stride:int|list|tuple=1, time_stride:int=1):
+    def __init__(self, path:str, *args, **kwargs):
         self._data = np.load(path, mmap_mode='r')[..., :3]  # [G,T,X,Y,Z,C=uvw]
 
         try: # Y-profile mean for adding back to fluctuations
@@ -168,7 +177,7 @@ class IUFNO_Channel(JHTDB_Channel):
         except FileNotFoundError:
             self.mean_field = 0
 
-        super().__init__(path, time_chunking, stride, time_stride)
+        super().__init__(path, *args, **kwargs)
 
     @property
     def n_groups(self) -> int:
@@ -200,10 +209,9 @@ class IUFNO_Channel(JHTDB_Channel):
         t0 = block * self.time_chunking * self.time_stride + offset
         t1 = t0 + self.time_chunking * self.time_stride # consistent with JHTDB_Channel: `(index+1)*self.time_chunking*self.time_stride` ends at next block boundary
         chunk = np.array(self._data[group_index, t0:t1:self.time_stride])  # [T,X,Y,Z,C], copy off mmap
-        fields = torch.as_tensor(chunk).permute(4, 1, 2, 3, 0)  # [C,X,Y,Z,T]
+        fields = torch.as_tensor(chunk).permute(4, 1, 2, 3, 0) # [C,X,Y,Z,T]
         fields = fields + self.mean_field # add y-profile mean back (broadcast over X,Z,T)
-        fields = self._pool(fields.moveaxis(-1, 0)).moveaxis(0, -1).float()
-        return fields[..., 0], fields[..., 1:]
+        return self._parse_raw_timechunk(fields)
 
 # preserves random state (verified to work: 9/24/25)
 def preload_dataset(dataset):
