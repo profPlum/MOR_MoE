@@ -61,10 +61,11 @@ class JHTDB_Channel(torch.utils.data.Dataset):
     _default_meta_data = DatasetMetaData(Lx=8*np.pi, Ly=2.0, Lz=3*np.pi, nu=5e-5, dt=0.0065, n_steps_per_flow_through_native=4000)
 
     def __init__(self, path:str, time_chunking=5, n_inputs=1, stride:int|list|tuple=1, time_stride:int=1):
+        assert n_inputs >= 1, 'n_inputs must be at least 1'
         self.path=path
         self.time_chunking=time_chunking
         self.n_inputs=n_inputs
-        self._time_stride=time_stride # ready-only
+        self._time_stride=time_stride # read-only
         assert type(time_stride) is int
         if type(stride) in [int,float]: stride=[stride]*3
         else: assert len(stride)==3 # we will not pool time because it breaks PDE timestep & stability and pytorch cannot do it easily
@@ -169,6 +170,7 @@ class IUFNO_Channel(JHTDB_Channel):
         # NOTE: Technically 400/21.25=18.82352941 steps per flow through, and 21.25 flow throughs per (400 step) group (we rounded)
 
     def __init__(self, path:str, *args, **kwargs):
+        ''' *args, **kwargs are passed to JHTDB_Channel.__init__ '''
         self._data = np.load(path, mmap_mode='r')[..., :3]  # [G,T,X,Y,Z,C=uvw]
 
         try: # Y-profile mean for adding back to fluctuations
@@ -231,13 +233,16 @@ class JHTDBDataModule(L.LightningDataModule):
     def __init__(self, dataset_path: str, batch_size: int, time_chunking: int, time_stride: int=1,
                  stride: int|list|tuple=1, long_horizon: int=400, train_proportion: float=0.8,
                  dataset_type: type[JHTDB_Channel|IUFNO_Channel] = JHTDB_Channel,
-                 preload_datasets: bool=True, fast_dataloaders: bool=False):
+                 preload_datasets: bool=True, fast_dataloaders: bool=False, n_inputs: int=1):
         assert 0 < train_proportion < 1, 'train_proportion must be between 0 and 1'
+        assert n_inputs >= 1, 'n_inputs must be at least 1'
         super().__init__()
         self.save_hyperparameters()
 
         # fence post counting: -1 for the last time step, +1 for the first time step
         long_horizon = max(2, (long_horizon-1) // time_stride + 1) # must be at least 2 to have input and output
+        assert time_chunking > n_inputs, f'{time_chunking=} must exceed {n_inputs=} so the target is non-empty'
+        assert long_horizon > n_inputs, f'{long_horizon=} must exceed {n_inputs=} so the target is non-empty'
         vars(self).update(locals()); del self.self # save configuration args settings
         self.setup('peek') # trivial setup to expose basic dataset info
 
@@ -251,8 +256,8 @@ class JHTDBDataModule(L.LightningDataModule):
         since it doesn't cost anything '''
 
         # Build datasets mirroring the main() logic
-        self.dataset = self.dataset_type(self.dataset_path, time_chunking=self.time_chunking, stride=self.stride, time_stride=self.time_stride)
-        dataset_long_horizon = self.dataset_type(self.dataset_path, time_chunking=self.long_horizon, stride=self.stride, time_stride=self.time_stride)
+        self.dataset = self.dataset_type(self.dataset_path, time_chunking=self.time_chunking, n_inputs=self.n_inputs, stride=self.stride, time_stride=self.time_stride)
+        dataset_long_horizon = self.dataset_type(self.dataset_path, time_chunking=self.long_horizon, n_inputs=self.n_inputs, stride=self.stride, time_stride=self.time_stride)
         if len(self.dataset)<self.batch_size: raise ValueError(f'Dataset files missing! {self.dataset_path=}')
 
         # this splitting is necessary because we need to split on the file level, not the coarse time chunk level
