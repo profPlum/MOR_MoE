@@ -39,9 +39,10 @@ class _Sim(L.LightningModule):
     (the code needs channel dim last but pytorch needs it right after batch dim),
     in a way that is *compatible with vmap* for batching!!
     '''
+    n_state_channels = 3 # u, v, w
     def __init__(self,nx=103,ny=26,nz=77,Lx=8*np.pi,Ly=2.0,Lz=3*np.pi,nu=5e-5,dt=0.0065,
                  u_b: torch.Tensor=0, use_PDE_solver=True, anisotropic_filter: bool=False, disable_filter: bool=False,
-                 dealias_before_quadratic: bool=False, apply_pde_filter_bottleneck: bool=True):
+                 dealias_before_quadratic: bool=False, apply_pde_filter_bottleneck: bool=True, n_inputs: int=1):
         ''' Defaults are set to the values needed for JHTDB channel flow.
             Also note that nu:=viscosity, Lx,Ly,Lz:=domain dimensions (physical),
             and nx,ny,nz:=grid dimensions (virtual)
@@ -52,7 +53,9 @@ class _Sim(L.LightningModule):
             disable_filter:= if True, do not apply any spectral truncation (filt and filt2 are all-ones).
             dealias_before_quadratic:= if True, apply filt before forming the quadratic term u*u (reduces aliasing).
             apply_pde_filter_bottleneck:= if True, apply filt to every PDE step (legacy low-pass bottleneck).'''
+        assert n_inputs >= 1, 'n_inputs must be at least 1'
         super().__init__()
+        self.n_inputs = n_inputs
         self.nx = nx
         self.ny = ny
         self.nz = nz
@@ -142,17 +145,43 @@ class _Sim(L.LightningModule):
         return cls(**merged)
 
     def genIC(self, from_LES=False):
-        h = torch.tensor(np.random.normal(0,1,(self.nx,self.ny,self.nz,3))).float().to(self.device)
+        C = self.n_state_channels
+        h = torch.tensor(np.random.normal(0,1,(self.nx,self.ny,self.nz,C))).float().to(self.device)
         hh = _rfft(h) * self.filt2[...,None]
         proj = self.k*(torch.sum(self.k*hh,axis=-1)/self.knorm2)[...,None]
         proj[0]=0
         u0 = _irfft(hh - proj, s=self.shapef)
-        u0 = u0.permute(-1,0,1,2) # (i.e. torch.moveaxis(u0,-1,0))
+        u0 = u0.permute(-1,0,1,2) # [C, X, Y, Z] (i.e. torch.moveaxis(u0,-1,0))
+        if self.n_inputs > 1:
+            u0 = u0.repeat(self.n_inputs, 1, 1, 1) # [u,v,w] copied across the input window
         if from_LES:
             assert self.op is not IdentityOp, 'Cannot use LES IC with IdentityOp'
             with torch.inference_mode():
-                u0 = self.evolve(u0,n=20) # make it more realistic (assuming forcing function)
+                # 20 keeps the previous realism burn-in; n_inputs replaces every copied frame
+                traj = self.evolve(u0, n=max(20, self.n_inputs), intermediate_outputs=True)
+            if isinstance(traj, tuple): traj = traj[0] # drop UQ trajectory, TODO: find better way to handle this
+            frames = traj[..., -self.n_inputs:].moveaxis(-1, 0) # [n_inputs, C, X, Y, Z]
+            u0 = frames.reshape(-1, *frames.shape[2:])
         return u0
+
+    def _as_history(self, u):
+        ''' u is [B, C, X, Y, Z]. A single frame is repeated to fill the input window. '''
+        C = self.n_state_channels
+        if u.shape[1] == C and self.n_inputs > 1:
+            return u.repeat(1, self.n_inputs, 1, 1, 1)
+        assert u.shape[1] == self.n_inputs * C, f'expected {self.n_inputs * C} channels, got {u.shape[1]}'
+        return u
+
+    def _model_input(self, history):
+        ''' PDE-update only the newest frame, then stack it behind the older frames. '''
+        C = self.n_state_channels
+        latest = self.vmap_NSupd(history[:, -C:])
+        if self.n_inputs == 1: return latest
+        return torch.cat([history[:, :-C], latest], dim=1) # keep older frames, replace the newest
+
+    def _advance_history(self, history, new_state):
+        if self.n_inputs == 1: return new_state
+        return torch.cat([history[:, self.n_state_channels:], new_state], dim=1)
 
     # NOTE: u.shape==[channel, x, y, z]
     def _NSupd(self,u): # Navier-stokes update
@@ -194,17 +223,17 @@ class _Sim(L.LightningModule):
 
     # This needs to output intermediate time-steps to get full loss!
     def evolve(self,u0,n,intermediate_outputs=False, intermediate_output_stride=1, to_cpu=False):
-        u = u0
+        added_batch = len(u0.shape)==4 # [C,X,Y,Z] -> [1,C,X,Y,Z]; vmap expects a batch dim
+        history = self._as_history(u0[None] if added_batch else u0)
         outputs = []
-        if len(u.shape)==4: # all permute ops above assume 4 dims (before vmap)
-            u = u[None] # add batch dim
+        new_state = history[:, -self.n_state_channels:]
         for i in range(n):
-            u = self.op.forward(self.vmap_NSupd(u)) # NOTE: this is the only place where the operator is used
-            if i%100==0 and u.isnan().any():
+            new_state = self.op.forward(self._model_input(history))
+            history = self._advance_history(history, new_state)
+            if i%100==0 and new_state.isnan().any():
                 warnings.warn(f'Simulation has diverged into NaNs! At step: {i}')
-            #assert not u.isnan().any()
             if intermediate_outputs and i%intermediate_output_stride==0:
-                outputs.append(u.to('cpu', non_blocking=True) if to_cpu else u)
+                outputs.append(new_state.to('cpu', non_blocking=True) if to_cpu else new_state)
 
         if intermediate_outputs and to_cpu:
             torch.cuda.synchronize() # async sync
@@ -212,55 +241,37 @@ class _Sim(L.LightningModule):
         # (tl;dr: stack(axis=-1)) to_cpu is used for evaluation which has the pattern of indexing individual timesteps and this helps OS paging
         fancy_stack = lambda outputs: torch.stack(outputs,axis=0).moveaxis(0,-1) if to_cpu else torch.stack(outputs,axis=-1)
 
-        # time dim is the last dim (if it exists)
-        outputs = fancy_stack(outputs) if intermediate_outputs else u
-        return outputs.squeeze() if len(u.shape)>len(u0.shape) else outputs
-        # remove artificial batch dimension only if it was added
+        # time dim is the last dim (if it exists). Record the 3-channel state, not the stacked window.
+        outputs = fancy_stack(outputs) if intermediate_outputs else new_state
+        return outputs.squeeze() if added_batch else outputs
 
-# For use with PPOU_net
+# For use with PPOU_net. Uncertainty is predicted each step and is not fed back in.
 class _UQ_Sim(_Sim):
-    def __init__(self, *args, propagate_uq: bool=True, **kwd_args):
-        super().__init__(*args, **kwd_args)
-        self.propagate_uq = propagate_uq
-
-    def genIC(self, from_LES=False):
-        u0 = super(_UQ_Sim,self).genIC(from_LES=from_LES)
-        if from_LES: u0 = u0[0] # remove unnecessary uq tensor
-        return u0
-
-    # This needs to output intermediate time-steps to get full loss!
     def evolve(self,u0,n,intermediate_outputs=False, intermediate_output_stride=1, to_cpu=False):
-        u = u0
-        u_outputs = []
-        uq_outputs = []
-        if len(u.shape)==4: # all permute ops above assume 4 dims (before vmap)
-            u = u[None] # add batch dim
-
-        #uq = None
-        uq = zero_uq = torch.zeros(1,device=u.device, dtype=u.dtype).expand(*u.shape)
+        added_batch = len(u0.shape)==4
+        history = self._as_history(u0[None] if added_batch else u0)
+        u_outputs, uq_outputs = [], []
+        new_state = history[:, -self.n_state_channels:]
+        new_uq = torch.zeros_like(new_state)
         for i in range(n):
-            if not self.propagate_uq: uq = zero_uq
-            u, uq = self.op.forward(self.vmap_NSupd(u), uq)
-            if i%100==0 and (u.isnan().any() or uq.isnan().any()):
+            # omit the uncertainty input; PPOU_net.forward fills it with zeros matching the velocity window
+            new_state, new_uq = self.op.forward(self._model_input(history))
+            history = self._advance_history(history, new_state)
+            if i%100==0 and (new_state.isnan().any() or new_uq.isnan().any()):
                 warnings.warn(f'Simulation has diverged into NaNs! At step: {i}')
-            #assert not (u.isnan().any() or uq.isnan().any())
             if intermediate_outputs and i%intermediate_output_stride==0:
-                u_outputs.append(u.to('cpu', non_blocking=True) if to_cpu else u)
-                uq_outputs.append(uq.to('cpu', non_blocking=True) if to_cpu else uq)
+                u_outputs.append(new_state.to('cpu', non_blocking=True) if to_cpu else new_state)
+                uq_outputs.append(new_uq.to('cpu', non_blocking=True) if to_cpu else new_uq)
 
-        # remove artificial batch dimension only if it was added
-        maybe_squeeze = lambda output: output.squeeze() if len(u.shape)>len(u0.shape) else output
+        maybe_squeeze = lambda output: output.squeeze() if added_batch else output
         fancy_stack = lambda outputs: torch.stack(outputs,axis=0).moveaxis(0,-1) if to_cpu else torch.stack(outputs,axis=-1)
-        # (tl;dr: stack(axis=-1)) to_cpu is used for evaluation which has the pattern of indexing individual timesteps and this helps OS paging
 
         if intermediate_outputs and to_cpu:
             torch.cuda.synchronize() # async sync
 
-        if intermediate_outputs: # time dim is the last dim (if it exists)
-            u_outputs = maybe_squeeze(fancy_stack(u_outputs))
-            uq_outputs = maybe_squeeze(fancy_stack(uq_outputs))
-            return u_outputs, uq_outputs
-        else: return maybe_squeeze(u), maybe_squeeze(uq)
+        if intermediate_outputs:
+            return maybe_squeeze(fancy_stack(u_outputs)), maybe_squeeze(fancy_stack(uq_outputs))
+        return maybe_squeeze(new_state), maybe_squeeze(new_uq)
 
 class POU_NetSimulator(POU_net):
     ''' Combines the POU_net with the raw Sim[ulator] class (internally). '''

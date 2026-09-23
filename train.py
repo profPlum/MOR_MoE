@@ -13,6 +13,7 @@ n_layers: int=int(os.environ.get('N_LAYERS', 4)) # number of layers in the POU n
 n_filters: int=int(os.environ.get('N_FILTERS', 32)) # hidden layer width (aka # of filters)
 dropout: float=float(os.environ.get('DROPOUT', 0.0))
 time_chunking: int=int(os.environ.get('TIME_CHUNKING', 9)) # how many self-aware recursive steps to take
+n_inputs: int=int(os.environ.get('N_INPUTS', 1)) # timesteps stacked as the model input
 time_stride: int=int(os.environ.get('TIME_STRIDE', 1)) # temporal stride between selected frames
 batch_size: int=int(os.environ.get('BATCH_SIZE', 2)) # batch size, with VI experts we can only fit 1 batch w/ 20 A100
 scale_lr_and_clip=True # multiply by DDP (total) batch_size
@@ -54,7 +55,6 @@ hidden_norm_groups = int(os.environ.get('HIDDEN_NORM_GROUPS', 1))
 use_VI = bool(int(os.environ.get('VI', True))) # whether to enable VI
 VI_counts_timestride_gap_data = bool(int(os.environ.get('VI_COUNTS_TIMESTRIDE_GAP_DATA', True))) # whether to count the gap data between timestrides in the dataset size for VI
 VI_prior_sigma=float(os.environ.get('VI_PRIOR_SIGMA', 0.2)) # this prior sigma almost matches he sigma of initialization
-VI_propagate_UQ = bool(int(os.environ.get('VI_PROPAGATE_UQ', True))) # whether to propagate uncertainty through recursive steps (can be off for control experiments)
 
 # NOTE: cosine+warmrestarts is the default scheduler (with T_max=1)
 one_cycle=bool(int(os.environ.get('ONE_CYCLE', True))) # scheduler
@@ -126,7 +126,7 @@ def proportional_allocation(scalar_allocation, proportional_to_size, int_cast=Tr
 
 if __name__=='__main__':
     # setup data module
-    dm_kwd_args = dict(batch_size=batch_size, time_chunking=time_chunking, stride=stride,
+    dm_kwd_args = dict(batch_size=batch_size, time_chunking=time_chunking, n_inputs=n_inputs, stride=stride,
                        time_stride=time_stride, fast_dataloaders=use_fast_dataloaders)
     if use_IUFNO_dataset:
         assert not use_PDE_solver, "PDE solver is not realistic for IUFNO dataset"
@@ -162,7 +162,7 @@ if __name__=='__main__':
         optional_kwd_args = {'prior_cfg': {'prior_sigma': VI_prior_sigma}, 'train_dataset_size': dataset_size}
 
     # scale lr & grad clip by: the number of *output* timesteps in one full batch (this follows scaling equations)
-    scale_of_batch_data = num_nodes*num_gpus_per_node*batch_size*(time_chunking-1) # (includes time)
+    scale_of_batch_data = num_nodes*num_gpus_per_node*batch_size*(time_chunking-n_inputs) # output timesteps only
     print(f'b4 scaling: {lr=}, {gradient_clip_val=}')
     if scale_lr_and_clip:
         lr *= scale_of_batch_data**0.5
@@ -198,12 +198,11 @@ if __name__=='__main__':
     simulator_kwd_args = md.simulator_kwd_args | dict(
         use_PDE_solver=use_PDE_solver, anisotropic_filter=anisotropic_filter,
         disable_filter=disable_filter, dealias_before_quadratic=dealias_before_quadratic,
-        apply_pde_filter_bottleneck=apply_pde_filter_bottleneck)
+        apply_pde_filter_bottleneck=apply_pde_filter_bottleneck, n_inputs=n_inputs)
     if use_manual_advection: simulator_kwd_args['u_b'] = dm.u_b
-    if use_VI: simulator_kwd_args['propagate_uq'] = VI_propagate_UQ
 
     make_gating_net = EqualizedFieldGatingNet if use_normalized_MoE else FieldGatingNet
-    model = SimModelClass(n_inputs=ndims, n_outputs=ndims, ndims=ndims, n_experts=n_experts, n_layers=n_layers, hidden_channels=n_filters, n_steps=time_chunking-1,
+    model = SimModelClass(n_inputs=n_inputs*ndims, n_outputs=ndims, ndims=ndims, n_experts=n_experts, n_layers=n_layers, hidden_channels=n_filters, n_steps=time_chunking-n_inputs,
                           weight_decay=weight_decay, lr=lr, one_cycle=one_cycle, three_phase=three_phase, RLoP=RLoP, RLoP_factor=RLoP_factor, RLoP_patience=RLoP_patience,
                           trig_encodings=use_trig, grid_inputs=use_grid_inputs, hidden_norm_groups=hidden_norm_groups, out_norm_groups=out_norm_groups,
                           make_optim=make_optim, make_gating_net=make_gating_net, simulator_kwd_args=simulator_kwd_args, **optional_kwd_args)
