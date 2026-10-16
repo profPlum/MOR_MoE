@@ -61,9 +61,10 @@ class JHTDB_Channel(torch.utils.data.Dataset):
     _default_meta_data = DatasetMetaData(Lx=8*np.pi, Ly=2.0, Lz=3*np.pi, nu=5e-5, dt=0.0065, n_steps_per_flow_through_native=4000)
 
     def __init__(self, path:str, time_chunking=5, stride:int|list|tuple=1, time_stride:int=1):
-        self.path=path
+        self._path=path # read-only
+        self._num_h5_files = len(glob(f'{path}/*.h5')) # precompute to avoid I/O
         self.time_chunking=time_chunking
-        self._time_stride=time_stride # ready-only
+        self._time_stride=time_stride # read-only
         assert type(time_stride) is int
         if type(stride) in [int,float]: stride=[stride]*3
         else: assert len(stride)==3 # we will not pool time because it breaks PDE timestep & stability and pytorch cannot do it easily
@@ -75,6 +76,9 @@ class JHTDB_Channel(torch.utils.data.Dataset):
         self._split_end_proportion = 1.0 # exclusive 1.0=length of dataset
 
         self.dataset_meta_data = self._default_meta_data.adapt_to_stride(self)
+
+    @property
+    def path(self): return self._path
 
     @property
     def time_stride(self): return self._time_stride
@@ -98,9 +102,8 @@ class JHTDB_Channel(torch.utils.data.Dataset):
 
     @property
     def _split_file_index_range(self) -> tuple[int, int]:
-        num_files = len(glob(f'{self.path}/*.h5'))
-        start_index = int(num_files * self._split_start_proportion)
-        end_index = int(num_files * self._split_end_proportion)
+        start_index = int(self._num_h5_files * self._split_start_proportion)
+        end_index = int(self._num_h5_files * self._split_end_proportion)
         return start_index, end_index
 
     def __len__(self):
@@ -109,8 +112,12 @@ class JHTDB_Channel(torch.utils.data.Dataset):
         # that being said, it wouldn't really work with dataset preloading, and I'm not sure how it would interact with existing offseting.
         start_index, end_index = self._split_file_index_range
         num_files = end_index - start_index
-        base_blocks = num_files // (self.time_chunking * self.time_stride)  # full blocks only
-        return base_blocks * self.time_stride  # one sample per offset per block
+        full_block = self.time_chunking * self.time_stride # includes trailing stride space
+        n_blocks, remainder = divmod(num_files, full_block)
+        # since we are considering the remainder (which uses stride space),
+        # we can use the same logic as for len with overlapping chunks
+        extra = max(0, remainder - (self.time_chunking - 1) * self.time_stride)
+        return n_blocks * self.time_stride + extra
 
     # Time stride verified to work: 11/18/25
     def __getitem__(self, index):
@@ -120,8 +127,7 @@ class JHTDB_Channel(torch.utils.data.Dataset):
         files = []
         velocity_fields = []
         start_index, end_index = self._split_file_index_range
-        offset = index % self.time_stride
-        index = index // self.time_stride
+        index, offset = divmod(index, self.time_stride)
         # NOTE: for overlapping chunks, you'd use range(index, index+self.time_chunking*self.time_stride, self.time_stride)
         for i in range(index*self.time_chunking*self.time_stride, (index+1)*self.time_chunking*self.time_stride, self.time_stride):
             i+=1 + offset + start_index # 1-based indexing + offset to utilize all data with time stride + start index to skip split files
