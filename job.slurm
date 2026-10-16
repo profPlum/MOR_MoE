@@ -9,7 +9,7 @@
 #SBATCH --time=1-00:00:00                    # Maximum runtime (HH:MM:SS) (48 hours for WNO-600-epochs)
 #SBATCH --partition=ghx4                     # Partition name
 #SBATCH --account=beoi-dtai-gh
-#SBATCH --job-name=MLE
+#SBATCH --job-name=MLE_FNO
 
 # Not going to work anymore b/c we would need to save the entire checkpoint which causes OOM...
 # ##SBATCH --signal=SIGUSR1@90
