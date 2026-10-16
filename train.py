@@ -16,13 +16,13 @@ time_chunking: int=int(os.environ.get('TIME_CHUNKING', 9)) # how many self-aware
 time_stride: int=int(os.environ.get('TIME_STRIDE', 1)) # temporal stride between selected frames
 batch_size: int=int(os.environ.get('BATCH_SIZE', 2)) # batch size, with VI experts we can only fit 1 batch w/ 20 A100
 scale_lr_and_clip=True # multiply by DDP (total) batch_size
+scale_cutoff=int(os.environ.get('SCALE_CUTOFF', 500)) # cutoff batch size for scaling
 lr: float=float(os.environ.get('LR', 1.563e-5)) # (VI) learning rate (will be scaled by recursive steps)
 weight_decay: float=float(os.environ.get('WEIGHT_DECAY', 0.0)) # weight decay
 max_epochs=int(os.environ.get('MAX_EPOCHS', 500))
 gradient_clip_val=float(os.environ.get('GRAD_CLIP', 50)) # grad clip adjusted based on new scaling rule
 make_optim=eval(f"torch.optim.{os.environ.get('OPTIM', 'Adam')}")
 ckpt_path=os.environ.get('CKPT_PATH', None)
-
 use_IUFNO_dataset=bool(int(os.environ.get('USE_IUFNO_DATASET', False))) # whether to use the IUFNO dataset
 use_IUFNO_Re590=bool(int(os.environ.get('USE_IUFNO_RE590', False))) # Re590 vs Re180 when USE_IUFNO_DATASET=1
 use_proportional_k_size=bool(int(os.environ.get('MAKE_K_SIZE_PROPORTIONAL', False))) # if K_MODES or CNN_FILTER_SIZE is given as a integer will create a list where each dimension is proportional to the field size
@@ -123,6 +123,15 @@ def proportional_allocation(scalar_allocation, proportional_to_size, int_cast=Tr
     print(f'{new_size=}')
     return list(new_size)
 
+def calculate_extra_epochs(scale_cutoff, n_epochs, aggregate_batch_size,
+                           time_chunking, train_dataset_len, n_inputs=1):
+    B = lambda b: train_dataset_len/b # total batches per epoch
+    b_cut = scale_cutoff/(time_chunking-n_inputs) # cutoff batch size
+    S_cut = B(b_cut)*n_epochs # total optimizer steps (with cutoff batch size)
+    S = B(aggregate_batch_size)*n_epochs # total optimizer steps
+    S_delta = max(0, S_cut - S) # extra optimizer steps
+    return int(S_delta/B(aggregate_batch_size)+0.5) # extra epochs
+
 if __name__=='__main__':
     # setup data module
     dm_kwd_args = dict(batch_size=batch_size, time_chunking=time_chunking, stride=stride,
@@ -136,20 +145,16 @@ if __name__=='__main__':
     else:
         dm_kwd_args['dataset_path'] = 'data/turbulence_output'
     dm = JHTDBDataModule(**dm_kwd_args)
+    ndims=3
 
     # derive field size from data module
     md = dm.meta_data()
     field_size = dm.field_size
     if k_modes is None: # default=max (potentially adjusted for stride)
         k_modes=field_size # e.g. [103,26,77]
-        assert len(k_modes)==3
+        assert len(k_modes)==ndims
     if use_proportional_k_size and type(k_modes) is int:
         k_modes=proportional_allocation(k_modes, field_size, cap_at_prop_size=True)
-
-    ndims=3
-    num_nodes = int(os.environ.get('SLURM_STEP_NUM_NODES', 1)) # can be auto-detected by slurm
-    num_gpus_per_node = int(os.environ.get('SLURM_STEP_TASKS_PER_NODE', torch.cuda.device_count()))
-    print(f'{num_nodes=}, {num_gpus_per_node=}')
 
     SimModelClass, optional_kwd_args = POU_NetSimulator, {}
     if use_VI: # VI is optional
@@ -160,14 +165,26 @@ if __name__=='__main__':
         dataset_size = model_agnostic_BNN.get_dataset_size(dm.train_dataset)//dataset_size_divisor
         optional_kwd_args = {'prior_cfg': {'prior_sigma': VI_prior_sigma}, 'train_dataset_size': dataset_size}
 
-    # scale lr & grad clip by: the number of *output* timesteps in one full batch (this follows scaling equations)
-    scale_of_batch_data = num_nodes*num_gpus_per_node*batch_size*(time_chunking-1) # (includes time)
-    print(f'b4 scaling: {lr=}, {gradient_clip_val=}')
+    num_nodes = int(os.environ.get('SLURM_STEP_NUM_NODES', 1)) # can be auto-detected by slurm
+    num_gpus_per_node = int(os.environ.get('SLURM_STEP_TASKS_PER_NODE', torch.cuda.device_count()))
+    print(f'{num_nodes=}, {num_gpus_per_node=}')
+
     if scale_lr_and_clip:
+        # scale lr & grad clip by: the number of *output* timesteps in one full batch (this follows scaling equations)
+        total_batch_size = num_nodes*num_gpus_per_node*batch_size # still strictly "batch size" but across GPUs
+        scale_of_batch_data = total_batch_size*(time_chunking-1) # (includes time)
+        print(f'before cap: {scale_of_batch_data=}, {scale_cutoff=}')
+        scale_of_batch_data = min(scale_of_batch_data, scale_cutoff)
+        print(f'after cap: {scale_of_batch_data=}')
+
+        max_epochs += calculate_extra_epochs(scale_cutoff, max_epochs, aggregate_batch_size=total_batch_size,
+                                             time_chunking=time_chunking, train_dataset_len=len(dm.train_dataset))
+        print(f'after max_epochs: {max_epochs=}')
+
+        print(f'b4 scaling: {lr=}, {gradient_clip_val=}')
         lr *= scale_of_batch_data**0.5
         gradient_clip_val /= scale_of_batch_data**0.5
-    print(f'after scaling: {lr=}, {gradient_clip_val=}')
-    print(f'{scale_of_batch_data=}')
+        print(f'after scaling: {lr=}, {gradient_clip_val=}')
 
     if ckpt_path: # secretly use the load from checkpoint api if needed
         SimModelClass_ = SimModelClass
