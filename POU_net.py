@@ -299,12 +299,14 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
         # we double output channels to have the sigma predictions too
         super().__init__(n_inputs*2, n_outputs*2, *args, **kwd_args)
 
+        # since FNO forces breaking changes anyways we might as well properly reparameterize this (by moving it before model_agnostic_dnn_to_bnn)
+        self._zero_expert_rho=nn.Parameter(torch.randn([1]))
+
         # make VI reparameterize our entire model
         model_agnostic_BNN.model_agnostic_dnn_to_bnn(self, train_dataset_size, prior_cfg=prior_cfg)
 
         # add additional set of metrics for validating aleatoric UQ itself compared to error
         #self.val_UQ_metrics = MetricsModule(self, n_outputs, prefix='val_UQ_')
-        self._zero_expert_rho=nn.Parameter(torch.randn([1]))
 
     # original forward before probabilistic considerations
     def forward(self, X, Y=None):
