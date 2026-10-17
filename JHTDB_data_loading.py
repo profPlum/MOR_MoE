@@ -60,11 +60,13 @@ class JHTDB_Channel(torch.utils.data.Dataset):
     '''
     _default_meta_data = DatasetMetaData(Lx=8*np.pi, Ly=2.0, Lz=3*np.pi, nu=5e-5, dt=0.0065, n_steps_per_flow_through_native=4000)
 
-    def __init__(self, path:str, time_chunking=5, stride:int|list|tuple=1, time_stride:int=1):
+    def __init__(self, path:str, time_chunking=5, stride:int|list|tuple=1, time_stride:int=1,
+                 random_data_augmentation:bool=False):
         self._path=path # read-only
         self._num_h5_files = len(glob(f'{path}/*.h5')) # precompute to avoid I/O
         self.time_chunking=time_chunking
         self._time_stride=time_stride # read-only
+        self._random_data_augmentation=random_data_augmentation
         assert type(time_stride) is int
         if type(stride) in [int,float]: stride=[stride]*3
         else: assert len(stride)==3 # we will not pool time because it breaks PDE timestep & stability and pytorch cannot do it easily
@@ -112,12 +114,31 @@ class JHTDB_Channel(torch.utils.data.Dataset):
         # that being said, it wouldn't really work with dataset preloading, and I'm not sure how it would interact with existing offseting.
         start_index, end_index = self._split_file_index_range
         num_files = end_index - start_index
-        full_block = self.time_chunking * self.time_stride # includes trailing stride space
-        n_blocks, remainder = divmod(num_files, full_block)
+        full_block_len = self.time_chunking * self.time_stride # includes trailing stride space
+        n_blocks, remainder = divmod(num_files, full_block_len)
         # since we are considering the remainder (which uses stride space),
         # we can use the same logic as for len with overlapping chunks
         extra = max(0, remainder - (self.time_chunking - 1) * self.time_stride)
         return n_blocks * self.time_stride + extra
+
+    # time_chunk.shape=[C,X,Y,Z,T]
+    def _apply_random_reflection_augmentation(self, time_chunk: torch.Tensor) -> torch.Tensor:
+        assert time_chunk.shape[4] == self.time_chunking, f'{time_chunk.shape=} must be [C,X,Y,Z,{self.time_chunking=}]'
+        assert len(time_chunk.shape) == 5, f'{time_chunk.shape=} must be [C,X,Y,Z,T]'
+        if not self._random_data_augmentation: return time_chunk
+
+        def apply_reflection(flip_axis: int) -> torch.Tensor:
+            assert flip_axis in [1,2], 'you cannot flip x it reverses the direction of flow!'
+            time_chunk[flip_axis] *= -1 # first is channel dimension
+            time_chunk = time_chunk.flip(axis=flip_axis)
+            return time_chunk
+
+        if torch.rand(1) < 0.5:
+            time_chunk = apply_reflection(1)
+        if torch.rand(1) < 0.5:
+            time_chunk = apply_reflection(2)
+
+        return time_chunk
 
     # Time stride verified to work: 11/18/25
     def __getitem__(self, index):
@@ -128,6 +149,15 @@ class JHTDB_Channel(torch.utils.data.Dataset):
         velocity_fields = []
         start_index, end_index = self._split_file_index_range
         index, offset = divmod(index, self.time_stride)
+
+        if self._random_data_augmentation:
+            # We could delete the first N<full_block_len steps from the dataset and get a unique valid dataset so we sample all such possibilities
+            # (we use torch RNG because it handles deterministic/reproducible & unique worker seeding automatically)
+            first_next_block_file_index = (index+1)*self.time_chunking*self.time_stride + 1 + offset + start_index # not sure if the +1 is necessary since it's just to match file naming convention...
+            max_offset = min(self.time_chunking*self.time_stride, end_index - first_next_block_file_index + 1) # ensure we don't exceed the end of the dataset
+            random_offset = torch.randint(0, max_offset, (1,)).item() # high is exclusive, because full_block_len offset is no longer a unique dataset
+            offset += random_offset
+
         # NOTE: for overlapping chunks, you'd use range(index, index+self.time_chunking*self.time_stride, self.time_stride)
         for i in range(index*self.time_chunking*self.time_stride, (index+1)*self.time_chunking*self.time_stride, self.time_stride):
             i+=1 + offset + start_index # 1-based indexing + offset to utilize all data with time stride + start index to skip split files
@@ -140,7 +170,7 @@ class JHTDB_Channel(torch.utils.data.Dataset):
             velocity_fields.append(files[-1][f'Velocity_{i:04}']) # :04 zero pads to 4 digits
         velocity_fields = torch.as_tensor(np.stack(velocity_fields).T) # reverse dimensions order [T,Z,Y,X,C] --> [C,X,Y,Z,T]
         velocity_fields = self._pool(velocity_fields.moveaxis(-1,0)).moveaxis(0,-1) # time dimension is (temporarily) treated as batch dimension
-        velocity_fields = velocity_fields.float() # make sure to use single precision! (after pooling) because double is too expensive!!
+        velocity_fields = self._apply_random_reflection_augmentation(velocity_fields.float()) # after pooling double precision is too expensive!!
 
         # IC_0.shape=[C,X,Y,Z] e.g. torch.Size([3, 103, 26, 77])
         # Sol_0.shape=[C,X,Y,Z,T] e.g. torch.Size([3, 103, 26, 77, 9])
