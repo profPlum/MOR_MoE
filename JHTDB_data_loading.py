@@ -53,6 +53,7 @@ class DatasetMetaData:
         return dict(nx=self.nx, ny=self.ny, nz=self.nz, Lx=self.Lx, Ly=self.Ly, Lz=self.Lz, dt=self.dt, nu=self.nu)
 
 # Verified to work: 8/23/24
+# TODO: perhaps use fully-data-augmented dataset & perform stratified sampling instead of random offset?
 class JHTDB_Channel(torch.utils.data.Dataset):
     '''
     Dataset for the JHTDB autoregressive problem... It is not possible to make
@@ -127,16 +128,16 @@ class JHTDB_Channel(torch.utils.data.Dataset):
         assert len(time_chunk.shape) == 5, f'{time_chunk.shape=} must be [C,X,Y,Z,T]'
         if not self._random_data_augmentation: return time_chunk
 
-        def apply_reflection(flip_axis: int) -> torch.Tensor:
-            assert flip_axis in [1,2], 'you cannot flip x it reverses the direction of flow!'
-            time_chunk[flip_axis] *= -1 # first is channel dimension
-            time_chunk = time_chunk.flip(axis=flip_axis)
-            return time_chunk
+        def apply_reflection(spatial_axis: int) -> torch.Tensor:
+            # [C,X,Y,Z,T]: y is axis 2 and z is axis 3; v is channel 1 and w is channel 2;
+            assert spatial_axis in (2, 3), 'you cannot flip x it reverses the direction of flow!'
+            time_chunk[spatial_axis - 1] *= -1 # spatial_axis - 1 to remove channel axis offset from spatial axis
+            return time_chunk.flip(spatial_axis) # negation + flip to apply the reflection
 
         if torch.rand(1) < 0.5:
-            time_chunk = apply_reflection(1)
+            time_chunk = apply_reflection(2) # y-axis reflection
         if torch.rand(1) < 0.5:
-            time_chunk = apply_reflection(2)
+            time_chunk = apply_reflection(3) # z-axis reflection
 
         return time_chunk
 
@@ -153,8 +154,9 @@ class JHTDB_Channel(torch.utils.data.Dataset):
         if self._random_data_augmentation:
             # We could delete the first N<full_block_len steps from the dataset and get a unique valid dataset so we sample all such possibilities
             # (we use torch RNG because it handles deterministic/reproducible & unique worker seeding automatically)
-            first_next_block_file_index = (index+1)*self.time_chunking*self.time_stride + 1 + offset + start_index # not sure if the +1 is necessary since it's just to match file naming convention...
-            max_offset = min(self.time_chunking*self.time_stride, end_index - first_next_block_file_index + 1) # ensure we don't exceed the end of the dataset
+            current_chunk_last_file_index = ((index+1)*self.time_chunking-1)*self.time_stride + 1 + offset + start_index # inclusive (in stride space)
+            remaining_files = end_index - current_chunk_last_file_index + 1 # len=inclusive_max-inclusive_min+1
+            max_offset = min(self.time_chunking*self.time_stride, remaining_files) # (exclusive) ensure we don't exceed the end of the dataset
             random_offset = torch.randint(0, max_offset, (1,)).item() # high is exclusive, because full_block_len offset is no longer a unique dataset
             offset += random_offset
 
