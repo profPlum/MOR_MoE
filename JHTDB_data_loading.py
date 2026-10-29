@@ -123,7 +123,7 @@ class JHTDB_Channel(torch.utils.data.Dataset):
         return n_blocks * self.time_stride + extra
 
     # time_chunk.shape=[C,X,Y,Z,T]
-    def _apply_random_reflection_augmentation(self, time_chunk: torch.Tensor) -> torch.Tensor:
+    def _apply_random_augmentation_transforms(self, time_chunk: torch.Tensor) -> torch.Tensor:
         assert time_chunk.shape[4] == self.time_chunking, f'{time_chunk.shape=} must be [C,X,Y,Z,{self.time_chunking=}]'
         assert len(time_chunk.shape) == 5, f'{time_chunk.shape=} must be [C,X,Y,Z,T]'
         if not self._random_data_augmentation: return time_chunk
@@ -138,6 +138,11 @@ class JHTDB_Channel(torch.utils.data.Dataset):
             time_chunk = apply_reflection(2) # y-axis reflection
         if torch.rand(1) < 0.5:
             time_chunk = apply_reflection(3) # z-axis reflection
+
+        # can't roll y-axis because it destroys BCs
+        shifts = (torch.randint(0, time_chunk.shape[1], (1,)).item(), # x-axis roll (upper bound is exclusive)
+                  torch.randint(0, time_chunk.shape[3], (1,)).item()) # z-axis roll
+        time_chunk = time_chunk.roll(shifts=shifts, dims=(1,3)) # roll x and z axes randomly
 
         return time_chunk
 
@@ -172,7 +177,7 @@ class JHTDB_Channel(torch.utils.data.Dataset):
             velocity_fields.append(files[-1][f'Velocity_{i:04}']) # :04 zero pads to 4 digits
         velocity_fields = torch.as_tensor(np.stack(velocity_fields).T) # reverse dimensions order [T,Z,Y,X,C] --> [C,X,Y,Z,T]
         velocity_fields = self._pool(velocity_fields.moveaxis(-1,0)).moveaxis(0,-1) # time dimension is (temporarily) treated as batch dimension
-        velocity_fields = self._apply_random_reflection_augmentation(velocity_fields.float()) # after pooling double precision is too expensive!!
+        velocity_fields = self._apply_random_augmentation_transforms(velocity_fields.float()) # after pooling double precision is too expensive!!
 
         # IC_0.shape=[C,X,Y,Z] e.g. torch.Size([3, 103, 26, 77])
         # Sol_0.shape=[C,X,Y,Z,T] e.g. torch.Size([3, 103, 26, 77, 9])
