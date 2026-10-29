@@ -67,7 +67,7 @@ class JHTDB_Channel(torch.utils.data.Dataset):
         self._num_h5_files = len(glob(f'{path}/*.h5')) # precompute to avoid I/O
         self.time_chunking=time_chunking
         self._time_stride=time_stride # read-only
-        self._random_data_augmentation=random_data_augmentation
+        self.random_data_augmentation=random_data_augmentation
         assert type(time_stride) is int
         if type(stride) in [int,float]: stride=[stride]*3
         else: assert len(stride)==3 # we will not pool time because it breaks PDE timestep & stability and pytorch cannot do it easily
@@ -126,7 +126,7 @@ class JHTDB_Channel(torch.utils.data.Dataset):
     def _apply_random_augmentation_transforms(self, time_chunk: torch.Tensor) -> torch.Tensor:
         assert time_chunk.shape[4] == self.time_chunking, f'{time_chunk.shape=} must be [C,X,Y,Z,{self.time_chunking=}]'
         assert len(time_chunk.shape) == 5, f'{time_chunk.shape=} must be [C,X,Y,Z,T]'
-        if not self._random_data_augmentation: return time_chunk
+        if not self.random_data_augmentation: return time_chunk
 
         def apply_reflection(spatial_axis: int) -> torch.Tensor:
             # [C,X,Y,Z,T]: y is axis 2 and z is axis 3; v is channel 1 and w is channel 2;
@@ -156,7 +156,7 @@ class JHTDB_Channel(torch.utils.data.Dataset):
         start_index, end_index = self._split_file_index_range
         index, offset = divmod(index, self.time_stride)
 
-        if self._random_data_augmentation:
+        if self.random_data_augmentation:
             # We could delete the first N<full_block_len steps from the dataset and get a unique valid dataset so we sample all such possibilities
             # (we use torch RNG because it handles deterministic/reproducible & unique worker seeding automatically)
             current_chunk_last_file_index = ((index+1)*self.time_chunking-1)*self.time_stride + 1 + offset + start_index # inclusive (in stride space)
@@ -202,7 +202,8 @@ class IUFNO_Channel(JHTDB_Channel):
         return DatasetMetaData(Lx=4*np.pi, Ly=2.0, Lz=4*np.pi/3, nu=nu, dt=1.0, n_steps_per_flow_through_native=19)
         # NOTE: Technically 400/21.25=18.82352941 steps per flow through, and 21.25 flow throughs per (400 step) group (we rounded)
 
-    def __init__(self, path:str, time_chunking=5, stride:int|list|tuple=1, time_stride:int=1):
+    def __init__(self, path:str, time_chunking=5, stride:int|list|tuple=1, time_stride:int=1,
+                 random_data_augmentation:bool=False):
         self._data = np.load(path, mmap_mode='r')[..., :3]  # [G,T,X,Y,Z,C=uvw]
 
         try: # Y-profile mean for adding back to fluctuations
@@ -211,7 +212,10 @@ class IUFNO_Channel(JHTDB_Channel):
         except FileNotFoundError:
             self.mean_field = 0
 
-        super().__init__(path, time_chunking, stride, time_stride)
+        if random_data_augmentation:
+            raise NotImplementedError('Random data augmentation is not implemented for IUFNO_Channel')
+
+        super().__init__(path, time_chunking, stride, time_stride, random_data_augmentation)
 
     @property
     def n_groups(self) -> int:
@@ -246,6 +250,7 @@ class IUFNO_Channel(JHTDB_Channel):
         fields = torch.as_tensor(chunk).permute(4, 1, 2, 3, 0)  # [C,X,Y,Z,T]
         fields = fields + self.mean_field # add y-profile mean back (broadcast over X,Z,T)
         fields = self._pool(fields.moveaxis(-1, 0)).moveaxis(0, -1).float()
+        fields = self._apply_random_augmentation_transforms(fields)
         return fields[..., 0], fields[..., 1:]
 
 # preserves random state (verified to work: 9/24/25)
@@ -266,8 +271,10 @@ class JHTDBDataModule(L.LightningDataModule):
     def __init__(self, dataset_path: str, batch_size: int, time_chunking: int, time_stride: int=1,
                  stride: int|list|tuple=1, long_horizon: int=400, train_proportion: float=0.8,
                  dataset_type: type[JHTDB_Channel|IUFNO_Channel] = JHTDB_Channel,
-                 preload_datasets: bool=True, fast_dataloaders: bool=False):
+                 preload_datasets: bool=True, fast_dataloaders: bool=False,
+                 random_data_augmentation: bool=False):
         assert 0 < train_proportion < 1, 'train_proportion must be between 0 and 1'
+        if random_data_augmentation: preload_datasets = False
         super().__init__()
         self.save_hyperparameters()
 
@@ -278,7 +285,7 @@ class JHTDBDataModule(L.LightningDataModule):
 
     @property
     def _fast_dataloader_kwd_args(self): # Optional faster dataloaders (uses more memory)
-        return {'num_workers': 1 if self.preload_datasets else 8, 'persistent_workers': self.preload_datasets} if self.fast_dataloaders else {}
+        return {'num_workers': 1 if self.preload_datasets else 8, 'persistent_workers': True} if self.fast_dataloaders else {}
 
     def setup(self, stage: str='fit'):
         ''' if stage=='peek': do not preload the dataset,
@@ -295,6 +302,7 @@ class JHTDBDataModule(L.LightningDataModule):
 
         # this kind of splitting is better for timeseries so that we can measure true extrapolation performance
         self.train_dataset, self.val_dataset = self.dataset.split(self.train_proportion)
+        self.train_dataset.random_data_augmentation = self.random_data_augmentation # val stays unaugmented
 
         if stage=='peek': # sanity checks
             print(f'{len(self.dataset)=}\n{len(self.train_dataset)=}\n{len(self.val_dataset)=}')
