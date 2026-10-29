@@ -79,6 +79,16 @@ class JHTDB_Channel(torch.utils.data.Dataset):
     @property
     def time_stride(self): return self._time_stride
 
+    def _downsample_time(self, fields):
+        '''Area-downsample [C,X,Y,Z,T] to the strided length. No-op when time_stride==1.'''
+        if self.time_stride == 1: return fields
+        native_t = fields.shape[-1]
+        out_t = _get_strided_length(native_t, self.time_stride)
+        assert out_t == self.time_chunking, f'{out_t=} != {self.time_chunking=} from native length {native_t}'
+        flat = fields.reshape(-1, 1, native_t)
+        pooled = torch.nn.functional.interpolate(flat, size=out_t, mode='area')
+        return pooled.reshape(*fields.shape[:-1], out_t)
+
     def split(self, proportion: float):
         assert 0 <= proportion <= 1, 'proportion must be between 0 and 1'
         from copy import copy
@@ -121,20 +131,21 @@ class JHTDB_Channel(torch.utils.data.Dataset):
         velocity_fields = []
         start_index, end_index = self._split_file_index_range
         offset = index % self.time_stride
-        index = index // self.time_stride
-        # NOTE: for overlapping chunks, you'd use range(index, index+self.time_chunking*self.time_stride, self.time_stride)
-        for i in range(index*self.time_chunking*self.time_stride, (index+1)*self.time_chunking*self.time_stride, self.time_stride):
-            i+=1 + offset + start_index # 1-based indexing + offset to utilize all data with time stride + start index to skip split files
+        block = index // self.time_stride
+        span = self.time_chunking * self.time_stride
+        # closed span of the strided hits; when time_stride==1 this is exactly those hits
+        first = block*span + 1 + offset + start_index # 1-based indexing + offset to utilize all data with time stride + start index to skip split files
+        for i in range(first, first + (self.time_chunking - 1)*self.time_stride + 1):
             assert i <= end_index, f'File index: {i} is above maximum {end_index}'
             try: files.append(h5py.File(f'{self.path}/channel_t={i}.h5', 'r')) # keep open for stacking
             except OSError as e:
                 if 'unable to open' in str(e).lower():
                     raise OSError(f'Unable to open file: "{self.path}/channel_t={i}.h5"')
                 else: raise
-            velocity_fields.append(files[-1][f'Velocity_{i:04}']) # :04 zero pads to 4 digits
+            velocity_fields.append(files[-1][f'Velocity_{i:04}']) # :04 zero pads to 4 digits; h5 dataset, copied once by stack
         velocity_fields = torch.as_tensor(np.stack(velocity_fields).T) # reverse dimensions order [T,Z,Y,X,C] --> [C,X,Y,Z,T]
         velocity_fields = self._pool(velocity_fields.moveaxis(-1,0)).moveaxis(0,-1) # time dimension is (temporarily) treated as batch dimension
-        velocity_fields = velocity_fields.float() # make sure to use single precision! (after pooling) because double is too expensive!!
+        velocity_fields = self._downsample_time(velocity_fields.float()) # single precision after pooling; double is too expensive
 
         # IC_0.shape=[C,X,Y,Z] e.g. torch.Size([3, 103, 26, 77])
         # Sol_0.shape=[C,X,Y,Z,T] e.g. torch.Size([3, 103, 26, 77, 9])
@@ -198,11 +209,12 @@ class IUFNO_Channel(JHTDB_Channel):
         group_index += self._split_group_index_range[0] # start
         block, offset = divmod(local_index, self.time_stride) # time stride multiplies the number of chunks per block
         t0 = block * self.time_chunking * self.time_stride + offset
-        t1 = t0 + self.time_chunking * self.time_stride # consistent with JHTDB_Channel: `(index+1)*self.time_chunking*self.time_stride` ends at next block boundary
-        chunk = np.array(self._data[group_index, t0:t1:self.time_stride])  # [T,X,Y,Z,C], copy off mmap
+        native_t = (self.time_chunking - 1)*self.time_stride + 1 # closed span; equals the strided hits when time_stride==1
+        chunk = np.array(self._data[group_index, t0:t0+native_t])  # [T,X,Y,Z,C], copy off mmap
         fields = torch.as_tensor(chunk).permute(4, 1, 2, 3, 0)  # [C,X,Y,Z,T]
         fields = fields + self.mean_field # add y-profile mean back (broadcast over X,Z,T)
         fields = self._pool(fields.moveaxis(-1, 0)).moveaxis(0, -1).float()
+        fields = self._downsample_time(fields)
         return fields[..., 0], fields[..., 1:]
 
 # preserves random state (verified to work: 9/24/25)
