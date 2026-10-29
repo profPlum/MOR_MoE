@@ -45,6 +45,7 @@ expert_types = [use_CNN_experts, use_WNO3d_experts, use_IUFNO_experts]
 assert sum(expert_types) <= 1, f"Only one expert type can be selected. Currently selected: CNN={use_CNN_experts}, WNO3d={use_WNO3d_experts}, IUFNO={use_IUFNO_experts}"
 
 use_fast_dataloaders = bool(int(os.environ.get('FAST_DATALOADERS', False))) # marginally faster dataloaders which use more VRAM
+use_data_augmentation = bool(int(os.environ.get('DATA_AUGMENTATION', False))) # random time offset, y/z reflection, x/z roll
 use_trig = bool(int(os.environ.get('TRIG_ENCODINGS', True))) # Ravi's trig encodings
 use_grid_inputs = bool(int(os.environ.get('GRID_INPUTS', 0))) # append positional encodings to inputs
 out_norm_groups = int(os.environ.get('OUT_NORM_GROUPS', 1)) # 0 or 1 or maybe 2 (whether or not to use output layer norm) keep it at one generally
@@ -127,7 +128,8 @@ def proportional_allocation(scalar_allocation, proportional_to_size, int_cast=Tr
 if __name__=='__main__':
     # setup data module
     dm_kwd_args = dict(batch_size=batch_size, time_chunking=time_chunking, stride=stride,
-                       time_stride=time_stride, fast_dataloaders=use_fast_dataloaders)
+                       time_stride=time_stride, fast_dataloaders=use_fast_dataloaders,
+                       random_data_augmentation=use_data_augmentation)
     if use_IUFNO_dataset:
         assert not use_PDE_solver, "PDE solver is not realistic for IUFNO dataset"
         iufno_dataset_path = 'data/data30_re590_64_65_32_real.npy' if use_IUFNO_Re590 else 'data/data_chl_re180/data_mave.npy'
