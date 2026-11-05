@@ -63,12 +63,12 @@ export OPTIM='AdamW' # RAdam is better for resuming, otherwise use Adam
 export RLoP=0 # Reduce Learning-rate on Plateu, can be useful for resuming (but otherwise keep it off!). Also bash booleans are binary
 export ONE_CYCLE=$((! RLoP)) # OneCycle warmup & decay lr schedule. Really important for scaling to multiple GPUs!
 export THREE_PHASE=0 # faster decay in one cycle, usually not needed
-export USE_PDE_SOLVER=0 # whether to use the PDE solver
-export USE_MANUAL_ADVECTION=0 # whether to use manual advection/forcing term in PDE solver
+export USE_PDE_SOLVER=1 # whether to use the PDE solver, automatically disabled when USE_IUFNO_DATASET=1
 export ANISOTROPIC_FILTER=0 # whether to use anisotropic filtering in PDE solver
 export DISABLE_FILTER=0 # whether to disable filtering in PDE solver (overrides ANISOTROPIC_FILTER)
 export DEALIAS_BEFORE_QUADRATIC=0 # if True, apply spectral filter before forming u*u (dealiasing)
 export APPLY_PDE_FILTER_BOTTLENECK=1 # if True, keep legacy PDE low-pass bottleneck (Ainv*filt)
+export USE_MANUAL_ADVECTION=0 # whether to use manual advection/forcing term in PDE solver
 export TRIG_ENCODINGS=1 # gives better (nearly periodic) partitions
 export GRID_INPUTS=0 # append positional encodings to inputs for experts
 export USE_NORMALIZED_MOE=1 # importance normalization gives better expert utilization
@@ -79,9 +79,9 @@ export VI=0 # use VI or not (in bash binary booleans have the best support for b
 export VI_PRIOR_SIGMA=0.2 # approximately reflects the values of sigma at initialization
 export VI_COUNTS_TIMESTRIDE_GAP_DATA=1 # whether to count the gap data between timestrides in the dataset size for VI
 export VI_PROPAGATE_UQ=1 # whether to propagate uncertainty through the LES model across timesteps (as additional input channels)
-export USE_IUFNO_DATASET=1 # 1 = IUFNO npy instead of JHTDB
+export USE_IUFNO_DATASET=0 # 1 = IUFNO npy instead of JHTDB
 export USE_IUFNO_RE590=0 # 1 = /data2/data30_re590_64_65_32_real.npy (29/30 groups), 0 = Re180 data_mave (20/21)
-export TIME_STRIDE=4 # must be integer-valued
+export TIME_STRIDE=4 # must be integer-valued, automatically disabled when USE_IUFNO_DATASET=1
 export STRIDE=1 # e.g. 1.5 or a crazy list [1.5,1.3,1.8] for smaller experiments
 export TIME_CHUNKING=10 # 10 is default now b/c we can fit it in GH200s
 export BATCH_SIZE=2 # GH200 can handle batch_size=2! (it has > x2 the memory of A100)
