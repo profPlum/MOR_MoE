@@ -126,17 +126,18 @@ def proportional_allocation(scalar_allocation, proportional_to_size, int_cast=Tr
 
 if __name__=='__main__':
     # setup data module
-    dm_kwd_args = dict(batch_size=batch_size, time_chunking=time_chunking, stride=stride,
-                       time_stride=time_stride, fast_dataloaders=use_fast_dataloaders)
+    implicit_dm_kwd_args = {'dataset_path': 'data/turbulence_output'} # holds derived args that aren't already specified by globals
     if use_IUFNO_dataset:
-        assert not use_PDE_solver, "PDE solver is not realistic for IUFNO dataset"
+        if use_PDE_solver or time_stride>1: print('Warning: IUFNO dataset is not compatible with PDE solver or time_stride>1. Disabling both.', file=sys.stderr)
+        use_PDE_solver = False # disable foot guns: cannot work at the baseline large timestride
+        time_stride = 1 # disable foot guns: already largely timestrided anymore is inappropriate
         iufno_dataset_path = 'data/data30_re590_64_65_32_real.npy' if use_IUFNO_Re590 else 'data/data_chl_re180/data_mave.npy'
         n_groups = 30 if use_IUFNO_Re590 else 21
-        dm_kwd_args.update(dataset_path=iufno_dataset_path, dataset_type=IUFNO_Channel, long_horizon=100,
-                           train_proportion=(n_groups-1)/n_groups)
-    else:
-        dm_kwd_args['dataset_path'] = 'data/turbulence_output'
-    dm = JHTDBDataModule(**dm_kwd_args)
+        implicit_dm_kwd_args.update(dataset_path=iufno_dataset_path, dataset_type=IUFNO_Channel, long_horizon=100,
+                                    train_proportion=(n_groups-1)/n_groups)
+    dm = JHTDBDataModule(batch_size=batch_size, time_chunking=time_chunking, stride=stride,
+                         time_stride=time_stride, fast_dataloaders=use_fast_dataloaders,
+                         **implicit_dm_kwd_args)
 
     # derive field size from data module
     md = dm.meta_data()
