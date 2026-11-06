@@ -78,12 +78,12 @@ export DROPOUT=0.0 # maybe this makes VI redundant?
 export VI=0 # use VI or not (in bash binary booleans have the best support for boolean logic)
 export VI_PRIOR_SIGMA=0.2 # approximately reflects the values of sigma at initialization
 export VI_COUNTS_TIMESTRIDE_GAP_DATA=1 # whether to count the gap data between timestrides in the dataset size for VI
-export VI_PROPAGATE_UQ=1 # whether to propagate uncertainty through the LES model across timesteps (as additional input channels)
 export USE_IUFNO_DATASET=0 # 1 = IUFNO npy instead of JHTDB
 export USE_IUFNO_RE590=0 # 1 = /data2/data30_re590_64_65_32_real.npy (29/30 groups), 0 = Re180 data_mave (20/21)
-export TIME_STRIDE=4 # must be integer-valued, automatically disabled when USE_IUFNO_DATASET=1
 export STRIDE=1 # e.g. 1.5 or a crazy list [1.5,1.3,1.8] for smaller experiments
-export TIME_CHUNKING=10 # 10 is default now b/c we can fit it in GH200s
+export TIME_STRIDE=4 # must be integer-valued, automatically disabled when USE_IUFNO_DATASET=1
+export IN_STEPS=1 # timesteps stacked as the model input
+export OUT_STEPS=9 # predicted timesteps (TIME_CHUNKING was IN_STEPS+OUT_STEPS=10)
 export BATCH_SIZE=2 # GH200 can handle batch_size=2! (it has > x2 the memory of A100)
 export FAST_DATALOADERS=0 # warning: they can cause OOMs for production jobs!
 export N_LAYERS=4 # number of expert layers

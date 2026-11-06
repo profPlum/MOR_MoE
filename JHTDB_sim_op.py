@@ -254,7 +254,7 @@ class _UQ_Sim(_Sim):
         new_state = history[:, -self.n_state_channels:]
         new_uq = torch.zeros_like(new_state)
         for i in range(n):
-            # omit the uncertainty input; PPOU_net.forward fills it with zeros matching the velocity window
+            # velocity window only; the VI model does not take an uncertainty input
             new_state, new_uq = self.op.forward(self._model_input(history))
             history = self._advance_history(history, new_state)
             if i%100==0 and (new_state.isnan().any() or new_uq.isnan().any()):
