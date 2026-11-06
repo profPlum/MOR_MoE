@@ -79,6 +79,16 @@ class JHTDB_Channel(torch.utils.data.Dataset):
         assert time_chunking >= in_steps, f'{time_chunking=} must be at least {in_steps=}'
         self.dataset_meta_data = self._default_meta_data.adapt_to_stride(self)
 
+    def _owned_frames(self) -> int:
+        ''' Non-overlapping chunk length: the original input plus the targets. Extra inputs are older frames. '''
+        return self.time_chunking - (self.in_steps - 1)
+
+    def _window_locals(self, core_start: int) -> list[int]:
+        ''' Strided local indexes for one sample. The original input stays at core_start and does not overlap the previous chunk. Older inputs are borrowed from that chunk, or repeat this input when no earlier frame exists. '''
+        lookback = self.in_steps - 1
+        return [core_start if local < 0 else local
+                for local in range(core_start - lookback * self.time_stride, core_start + self._owned_frames() * self.time_stride, self.time_stride)]
+
     @property
     def time_stride(self): return self._time_stride
 
@@ -112,7 +122,8 @@ class JHTDB_Channel(torch.utils.data.Dataset):
         # that being said, it wouldn't really work with dataset preloading, and I'm not sure how it would interact with existing offseting.
         start_index, end_index = self._split_file_index_range
         num_files = end_index - start_index
-        base_blocks = num_files // (self.time_chunking * self.time_stride)  # full blocks only
+        # Same block count as in_steps=1. Extra inputs are borrowed instead of lengthening the block.
+        base_blocks = num_files // (self._owned_frames() * self.time_stride)
         return base_blocks * self.time_stride  # one sample per offset per block
 
     # provide timechunk processing as private method for reuse in child classes
@@ -138,8 +149,9 @@ class JHTDB_Channel(torch.utils.data.Dataset):
         start_index, end_index = self._split_file_index_range
         offset = index % self.time_stride
         index = index // self.time_stride
-        # NOTE: for overlapping chunks, you'd use range(index, index+self.time_chunking*self.time_stride, self.time_stride)
-        for i in range(index*self.time_chunking*self.time_stride, (index+1)*self.time_chunking*self.time_stride, self.time_stride):
+        core_start = index * self._owned_frames() * self.time_stride
+        for local in self._window_locals(core_start):
+            i = local
             i+=1 + offset + start_index # 1-based indexing + offset to utilize all data with time stride + start index to skip split files
             assert i <= end_index, f'File index: {i} is above maximum {end_index}'
             try: files.append(h5py.File(f'{self.path}/channel_t={i}.h5', 'r')) # keep open for stacking
@@ -194,8 +206,9 @@ class IUFNO_Channel(JHTDB_Channel):
     @property
     def _samples_per_group(self) -> int:
         n_times = self._data.shape[1] # 400
-        base_blocks, remainder = divmod(n_times, self.time_chunking * self.time_stride)
-        extra = max(0, remainder - (self.time_chunking - 1) * self.time_stride)
+        owned = self._owned_frames()
+        base_blocks, remainder = divmod(n_times, owned * self.time_stride)
+        extra = max(0, remainder - (owned - 1) * self.time_stride)
         return base_blocks * self.time_stride + extra
 
     def __len__(self):
@@ -209,9 +222,10 @@ class IUFNO_Channel(JHTDB_Channel):
         group_index, local_index = divmod(index, self._samples_per_group)
         group_index += self._split_group_index_range[0] # start
         block, offset = divmod(local_index, self.time_stride) # time stride multiplies the number of chunks per block
-        t0 = block * self.time_chunking * self.time_stride + offset
-        t1 = t0 + self.time_chunking * self.time_stride # consistent with JHTDB_Channel: `(index+1)*self.time_chunking*self.time_stride` ends at next block boundary
-        chunk = np.array(self._data[group_index, t0:t1:self.time_stride])  # [T,X,Y,Z,C], copy off mmap
+        core_start = block * self._owned_frames() * self.time_stride + offset
+        times = self._window_locals(core_start)
+        assert times[-1] < self._data.shape[1], f'time index {times[-1]} is outside a group of length {self._data.shape[1]}'
+        chunk = np.stack([self._data[group_index, t] for t in times])  # [T,X,Y,Z,C]
         fields = torch.as_tensor(chunk).permute(4, 1, 2, 3, 0) # [C,X,Y,Z,T]
         fields = fields + self.mean_field # add y-profile mean back (broadcast over X,Z,T)
         return self._parse_raw_timechunk(fields)
