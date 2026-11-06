@@ -296,8 +296,8 @@ import model_agnostic_BNN
 
 class PPOU_net(POU_net): # Not really, it's POU+VI
     def __init__(self, n_inputs, n_outputs, train_dataset_size, *args, prior_cfg={}, **kwd_args):
-        # we double output channels to have the sigma predictions too
-        super().__init__(n_inputs*2, n_outputs*2, *args, **kwd_args)
+        # double output channels for the sigma head; inputs stay the velocity window
+        super().__init__(n_inputs, n_outputs*2, *args, **kwd_args)
 
         # make VI reparameterize our entire model
         model_agnostic_BNN.model_agnostic_dnn_to_bnn(self, train_dataset_size, prior_cfg=prior_cfg)
@@ -307,10 +307,7 @@ class PPOU_net(POU_net): # Not really, it's POU+VI
         self._zero_expert_rho=nn.Parameter(torch.randn([1]))
 
     # original forward before probabilistic considerations
-    def forward(self, X, Y=None):
-        if Y is None: Y = torch.zeros(1,device=X.device, dtype=X.dtype).expand(*X.shape)
-        X = torch.cat([X,Y], axis=1)
-
+    def forward(self, X):
         # this context works recursively
         with self.gating_net.cached_gating_weights():
             mu_pred, rho_pred = super().forward(X, apply_output_bounds=False).tensor_split(2, dim=1)

@@ -12,8 +12,11 @@ n_experts: int=int(os.environ.get('N_EXPERTS', 3)) # number of experts in MoE
 n_layers: int=int(os.environ.get('N_LAYERS', 4)) # number of layers in the POU net
 n_filters: int=int(os.environ.get('N_FILTERS', 32)) # hidden layer width (aka # of filters)
 dropout: float=float(os.environ.get('DROPOUT', 0.0))
-time_chunking: int=int(os.environ.get('TIME_CHUNKING', 9)) # how many self-aware recursive steps to take
-n_inputs: int=int(os.environ.get('N_INPUTS', 1)) # timesteps stacked as the model input
+in_steps: int=int(os.environ.get('IN_STEPS', 1)) # timesteps stacked as the model input
+out_steps: int=int(os.environ.get('OUT_STEPS', 8)) # predicted timesteps (recursive steps)
+assert in_steps >= 1 and out_steps >= 1, f'{in_steps=} and {out_steps=} must be at least 1'
+n_inputs = in_steps
+time_chunking = in_steps + out_steps # dataset chunk length: inputs plus outputs
 time_stride: int=int(os.environ.get('TIME_STRIDE', 1)) # temporal stride between selected frames
 batch_size: int=int(os.environ.get('BATCH_SIZE', 2)) # batch size, with VI experts we can only fit 1 batch w/ 20 A100
 scale_lr_and_clip=True # multiply by DDP (total) batch_size
@@ -163,7 +166,7 @@ if __name__=='__main__':
         optional_kwd_args = {'prior_cfg': {'prior_sigma': VI_prior_sigma}, 'train_dataset_size': dataset_size}
 
     # scale lr & grad clip by: the number of *output* timesteps in one full batch (this follows scaling equations)
-    scale_of_batch_data = num_nodes*num_gpus_per_node*batch_size*(time_chunking-n_inputs) # output timesteps only
+    scale_of_batch_data = num_nodes*num_gpus_per_node*batch_size*out_steps # output timesteps only
     print(f'b4 scaling: {lr=}, {gradient_clip_val=}')
     if scale_lr_and_clip:
         lr *= scale_of_batch_data**0.5
@@ -203,7 +206,7 @@ if __name__=='__main__':
     if use_manual_advection: simulator_kwd_args['u_b'] = dm.u_b
 
     make_gating_net = EqualizedFieldGatingNet if use_normalized_MoE else FieldGatingNet
-    model = SimModelClass(n_inputs=n_inputs*ndims, n_outputs=ndims, ndims=ndims, n_experts=n_experts, n_layers=n_layers, hidden_channels=n_filters, n_steps=time_chunking-n_inputs,
+    model = SimModelClass(n_inputs=n_inputs*ndims, n_outputs=ndims, ndims=ndims, n_experts=n_experts, n_layers=n_layers, hidden_channels=n_filters, n_steps=out_steps,
                           weight_decay=weight_decay, lr=lr, one_cycle=one_cycle, three_phase=three_phase, RLoP=RLoP, RLoP_factor=RLoP_factor, RLoP_patience=RLoP_patience,
                           trig_encodings=use_trig, grid_inputs=use_grid_inputs, hidden_norm_groups=hidden_norm_groups, out_norm_groups=out_norm_groups,
                           make_optim=make_optim, make_gating_net=make_gating_net, simulator_kwd_args=simulator_kwd_args, **optional_kwd_args)
