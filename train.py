@@ -15,7 +15,6 @@ dropout: float=float(os.environ.get('DROPOUT', 0.0))
 in_steps: int=int(os.environ.get('IN_STEPS', 1)) # timesteps stacked as the model input
 out_steps: int=int(os.environ.get('OUT_STEPS', 8)) # predicted timesteps (recursive steps)
 assert in_steps >= 1 and out_steps >= 1, f'{in_steps=} and {out_steps=} must be at least 1'
-n_inputs = in_steps
 time_chunking = in_steps + out_steps # dataset chunk length: inputs plus outputs
 time_stride: int=int(os.environ.get('TIME_STRIDE', 1)) # temporal stride between selected frames
 batch_size: int=int(os.environ.get('BATCH_SIZE', 2)) # batch size, with VI experts we can only fit 1 batch w/ 20 A100
@@ -138,7 +137,7 @@ if __name__=='__main__':
         n_groups = 30 if use_IUFNO_Re590 else 21
         implicit_dm_kwd_args.update(dataset_path=iufno_dataset_path, dataset_type=IUFNO_Channel, long_horizon=100,
                                     train_proportion=(n_groups-1)/n_groups)
-    dm = JHTDBDataModule(batch_size=batch_size, n_inputs=n_inputs, time_chunking=time_chunking, stride=stride,
+    dm = JHTDBDataModule(batch_size=batch_size, in_steps=in_steps, time_chunking=time_chunking, stride=stride,
                          time_stride=time_stride, fast_dataloaders=use_fast_dataloaders,
                          **implicit_dm_kwd_args)
 
@@ -202,11 +201,11 @@ if __name__=='__main__':
     simulator_kwd_args = md.simulator_kwd_args | dict(
         use_PDE_solver=use_PDE_solver, anisotropic_filter=anisotropic_filter,
         disable_filter=disable_filter, dealias_before_quadratic=dealias_before_quadratic,
-        apply_pde_filter_bottleneck=apply_pde_filter_bottleneck, n_inputs=n_inputs)
+        apply_pde_filter_bottleneck=apply_pde_filter_bottleneck, in_steps=in_steps)
     if use_manual_advection: simulator_kwd_args['u_b'] = dm.u_b
 
     make_gating_net = EqualizedFieldGatingNet if use_normalized_MoE else FieldGatingNet
-    model = SimModelClass(n_inputs=n_inputs*ndims, n_outputs=ndims, ndims=ndims, n_experts=n_experts, n_layers=n_layers, hidden_channels=n_filters, n_steps=out_steps,
+    model = SimModelClass(n_inputs=in_steps*ndims, n_outputs=ndims, ndims=ndims, n_experts=n_experts, n_layers=n_layers, hidden_channels=n_filters, n_steps=out_steps,
                           weight_decay=weight_decay, lr=lr, one_cycle=one_cycle, three_phase=three_phase, RLoP=RLoP, RLoP_factor=RLoP_factor, RLoP_patience=RLoP_patience,
                           trig_encodings=use_trig, grid_inputs=use_grid_inputs, hidden_norm_groups=hidden_norm_groups, out_norm_groups=out_norm_groups,
                           make_optim=make_optim, make_gating_net=make_gating_net, simulator_kwd_args=simulator_kwd_args, **optional_kwd_args)

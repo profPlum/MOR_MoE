@@ -42,7 +42,7 @@ class _Sim(L.LightningModule):
     n_state_channels = 3 # u, v, w
     def __init__(self,nx=103,ny=26,nz=77,Lx=8*np.pi,Ly=2.0,Lz=3*np.pi,nu=5e-5,dt=0.0065,
                  u_b: torch.Tensor=0, use_PDE_solver=True, anisotropic_filter: bool=False, disable_filter: bool=False,
-                 dealias_before_quadratic: bool=False, apply_pde_filter_bottleneck: bool=True, n_inputs: int=1):
+                 dealias_before_quadratic: bool=False, apply_pde_filter_bottleneck: bool=True, in_steps: int=1):
         ''' Defaults are set to the values needed for JHTDB channel flow.
             Also note that nu:=viscosity, Lx,Ly,Lz:=domain dimensions (physical),
             and nx,ny,nz:=grid dimensions (virtual)
@@ -53,9 +53,9 @@ class _Sim(L.LightningModule):
             disable_filter:= if True, do not apply any spectral truncation (filt and filt2 are all-ones).
             dealias_before_quadratic:= if True, apply filt before forming the quadratic term u*u (reduces aliasing).
             apply_pde_filter_bottleneck:= if True, apply filt to every PDE step (legacy low-pass bottleneck).'''
-        assert n_inputs >= 1, 'n_inputs must be at least 1'
+        assert in_steps >= 1, 'in_steps must be at least 1'
         super().__init__()
-        self.n_inputs = n_inputs
+        self.in_steps = in_steps
         self.nx = nx
         self.ny = ny
         self.nz = nz
@@ -152,35 +152,35 @@ class _Sim(L.LightningModule):
         proj[0]=0
         u0 = _irfft(hh - proj, s=self.shapef)
         u0 = u0.permute(-1,0,1,2) # [C, X, Y, Z] (i.e. torch.moveaxis(u0,-1,0))
-        if self.n_inputs > 1:
-            u0 = u0.repeat(self.n_inputs, 1, 1, 1) # [u,v,w] copied across the input window
+        if self.in_steps > 1:
+            u0 = u0.repeat(self.in_steps, 1, 1, 1) # [u,v,w] copied across the input window
         if from_LES:
             assert self.op is not IdentityOp, 'Cannot use LES IC with IdentityOp'
             with torch.inference_mode():
-                # 20 keeps the previous realism burn-in; n_inputs replaces every copied frame
-                traj = self.evolve(u0, n=max(20, self.n_inputs), intermediate_outputs=True)
+                # 20 keeps the previous realism burn-in; in_steps replaces every copied frame
+                traj = self.evolve(u0, n=max(20, self.in_steps), intermediate_outputs=True)
             if isinstance(traj, tuple): traj = traj[0] # drop UQ trajectory, TODO: find better way to handle this
-            frames = traj[..., -self.n_inputs:].moveaxis(-1, 0) # [n_inputs, C, X, Y, Z]
+            frames = traj[..., -self.in_steps:].moveaxis(-1, 0) # [in_steps, C, X, Y, Z]
             u0 = frames.reshape(-1, *frames.shape[2:])
         return u0
 
     def _as_history(self, u):
         ''' u is [B, C, X, Y, Z]. A single frame is repeated to fill the input window. '''
         C = self.n_state_channels
-        if u.shape[1] == C and self.n_inputs > 1:
-            return u.repeat(1, self.n_inputs, 1, 1, 1)
-        assert u.shape[1] == self.n_inputs * C, f'expected {self.n_inputs * C} channels, got {u.shape[1]}'
+        if u.shape[1] == C and self.in_steps > 1:
+            return u.repeat(1, self.in_steps, 1, 1, 1)
+        assert u.shape[1] == self.in_steps * C, f'expected {self.in_steps * C} channels, got {u.shape[1]}'
         return u
 
     def _model_input(self, history):
         ''' PDE-update only the newest frame, then stack it behind the older frames. '''
         C = self.n_state_channels
         latest = self.vmap_NSupd(history[:, -C:])
-        if self.n_inputs == 1: return latest
+        if self.in_steps == 1: return latest
         return torch.cat([history[:, :-C], latest], dim=1) # keep older frames, replace the newest
 
     def _advance_history(self, history, new_state):
-        if self.n_inputs == 1: return new_state
+        if self.in_steps == 1: return new_state
         return torch.cat([history[:, self.n_state_channels:], new_state], dim=1)
 
     # NOTE: u.shape==[channel, x, y, z]

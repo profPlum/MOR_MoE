@@ -60,11 +60,11 @@ class JHTDB_Channel(torch.utils.data.Dataset):
     '''
     _default_meta_data = DatasetMetaData(Lx=8*np.pi, Ly=2.0, Lz=3*np.pi, nu=5e-5, dt=0.0065, n_steps_per_flow_through_native=4000)
 
-    def __init__(self, path:str, time_chunking=5, n_inputs=1, stride:int|list|tuple=1, time_stride:int=1):
-        assert n_inputs >= 1, 'n_inputs must be at least 1'
+    def __init__(self, path:str, time_chunking=5, in_steps=1, stride:int|list|tuple=1, time_stride:int=1):
+        assert in_steps >= 1, 'in_steps must be at least 1'
         self.path=path
         self.time_chunking=time_chunking
-        self.n_inputs=n_inputs
+        self.in_steps=in_steps
         self._time_stride=time_stride # read-only
         assert type(time_stride) is int
         if type(stride) in [int,float]: stride=[stride]*3
@@ -76,6 +76,7 @@ class JHTDB_Channel(torch.utils.data.Dataset):
         self._split_start_proportion = 0
         self._split_end_proportion = 1.0 # exclusive 1.0=length of dataset
 
+        assert time_chunking >= in_steps, f'{time_chunking=} must be at least {in_steps=}'
         self.dataset_meta_data = self._default_meta_data.adapt_to_stride(self)
 
     @property
@@ -116,16 +117,16 @@ class JHTDB_Channel(torch.utils.data.Dataset):
 
     # provide timechunk processing as private method for reuse in child classes
     def _parse_raw_timechunk(self, velocity_fields: np.ndarray|torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        ''' returns (IC, sol), handles pooling and reshaping (given self.n_inputs) '''
+        ''' returns (IC, sol), handles pooling and reshaping (given self.in_steps) '''
         # time dimension is (temporarily) treated as batch dimension
         velocity_fields = self._pool(torch.as_tensor(velocity_fields).moveaxis(-1,0)).moveaxis(0,-1)
         velocity_fields = velocity_fields.float() # make sure to use single precision! (after pooling) because double is too expensive!!
 
         # IC_0.shape=[C,X,Y,Z] e.g. torch.Size([3, 103, 26, 77])
         # Sol_0.shape=[C,X,Y,Z,T] e.g. torch.Size([3, 103, 26, 77, 9])
-        IC = velocity_fields[...,:self.n_inputs].moveaxis(-1,0)
+        IC = velocity_fields[...,:self.in_steps].moveaxis(-1,0)
         IC = IC.reshape(-1, *IC.shape[2:])# verified same as: IC = torch.cat([IC_i for IC_i in IC], dim=0) (without copy)
-        return IC, velocity_fields[...,self.n_inputs:] # X=IC, Y=sol
+        return IC, velocity_fields[...,self.in_steps:] # X=IC, Y=sol
 
     # Time stride verified to work: 11/18/25
     def __getitem__(self, index):
@@ -233,16 +234,16 @@ class JHTDBDataModule(L.LightningDataModule):
     def __init__(self, dataset_path: str, batch_size: int, time_chunking: int, time_stride: int=1,
                  stride: int|list|tuple=1, long_horizon: int=400, train_proportion: float=0.8,
                  dataset_type: type[JHTDB_Channel|IUFNO_Channel] = JHTDB_Channel,
-                 preload_datasets: bool=True, fast_dataloaders: bool=False, n_inputs: int=1):
+                 preload_datasets: bool=True, fast_dataloaders: bool=False, in_steps: int=1):
         assert 0 < train_proportion < 1, 'train_proportion must be between 0 and 1'
-        assert n_inputs >= 1, 'n_inputs must be at least 1'
+        assert in_steps >= 1, 'in_steps must be at least 1'
         super().__init__()
         self.save_hyperparameters()
 
         # fence post counting: -1 for the last time step, +1 for the first time step
         long_horizon = max(2, (long_horizon-1) // time_stride + 1) # must be at least 2 to have input and output
-        assert time_chunking > n_inputs, f'{time_chunking=} must exceed {n_inputs=} so the target is non-empty'
-        assert long_horizon > n_inputs, f'{long_horizon=} must exceed {n_inputs=} so the target is non-empty'
+        assert time_chunking > in_steps, f'{time_chunking=} must exceed {in_steps=} so the target is non-empty'
+        assert long_horizon > in_steps, f'{long_horizon=} must exceed {in_steps=} so the target is non-empty'
         vars(self).update(locals()); del self.self # save configuration args settings
         self.setup('peek') # trivial setup to expose basic dataset info
 
@@ -256,8 +257,8 @@ class JHTDBDataModule(L.LightningDataModule):
         since it doesn't cost anything '''
 
         # Build datasets mirroring the main() logic
-        self.dataset = self.dataset_type(self.dataset_path, time_chunking=self.time_chunking, n_inputs=self.n_inputs, stride=self.stride, time_stride=self.time_stride)
-        dataset_long_horizon = self.dataset_type(self.dataset_path, time_chunking=self.long_horizon, n_inputs=self.n_inputs, stride=self.stride, time_stride=self.time_stride)
+        self.dataset = self.dataset_type(self.dataset_path, time_chunking=self.time_chunking, in_steps=self.in_steps, stride=self.stride, time_stride=self.time_stride)
+        dataset_long_horizon = self.dataset_type(self.dataset_path, time_chunking=self.long_horizon, in_steps=self.in_steps, stride=self.stride, time_stride=self.time_stride)
         if len(self.dataset)<self.batch_size: raise ValueError(f'Dataset files missing! {self.dataset_path=}')
 
         # this splitting is necessary because we need to split on the file level, not the coarse time chunk level
