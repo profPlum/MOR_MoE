@@ -1,5 +1,7 @@
 #!/bin/bash
 
+EXTRA_NB_ARGS=("$@") # extra NB args saves and restores the script's "$@"
+
 evaluate_experiment() {
     experiment_name="$1"
     version="${2:-*}"
@@ -7,7 +9,9 @@ evaluate_experiment() {
     echo "Evaluating $out_name"
     papermill model_eval.ipynb "./notebook_runs/$out_name.ipynb" \
      -p checkpoint_path "./lightning_logs/$experiment_name/$version/*.ckpt" \
-     -p n_sim_pred_samples 10 -p n_flow_through_times 10
+     -p n_sim_pred_samples 10 -p n_flow_through_times 10 "${EXTRA_NB_ARGS[@]}"
+    # ^ extra NB args works like "$@" would outside the function
+
     rm "./notebook_runs/failures/$out_name.ipynb" 2> /dev/null
     # they are somtimes moved here as post-processing step so we erase the old version
 }
@@ -25,6 +29,8 @@ read ALL_VERSIONS
 [[ $ALL_VERSIONS == y ]] && echo "Evaluating all versions" || echo "Evaluating only the latest version"
 [[ $SKIP ]] || SKIP=0
 [[ $HOURS ]] || HOURS=0
+
+echo using extra eval notebook args "(passed as script args)": "${EXTRA_NB_ARGS[@]}"
 
 # pre-save while the files are fixed/known
 experiment_names=$(\ls -t ./lightning_logs | \tail -n +$((SKIP+1)) | \head -n $N)
